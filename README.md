@@ -222,3 +222,11 @@ Les statuts sont internes à l'outil. Les anciens exports restent dans **Histori
 Avant les prédictions, l'application demande de confirmer le taux effectivement inscrit dans le XML de base : **1 unité de sa devise = taux CDF**. La confirmation est conservée pendant la session pour ce fichier et ce taux ; un changement demande une nouvelle confirmation. Les recherches utilisant plusieurs références affichent leurs taux respectifs. Aucun taux global supplémentaire n'est configuré par ce mécanisme.
 
 Après export, la comparaison met en évidence les **taxes globales du XML généré**, celles du fichier fourni, leur différence en CDF et en pourcentage. Elle distingue aussi les taxes des articles et les taxes totales, avec les taux de change des deux XML. Attention : le calcul actuel reprend les taxes globales du XML de base ; ce montant n'est pas une nouvelle estimation recalculée.
+
+### Télécharger le XML d'un modèle validé
+
+Dans **Outils → Modèles générés**, choisissez **Tous** ou **Validé localement**, sélectionnez le modèle puis cliquez sur **Télécharger le XML…**. Le bouton existe aussi dans sa fiche. Choisissez librement le dossier et le nom ; la proposition de nom inclut la plaque du camion, avec les caractères de chemin remplacés.
+
+Le téléchargement reprend le XML exact déjà exporté ou le XML final conservé du modèle, sans recalculer ni demander le fichier d'origine. Il est enregistré dans l'historique et permet ensuite la comparaison XML. Seuls les modèles validés localement peuvent être téléchargés par cette commande. Un remplacement de fichier demande confirmation.
+
+Un modèle validé peut aussi être imprimé via **Imprimer en PDF…** ; la fenêtre de comparaison propose **Enregistrer en PDF…**. Le PDF est un document de travail.

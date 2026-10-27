@@ -169,3 +169,62 @@ def lire_export(identifiant, base=None):
     if not sha or hashlib.sha256(contenu).hexdigest() != sha:
         raise ValueError('Le XML exporté a été modifié ou son empreinte est absente. Comparaison refusée.')
     return contenu
+
+
+def nom_export(modele):
+    """Nom portable ; aucune plaque ou identité ne peut introduire un chemin."""
+    import re
+    def nettoyer(valeur, defaut):
+        texte = re.sub(r'[<>:"/\\|?*\x00-\x1f\x7f]', '-', str(valeur or ''))
+        return ' '.join(texte.split()).strip(' .-') or defaut
+    plaque = nettoyer(modele['resultat'].get('info', {}).get('camion'), 'SANS-PLAQUE')[:80]
+    nom = nettoyer(modele.get('nom'), f"Modele-{modele['id']}")
+    if nom.lower().endswith('.xml'):
+        nom = nom[:-4]
+    return f'{plaque} - {nom}'[:210].rstrip(' .') + '.xml'
+
+
+class ErreurSuiviExport(OSError):
+    """Le fichier a été écrit, mais sa trace n'a pas pu être enregistrée."""
+
+
+def exporter_xml(identifiant, destination, auteur, ecraser=False, base=None):
+    """Télécharge un modèle validé, sans sa source et sans nouveau calcul fiscal."""
+    import os
+    import tempfile
+    auteur = _auteur(auteur)
+    destination = Path(destination).expanduser().resolve()
+    if destination.suffix.lower() != '.xml':
+        raise ValueError('Choisissez un fichier avec extension .xml.')
+    if destination == Path(base if base is not None else BASE).resolve():
+        raise ValueError('La base de données ne peut pas servir de destination XML.')
+    modele = detail(identifiant, base=base)
+    if modele['statut'] != 'valide':
+        raise ValueError('Seul un modèle Validé localement peut être téléchargé en XML.')
+    exporte = any(e['action'] == 'export' for e in modele['evenements'])
+    contenu = lire_export(identifiant, base=base) if exporte else bytes(modele['modele_xml'])
+    temporaire = None
+    try:
+        with tempfile.NamedTemporaryFile(dir=destination.parent, prefix='.asydec-', delete=False) as fichier:
+            temporaire = Path(fichier.name)
+            fichier.write(contenu)
+            fichier.flush()
+            os.fsync(fichier.fileno())
+        if ecraser:
+            os.replace(temporaire, destination)
+        else:
+            # Un lien créé exclusivement évite une course d'écrasement sur un fichier apparu entre-temps.
+            os.link(temporaire, destination)
+    finally:
+        if temporaire is not None and temporaire.exists():
+            temporaire.unlink()
+    sha = hashlib.sha256(contenu).hexdigest()
+    trace = json.dumps({'chemin': str(destination), 'sha256': sha}, sort_keys=True)
+    try:
+        with _connexion(base) as conn:
+            evenement = _evenement(conn, identifiant, auteur, 'export', detail=trace)
+            conn.execute('INSERT INTO exports_xml(evenement_id,sha256,contenu) VALUES(?,?,?)',
+                         (evenement, sha, contenu))
+    except Exception as exc:
+        raise ErreurSuiviExport(f'Le XML a été enregistré dans {destination}, mais son suivi a échoué : {exc}') from exc
+    return str(destination)

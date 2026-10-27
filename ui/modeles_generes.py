@@ -37,6 +37,8 @@ class PageModelesGeneres(ttk.Frame):
         self.pdf_bouton.pack(side='left',padx=4)
         actions=ttk.Frame(self)
         actions.pack(fill='x',pady=(0,8))
+        self.xml_bouton=theme.bouton(actions,'Télécharger le XML…',self.telecharger_xml,state='disabled')
+        self.xml_bouton.pack(side='right',padx=4)
         for statut in service.STATUTS:
             theme.bouton(actions,service.STATUTS[statut],lambda s=statut:self.changer(s)).pack(side='left',padx=4)
         self.message=theme.Message(self)
@@ -59,6 +61,7 @@ class PageModelesGeneres(ttk.Frame):
         self.modeles={str(m['id']):m for m in lignes}
         self.comparer_bouton.configure(state='disabled')
         self.pdf_bouton.configure(state='disabled')
+        self.xml_bouton.configure(state='disabled')
         self.table.delete(*self.table.get_children())
         for identifiant,m in self.modeles.items():
             r=m['resultat']
@@ -74,6 +77,7 @@ class PageModelesGeneres(ttk.Frame):
         libre=not self.app.session_verrouillee
         self.comparer_bouton.configure(state='normal' if modele.get('exporte') and libre else 'disabled')
         self.pdf_bouton.configure(state='normal' if modele.get('statut')=='valide' and libre else 'disabled')
+        self.xml_bouton.configure(state='normal' if modele.get('statut')=='valide' and libre else 'disabled')
 
     def selection(self):
         choix=self.table.selection()
@@ -116,7 +120,38 @@ class PageModelesGeneres(ttk.Frame):
         boutons.pack(fill='x',pady=8)
         theme.bouton(boutons,'Fermer',fen.destroy).pack(side='right')
         if d['statut']=='valide':
+            theme.bouton(boutons,'Télécharger le XML…',lambda:self.telecharger_xml(identifiant,fen)).pack(side='right',padx=8)
             theme.bouton(boutons,'Imprimer en PDF…',lambda:self.imprimer(identifiant,fen)).pack(side='right',padx=8)
+
+    def telecharger_xml(self,identifiant=None,parent=None):
+        if self.app.session_verrouillee:
+            return
+        identifiant=identifiant if identifiant is not None else self.selection()
+        if identifiant is None:
+            return
+        parent=parent or self
+        try:
+            d=service.detail(identifiant)
+            if d['statut']!='valide':
+                raise ValueError('Seul un modèle Validé localement peut être téléchargé en XML.')
+            nom=service.nom_export(d)
+        except Exception as exc:
+            messagebox.showerror('XML indisponible',str(exc),parent=parent)
+            return
+        chemin=filedialog.asksaveasfilename(parent=parent,title='Enregistrer le XML validé',
+            initialfile=nom,defaultextension='.xml',filetypes=[('XML','*.xml')],confirmoverwrite=True)
+        if not chemin or self.app.session_verrouillee:
+            return
+        try:
+            destination=service.exporter_xml(identifiant,chemin,self.app.utilisateur,ecraser=Path(chemin).exists())
+        except service.ErreurSuiviExport as exc:
+            messagebox.showwarning('XML enregistré, suivi incomplet',str(exc),parent=parent)
+            return
+        except Exception as exc:
+            messagebox.showerror('XML non enregistré',str(exc),parent=parent)
+            return
+        self.afficher()
+        messagebox.showinfo('XML enregistré',destination,parent=parent)
 
     def imprimer(self,identifiant=None,parent=None):
         if self.app.session_verrouillee:
