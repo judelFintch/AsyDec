@@ -4,6 +4,7 @@ from pathlib import Path
 import tempfile
 import tkinter as tk
 from tkinter import ttk, messagebox, simpledialog, filedialog
+import export_pdf
 import modeles_generes as service
 from ui import theme
 from ui.theme import nombre
@@ -32,6 +33,8 @@ class PageModelesGeneres(ttk.Frame):
             theme.bouton(barre,texte,action).pack(side='left',padx=4)
         self.comparer_bouton=theme.bouton(barre,'Comparer avec un XML…',self.comparer,state='disabled')
         self.comparer_bouton.pack(side='left',padx=4)
+        self.pdf_bouton=theme.bouton(barre,'Imprimer en PDF…',self.imprimer,state='disabled')
+        self.pdf_bouton.pack(side='left',padx=4)
         actions=ttk.Frame(self)
         actions.pack(fill='x',pady=(0,8))
         for statut in service.STATUTS:
@@ -55,6 +58,7 @@ class PageModelesGeneres(ttk.Frame):
             return
         self.modeles={str(m['id']):m for m in lignes}
         self.comparer_bouton.configure(state='disabled')
+        self.pdf_bouton.configure(state='disabled')
         self.table.delete(*self.table.get_children())
         for identifiant,m in self.modeles.items():
             r=m['resultat']
@@ -66,8 +70,10 @@ class PageModelesGeneres(ttk.Frame):
 
     def actualiser_comparaison(self):
         identifiant=self.selection()
-        exporte=self.modeles.get(str(identifiant),{}).get('exporte',False)
-        self.comparer_bouton.configure(state='normal' if exporte and not self.app.session_verrouillee else 'disabled')
+        modele=self.modeles.get(str(identifiant),{})
+        libre=not self.app.session_verrouillee
+        self.comparer_bouton.configure(state='normal' if modele.get('exporte') and libre else 'disabled')
+        self.pdf_bouton.configure(state='normal' if modele.get('statut')=='valide' and libre else 'disabled')
 
     def selection(self):
         choix=self.table.selection()
@@ -106,7 +112,29 @@ class PageModelesGeneres(ttk.Frame):
         texte.insert('1.0','\n'.join(f"{date_locale(e['date_utc'])} · {e['auteur']} · "
             f"{service.STATUTS.get(e['statut'], e['action'])} · {e['detail']}" for e in d['evenements']))
         texte.configure(state='disabled')
-        theme.bouton(cadre,'Fermer',fen.destroy).pack(anchor='e',pady=8)
+        boutons=ttk.Frame(cadre)
+        boutons.pack(fill='x',pady=8)
+        theme.bouton(boutons,'Fermer',fen.destroy).pack(side='right')
+        if d['statut']=='valide':
+            theme.bouton(boutons,'Imprimer en PDF…',lambda:self.imprimer(identifiant,fen)).pack(side='right',padx=8)
+
+    def imprimer(self,identifiant=None,parent=None):
+        if self.app.session_verrouillee:
+            return
+        identifiant=identifiant if identifiant is not None else self.selection()
+        if identifiant is None:
+            return
+        try:
+            # Garde indépendante du bouton : le statut est relu dans la base.
+            d=service.detail(identifiant)
+            if d['statut']!='valide':
+                raise ValueError('Seul un modèle « Validé localement » peut être imprimé en PDF.')
+        except Exception as exc:
+            messagebox.showerror('PDF indisponible',str(exc),parent=parent or self)
+            return
+        from ui.comparaison import enregistrer_pdf
+        enregistrer_pdf(parent or self,f"Modele {identifiant} {d['importateur']} valide.pdf",
+            lambda chemin:export_pdf.pdf_modele(d,chemin,self.app.utilisateur))
 
     def changer(self,statut):
         if self.app.session_verrouillee:

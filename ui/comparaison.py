@@ -1,8 +1,28 @@
 """Fenêtre de comparaison descriptive, sans import ni modification des fichiers."""
+import subprocess
+import sys
 import tkinter as tk
-from tkinter import ttk
+from tkinter import ttk, filedialog, messagebox
+import export_pdf
 from ui import theme
 from ui.theme import nombre
+
+
+def enregistrer_pdf(parent, nom, fabrique):
+    """Demande l'emplacement, crée le PDF par fabrique(chemin), puis propose de l'ouvrir."""
+    chemin = filedialog.asksaveasfilename(parent=parent, title='Enregistrer en PDF',
+        initialfile=nom, defaultextension='.pdf', filetypes=[('PDF', '*.pdf')])
+    if not chemin:
+        return None
+    try:
+        fabrique(chemin)
+    except Exception as exc:
+        messagebox.showerror('PDF non créé', str(exc), parent=parent)
+        return None
+    if sys.platform == 'darwin' and messagebox.askyesno('PDF enregistré',
+            f'{chemin}\n\nOuvrir le PDF dans Aperçu pour l’imprimer (⌘P) ?', parent=parent):
+        subprocess.run(['open', chemin], check=False)
+    return chemin
 
 
 def afficher(parent, rapport):
@@ -49,5 +69,10 @@ def afficher(parent, rapport):
         texte.pack(fill='x')
         texte.insert('1.0', '\n'.join(details))
         texte.configure(state='disabled')
-    theme.bouton(cadre, 'Fermer', fen.destroy).pack(anchor='e', pady=8)
+    boutons = ttk.Frame(cadre)
+    boutons.pack(fill='x', pady=8)
+    theme.bouton(boutons, 'Fermer', fen.destroy).pack(side='right')
+    utilisateur = getattr(parent.winfo_toplevel(), 'utilisateur', '')
+    theme.bouton(boutons, 'Enregistrer en PDF…', lambda: enregistrer_pdf(fen, 'Comparaison XML.pdf',
+        lambda chemin: export_pdf.pdf_comparaison(rapport, chemin, utilisateur))).pack(side='right', padx=8)
     return fen

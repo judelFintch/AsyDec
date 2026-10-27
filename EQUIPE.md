@@ -8,6 +8,7 @@ CAP : Contrôle, Analyse, Production.
 | AGT-002 | Quartz | Claude Code `outils-65` / `19dadd` (identité déclarée dans son rapport) | Références XML, données SQLite, consultation et analyse. |
 | AGT-003 | Euclide | Copilot SDK dans VS Code (session déclarée dans son rapport) | Revue mathématique et cas limites, sans modification des règles. |
 | AGT-004 | Relais | Sous-agent Codex `/root/simplifier_totaux` | Lots ciblés attribués par Atlas, rapport préalable, tests et livraison sans commit. |
+| AGT-005 | Plume | Claude Code extension VS Code, déclaré dans RAPPORT_AGENT_PDF.md | Impression PDF des modèles et comparaisons, lot PDF-001. |
 
 Ces noms sont des identifiants de travail pour les agents existants, pas des agents supplémentaires.
 
