@@ -5,7 +5,7 @@ Dernière validation complète : 74 tests réussis ; REF-101 intégré (`97c2f9c
 
 | Agent | Tâche autorisée | Livrable attendu |
 |---|---|---|
-| Quartz (AGT-002) | REF-102 livré, revue Atlas attendue | Import multiple/dossier ; 82 tests annoncés par Quartz, à vérifier indépendamment. |
+| Quartz (AGT-002) | REF-102 : retouche demandée après revue | Annoncer la fin après fermeture SQLite et conserver le suivi jusqu’à l’arrêt du fil. |
 | Euclide (AGT-003) | MAT-102 : corriger les deux cas limites confirmés | Correctifs minimaux colis/ratios homogènes et tests de régression. |
 | Atlas (AGT-001) | Revue, arbitrage et intégration | Vérifier les rapports et tests, puis commiter chaque lot séparément. |
 
