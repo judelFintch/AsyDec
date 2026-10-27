@@ -15,10 +15,13 @@ from ui.connexion import demander_connexion
 from ui.parametres import PageParametres
 from ui.etapes import PageArticles, PageDossier, PageVerifier
 from ui.outils import PageEtude, PageHistorique, PageRatios, PageRepartitions
+from ui.references import PageReferences
+import base_references
 
 PREFERENCES = local.CONFIGURATION / "preferences.json"
 ETAPES = [("dossier", "1   Dossier"), ("articles", "2   Articles"), ("verifier", "3   Vérifier et générer")]
-OUTILS = [("repartitions", "Répartitions"), ("ratios", "Récupération des ratios"),
+OUTILS = [("references", "Bibliothèque des références"),
+          ("repartitions", "Répartitions"), ("ratios", "Récupération des ratios"),
           ("etude", "Étude des XML"), ("historique", "Historique"), ("parametres", "Paramètres")]
 
 
@@ -69,7 +72,9 @@ class AsyDec(tk.Tk):
         contenu.rowconfigure(0, weight=1)
         contenu.columnconfigure(0, weight=1)
         self.pages = {}
+        self._base_refs = None  # connexion SQLite des références, ouverte au premier besoin
         for cle, classe in [("dossier", PageDossier), ("articles", PageArticles), ("verifier", PageVerifier),
+                            ("references", PageReferences),
                             ("repartitions", PageRepartitions), ("ratios", PageRatios), ("etude", PageEtude),
                             ("historique", PageHistorique), ("parametres", PageParametres)]:
             page = classe(contenu, self)
@@ -81,6 +86,7 @@ class AsyDec(tk.Tk):
         self.bind_all("<Command-Key-2>", lambda e: self.montrer("articles"))
         self.bind_all("<Command-Key-3>", lambda e: self.montrer("verifier"))
         self.protocol("WM_DELETE_WINDOW", self.quitter)
+        self.enregistrer_preparation_reset(self._preparer_reset_references)
         self.montrer("parametres" if erreur_reglages else self.reglages['page_demarrage'])
         self.appliquer_reglages(self.reglages)
         self.bind_all('<KeyPress>', self._activite, add='+')
@@ -212,7 +218,25 @@ class AsyDec(tk.Tk):
         if self._minuteur_session is not None:
             self.after_cancel(self._minuteur_session)
             self._minuteur_session = None
+        AsyDec.fermer_base_refs(self)  # appel explicite : fonctionne aussi sur un objet de test minimal
         self.destroy()
+
+    def base_refs(self):
+        """Connexion à la base des références, ouverte au premier besoin dans le fil Tkinter."""
+        if self._base_refs is None:
+            self._base_refs = base_references.ouvrir()
+        return self._base_refs
+
+    def fermer_base_refs(self):
+        """Fermeture idempotente ; la base se rouvrira au prochain besoin."""
+        if getattr(self, "_base_refs", None) is not None:
+            self._base_refs.close()
+            self._base_refs = None
+
+    def _preparer_reset_references(self):
+        """Callback de reset (CFG-001 / REF-001) : refuse si un import tourne, sinon ferme la base."""
+        self.pages["references"].preparer_reset()
+        self.fermer_base_refs()
 
     def enregistrer_preparation_reset(self, callback):
         """Raccordement pour les services : arrêter les tâches et fermer les connexions."""

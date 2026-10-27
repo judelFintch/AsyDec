@@ -277,5 +277,54 @@ class StatutsTest(Base):
         self.assertEqual(len(self.S.lister_documents(self.conn, recherche='b.xml')), 1)
 
 
+class ConsultationTest(Base):
+    def setUp(self):
+        super().setUp()
+        import service_references as S
+        self.S = S
+        I.importer_lot([self.fichier('a.xml', declaration([item(), item(code='6304', nom='Couvre-lits', fob='20')],
+                                                           fob='170', colis='20'))], self.conn)
+        I.importer_lot([self.fichier('b.xml', declaration([item(fob='140')], fob='140', reference='R2'))], self.conn,
+                       origine='genere')
+        I.importer_lot([self.fichier('c.xml', declaration([item(fob='0')], fob='0', reference='R3'))], self.conn)
+        self.a, self.b, self.c = [r[0] for r in self.conn.execute('SELECT id FROM documents ORDER BY id')]
+
+    def test_fiche_complete_et_valeurs_exactes(self):
+        d = self.S.detail_document(self.conn, self.a)
+        self.assertEqual((d['statut'], d['document']['nom_initial']), ('non_verifie', 'a.xml'))
+        self.assertEqual(d['valorisation']['cif_total'], '28312500')
+        self.assertEqual([a['code'] for a in d['articles']], ['6309', '6304'])
+        self.assertEqual(d['articles'][0]['taxes'][0]['montant'], '100')
+        self.assertEqual(len(d['sources']), 1)
+        self.assertEqual(d['preuve_suggeree'], 'Enregistrement E 12 du 10/1/26')
+        with self.assertRaises(ValueError):
+            self.S.detail_document(self.conn, 999)
+
+    def test_compteurs_et_filtres(self):
+        self.S.enregistrer_statut(self.conn, self.a, 'accepte', preuve='P')
+        c = self.S.compteurs(self.conn)
+        self.assertEqual((c['documents'], c['articles'], c['observations'], c['acceptes'], c['non_verifies']),
+                         (3, 4, 3, 1, 2))
+        self.assertGreater(c['anomalies'], 0)                    # article sans FOB de c.xml
+        self.assertEqual([d['id'] for d in self.S.lister_documents(self.conn, origine='genere')], [self.b])
+        self.assertEqual(self.S.options_filtres(self.conn)['importateurs'], ['IMPORT A'])
+
+    def test_politique_des_statuts(self):
+        self.S.enregistrer_statut(self.conn, self.a, 'accepte', preuve='P')
+        self.S.enregistrer_statut(self.conn, self.b, 'rejete', commentaire='Contesté')
+        acceptees = self.S.observations(self.conn, ('accepte',))
+        self.assertEqual({o['document_id'] for o in acceptees}, {self.a})
+        self.assertEqual(self.S.observations(self.conn, ('non_verifie',)), [])   # c.xml : aucun ratio calculable
+        tout = self.S.observations(self.conn, ('accepte', 'non_verifie', 'rejete', 'exclu'))
+        self.assertNotIn(self.b, {o['document_id'] for o in tout})                # rejeté : jamais compté
+        self.assertEqual(self.S.observations(self.conn, ('rejete',)), [])
+        friperie = next(o for o in acceptees if o['code'] == '6309')
+        self.assertEqual((friperie['ratio'], friperie['statut'], friperie['groupe']),
+                         (1.5, 'accepte', ('USD', '6309', 'friperie')))
+        import ratios
+        groupes = ratios.regrouper(acceptees)
+        self.assertEqual([g['designation'] for g in groupes], ['Friperie', 'Couvre-lits'])
+
+
 if __name__ == '__main__':
     unittest.main()
