@@ -283,6 +283,9 @@ class AsyDec(tk.Tk):
         """Calcule la déclaration avec les valeurs de l'étape 2. Lève ValueError si impossible."""
         if self.session_verrouillee:
             raise ValueError('La session est verrouillée.')
+        from ui.taux_change import confirmer
+        if not confirmer(self, [self.base], parent=self):
+            raise ValueError('Calcul annulé : le taux de change doit être confirmé.')
         v = self.pages["articles"].valeurs()
         registre = generer.lire_registre()
         res = generer.produire(

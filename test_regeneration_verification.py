@@ -1,5 +1,9 @@
 """La régénération de l'étape 3 conserve le dossier et n'exporte jamais de XML."""
 import copy
+import tempfile
+from pathlib import Path
+from test_references import declaration, item
+from ui.taux_change import confirmer
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 import unittest
@@ -20,6 +24,13 @@ class RegenerationVerificationTest(unittest.TestCase):
         articles = SimpleNamespace(remplir=Mock())
         self.app = SimpleNamespace(base='dossier.xml',reference='reference.xml',profil=self.profil,
             table_imp=[],session_verrouillee=False,pages={'articles':articles})
+        self.temp=tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        source=Path(self.temp.name)/'dossier.xml'
+        source.write_bytes(declaration([item()]))
+        self.app.base=str(source)
+        with patch('ui.taux_change.messagebox.askyesno',return_value=True):
+            confirmer(self.app,[source])
         self.page = SimpleNamespace(app=self.app,resultat=self.ancien,deja_vues={},fichier='ancien-export.xml',
             regenerer_bouton=Mock(),finder=Mock(),message=Mock(),update_idletasks=Mock(),_presenter=Mock())
         self.page._repartition=etapes.PageVerifier._repartition
@@ -34,7 +45,7 @@ class RegenerationVerificationTest(unittest.TestCase):
         self.assertEqual(args.args[:3],(800,800.,108))
         self.assertIn(variantes.cle_variante(etapes.PageVerifier._repartition(self.ancien)),args.kwargs['exclure'])
         self.assertFalse(produire.call_args.kwargs['enregistrer'])
-        self.assertEqual(produire.call_args.args[0],'dossier.xml')
+        self.assertEqual(produire.call_args.args[0],self.app.base)
         self.app.pages['articles'].remplir.assert_called_once_with(self.nouveau['poids'],self.nouveau['fob'],self.nouveau['colis'],mode='SAISI')
         self.page._presenter.assert_called_once_with(self.apercu)
         self.assertEqual(self.app.reference,'reference.xml')

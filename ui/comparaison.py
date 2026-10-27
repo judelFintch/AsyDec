@@ -15,8 +15,16 @@ def afficher(parent, rapport):
     theme.entete_page(cadre, 'XML généré / fichier fourni',
         'Écart = fichier fourni − XML généré. Un écart ne prouve pas une erreur de calcul ou une acceptation douanière.')
     ttk.Label(cadre, text=f"XML généré : {rapport.get('source', '—')}\nFichier fourni : {rapport['fichier']}\n"
-        f"Devise du XML généré : {rapport['devise_prevue'] or 'absente'} · devise fournie : {rapport['devise_fournie'] or 'absente'}",
+        f"Devise du XML généré : {rapport['devise_prevue'] or 'absente'} · devise fournie : {rapport['devise_fournie'] or 'absente'}\n"
+        f"Taux XML généré : 1 {rapport['devise_prevue'] or '?'} = {nombre(rapport.get('taux_genere'), 4)} CDF · "
+        f"taux fichier fourni : 1 {rapport['devise_fournie'] or '?'} = {nombre(rapport.get('taux_fourni'), 4)} CDF",
         wraplength=1150).pack(anchor='w', pady=6)
+    globales = next((l for l in rapport['lignes'] if l['metrique'] == 'taxes_globales'), None)
+    if globales:
+        ttk.Label(cadre, text=(f"Taxes globales : XML généré {nombre(globales['prevu'], 2)} CDF · "
+            f"Fichier fourni {nombre(globales['fourni'], 2)} CDF · "
+            f"Écart {nombre(globales['ecart'], 2)} CDF ({nombre(globales['pourcentage'], 2)} %)"),
+            style='Section.TLabel', wraplength=1150).pack(anchor='w', pady=8)
     message = theme.Message(cadre)
     message.pack(fill='x', pady=6)
     contexte = rapport['contexte']

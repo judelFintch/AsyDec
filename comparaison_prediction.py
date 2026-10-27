@@ -29,7 +29,7 @@ def comparer_xmls(chemin_genere, chemin_fourni):
     v = genere['valorisation']
     resultat = {'resume': {k: v[c] for k,c in (
         ('poids','poids_total'),('fob','fob_total'),('cif','cif_total'),('taxes_totales','taxes_totales'),
-        ('taux','taux_change'),('fret','fret_externe_montant'),('assurance','assurance_montant'),('colis_total','colis_total'))},
+        ('taxes_globales','taxes_globales'),('taux','taux_change'),('fret','fret_externe_montant'),('assurance','assurance_montant'),('colis_total','colis_total'))},
         'colis': [a['colis'] for a in genere['articles']]}
     resultat['resume']['articles'] = [{k:a[c] for k,c in (
         ('poids','poids_brut'),('fob','fob'),('cif','cif'),('taxes','taxes_article'))} for a in genere['articles']]
@@ -84,7 +84,7 @@ def _comparer(resultat, base, fourni, chemin_fourni, source_xml=False):
                     'Donnée absente' if ecart is None else 'Contexte différent / non vérifiable' if contextes and metrique in ('cif', 'taxes') else
                     'Identique' if ecart == 0 else 'Écart observé')
             lignes.append(dict(position=position, code=code, designation=nom, metrique=metrique,
-                libelle=libelle, prevu=p, fourni=f, ecart=ecart, pourcentage=pourcentage, etat=etat))
+                libelle='Taxes totales CDF' if position == 'Total global' and metrique == 'taxes' else libelle, prevu=p, fourni=f, ecart=ecart, pourcentage=pourcentage, etat=etat))
     for position in sorted(set(predictions) | set(reels)):
         source, prevu = predictions.get(position, ({}, {}))
         actuel = reels.get(position, {})
@@ -105,11 +105,25 @@ def _comparer(resultat, base, fourni, chemin_fourni, source_xml=False):
     actuel = {k: _decimal(vf[c]) for k, c in (('poids', 'poids_total'), ('fob', 'fob_total'), ('colis', 'colis_total'), ('cif', 'cif_total'), ('taxes', 'taxes_totales'))}
     actuel['ratio'] = _ratio(actuel['fob'], actuel['poids'])
     ajouter('Total global', '', 'Ratio global = FOB total / poids total', prevu, actuel)
+    def somme_complete(valeurs):
+        valeurs = list(valeurs)
+        return sum(valeurs, Decimal(0)) if valeurs and all(v is not None for v in valeurs) else None
+    taxes_articles_prevues = _decimal(resume.get('taxes_articles')) if 'taxes_articles' in resume else somme_complete(
+        _decimal(a['taxes']) for a in resume['articles'])
+    taxes_articles_fournies = somme_complete(_decimal(a['taxes_article']) for a in fourni['articles'])
+    for metrique,libelle,p,f in (
+        ('taxes_articles','Taxes articles CDF',taxes_articles_prevues,taxes_articles_fournies),
+        ('taxes_globales','Taxes globales CDF',_decimal(resume.get('taxes_globales')), _decimal(vf['taxes_globales']))):
+        ecart = f-p if p is not None and f is not None else None
+        lignes.append(dict(position='Total global',code='',designation=libelle,metrique=metrique,libelle=libelle,
+            prevu=p,fourni=f,ecart=ecart,pourcentage=ecart/abs(p)*100 if ecart is not None and p!=0 else None,
+            etat='Donnée absente' if ecart is None else 'Identique' if ecart==0 else 'Écart observé'))
     # Un changement de contexte découvert sur un article concerne aussi ceux déjà ajoutés.
     if contextes:
         for ligne in lignes:
-            if ligne['metrique'] in ('cif', 'taxes') and ligne['ecart'] is not None:
+            if ligne['metrique'] in ('cif', 'taxes', 'taxes_articles', 'taxes_globales') and ligne['ecart'] is not None:
                 ligne['etat'] = 'Contexte différent / non vérifiable'
     return dict(lignes=lignes, contexte=contextes, avertissements=avertissements,
+                taux_genere=_decimal(resume.get('taux')), taux_fourni=_decimal(vf['taux_change']),
                 fichier=str(Path(chemin_fourni)), devise_prevue=base['document']['devise'],
                 devise_fournie= fourni['document']['devise'])

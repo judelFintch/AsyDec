@@ -10,7 +10,7 @@ class AffichageRatiosTest(unittest.TestCase):
         self.tableau = Mock()
         self.tableau.get_children.return_value = ('ancien',)
         self.page = SimpleNamespace(tableau=self.tableau, cartes={k:Mock() for k in ('poids','fob','colis','taxes')},
-            var_fichier=Mock(), comparer_bouton=Mock(), deja_vues={}, regenerer_bouton=Mock(), generer=Mock(), message=Mock(),
+            var_fichier=Mock(), var_taux=Mock(), comparer_bouton=Mock(), deja_vues={}, regenerer_bouton=Mock(), generer=Mock(), message=Mock(),
             _contexte_regeneration=Mock(return_value='contexte'), _repartition=E.PageVerifier._repartition)
         self.page._montrer = lambda res: E.PageVerifier._montrer(self.page,res)
 

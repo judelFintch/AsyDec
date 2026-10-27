@@ -52,7 +52,8 @@ class PageRepartitions(ttk.Frame):
 
         cadre, self.liste = theme.tableau(self, [
             ("n", "N°", 50, "center"), ("modele", "Modèle de référence", 430, "w"),
-            ("score", "Proximité / 100", 130, "e"), ("taxes", "Taxes estimées CDF", 170, "e")], 6)
+            ("score", "Proximité / 100", 130, "e"), ("taux", "Taux CDF/devise", 130, "e"),
+            ("taxes", "Taxes estimées CDF", 170, "e")], 6)
         cadre.pack(fill="x")
         self.liste.bind("<<TreeviewSelect>>", self.detailler)
         ttk.Label(self, text="Détail de la proposition", style="Section.TLabel").pack(anchor="w", pady=(14, 6))
@@ -81,6 +82,10 @@ class PageRepartitions(ttk.Frame):
             cle = (poids, fob, colis)
             vues = self.deja_vues.setdefault(cle, set())
             chemins = self.selection_modeles or self.app.chemins_xml_disponibles(generation=True)
+            from ui.taux_change import confirmer
+            if not confirmer(self.app, chemins, parent=self):
+                self.message.afficher("alerte", "Recherche annulée : taux de change non confirmés")
+                return
             propositions, ecartes = variantes.rechercher_modeles(poids, fob, colis, chemins=chemins,
                                                                  nombre=3 if autres else 12, exclure=vues)
             for v in propositions:
@@ -96,7 +101,7 @@ class PageRepartitions(ttk.Frame):
         self.liste.delete(*self.liste.get_children())
         for k, v in enumerate(propositions):
             self.liste.insert("", "end", iid=str(k), values=(
-                k + 1, v["modele"], nombre(v["proximite"], 2), nombre(v["resultat"]["resume"]["taxes_totales"])))
+                k + 1, v["modele"], nombre(v["proximite"], 2), nombre(v["resultat"]["resume"]["taux"], 4), nombre(v["resultat"]["resume"]["taxes_totales"])))
         self.message.afficher("ok", f"{len(propositions)} proposition(s), de la plus proche à la moins proche de vos modèles",
                               [f"{len(ecartes)} modèle(s) non utilisable(s) pour ces totaux."] if ecartes else [])
         self.autres.configure(state="normal")

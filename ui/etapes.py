@@ -396,6 +396,8 @@ class PageVerifier(ttk.Frame):
             carte.grid(row=0, column=k, sticky="nsew", padx=(0 if k == 0 else 8, 0))
             self.cartes[cle] = carte
         self.var_fichier = tk.StringVar()
+        self.var_taux = tk.StringVar()
+        ttk.Label(self, textvariable=self.var_taux, style="Doux.TLabel").pack(anchor="w", pady=(8, 0))
         ttk.Label(self, textvariable=self.var_fichier, style="Doux.TLabel").pack(anchor="w", pady=(12, 6))
 
         barre = pied(self)
@@ -432,6 +434,7 @@ class PageVerifier(ttk.Frame):
             for carte in self.cartes.values():
                 carte.definir("—")
             self.var_fichier.set("")
+            self.var_taux.set("")
             return
         self._presenter(res)
 
@@ -465,6 +468,13 @@ class PageVerifier(ttk.Frame):
     def regenerer(self):
         """Propose un autre aperçu avec les mêmes totaux, sans exporter de fichier."""
         if not self.resultat or self.app.session_verrouillee:
+            return
+        from ui.taux_change import confirmer
+        try:
+            if not confirmer(self.app, [self.app.base], parent=self):
+                return
+        except Exception as exc:
+            messagebox.showinfo("Proposition actuelle conservée", str(exc), parent=self)
             return
         ancien = self.resultat
         self.regenerer_bouton.configure(state="disabled")
@@ -504,6 +514,8 @@ class PageVerifier(ttk.Frame):
 
     def _montrer(self, res):
         r = res["resume"]
+        self.var_taux.set(f"Taux XML du dossier (CDF par unité de devise) : {nombre(r.get('taux'), 4)} · "
+                          f"Taxes globales reprises du XML de base : {nombre(r.get('taxes_globales'))} CDF")
         self.cartes["poids"].definir(nombre(r["poids"]))
         self.cartes["fob"].definir(nombre(r["fob"], 2))
         self.cartes["colis"].definir(str(int(sum(res["colis"]))))

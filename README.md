@@ -216,3 +216,9 @@ Ouvrez **Outils → Modèles générés** pour voir les propositions conservées
 Dans **Vérifier et générer**, cliquez sur **Enregistrer la proposition** pour la conserver avant export. Les nouveaux exports XML sont ajoutés automatiquement. Les clics répétés sur la même proposition ne créent pas de doublon et ne remettent pas son statut à zéro. La consultation présente les valeurs par article, les ratios et l'historique daté des actions ; la comparaison avec un fichier XML devient possible uniquement après export XML. La copie exacte du nouvel export est conservée pour comparer même si le fichier est déplacé. Les propositions non exportées restent consultables, sans comparaison.
 
 Les statuts sont internes à l'outil. Les anciens exports restent dans **Historique** ; ils ne sont pas ajoutés rétroactivement à cette liste. Les simulations non enregistrées ne sont pas conservées automatiquement.
+
+### Taux de change et écart des taxes globales
+
+Avant les prédictions, l'application demande de confirmer le taux effectivement inscrit dans le XML de base : **1 unité de sa devise = taux CDF**. La confirmation est conservée pendant la session pour ce fichier et ce taux ; un changement demande une nouvelle confirmation. Les recherches utilisant plusieurs références affichent leurs taux respectifs. Aucun taux global supplémentaire n'est configuré par ce mécanisme.
+
+Après export, la comparaison met en évidence les **taxes globales du XML généré**, celles du fichier fourni, leur différence en CDF et en pourcentage. Elle distingue aussi les taxes des articles et les taxes totales, avec les taux de change des deux XML. Attention : le calcul actuel reprend les taxes globales du XML de base ; ce montant n'est pas une nouvelle estimation recalculée.

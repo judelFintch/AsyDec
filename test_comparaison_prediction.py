@@ -123,6 +123,28 @@ class ComparaisonPredictionTest(unittest.TestCase):
         self.assertEqual(self.ligne(rapport,3,'poids')['prevu'],50)
 
 
+    def test_taxes_globales_distinctes_des_taxes_articles_et_totales(self):
+        self.modifier('Financial/Amounts/Global_taxes','70')
+        self.modifier('Financial/Amounts/Totals_taxes','270')
+        rapport=C.comparer_xmls(self.base,self.fourni)
+        globale=self.ligne(rapport,'Total global','taxes_globales')
+        articles=self.ligne(rapport,'Total global','taxes_articles')
+        totale=self.ligne(rapport,'Total global','taxes')
+        self.assertEqual((globale['prevu'],globale['fourni'],globale['ecart'],globale['pourcentage']),
+                         (Decimal(50),Decimal(70),Decimal(20),Decimal(40)))
+        self.assertEqual(articles['ecart'],0)
+        self.assertEqual(totale['ecart'],20)
+        self.assertEqual(totale['libelle'],'Taxes totales CDF')
+        self.assertEqual(rapport['taux_genere'],Decimal('2265.5'))
+        self.assertEqual(rapport['taux_fourni'],Decimal('2265.5'))
+
+    def test_taxes_globales_absentes_non_inventees(self):
+        self.modifier('Financial/Amounts/Global_taxes','')
+        rapport=C.comparer_xmls(self.base,self.fourni)
+        l=self.ligne(rapport,'Total global','taxes_globales')
+        self.assertIsNone(l['fourni'])
+        self.assertIsNone(l['ecart'])
+
 
 class ActionComparaisonTest(unittest.TestCase):
     def test_preexport_absence_fichier_et_verrouillage_sans_selecteur(self):
