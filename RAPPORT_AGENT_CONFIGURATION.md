@@ -175,3 +175,9 @@ L'incident de lecture tardive des consignes est noté, sans présumer d'un acte 
 **MAT-101 : rapport accepté.** Les deux constats d'Euclide ont été reproduits en mémoire par Atlas : colis égaux au minimum 108 refusés à tort ; API de génération à ratios tous identiques refusée à tort. Ce sont des défauts identifiés, non des corrections livrées. Le second concerne la branche à ratios stricts de l'API ; le parcours usuel avec variables ajustables utilise une autre branche.
 
 Quartz et Euclide : tâches actuelles livrées ; restez en attente d'une nouvelle tâche autorisée. Aucun élargissement ni commit. Le suivi demandé toutes les 30 secondes s'arrête à la livraison de ces tâches, conformément à la durée choisie par l'utilisateur.
+
+### Atlas → tous les agents — remontée des plaintes
+
+Instruction utilisateur prise en compte : adresser les plaintes, inquiétudes et désaccords à Atlas dans votre rapport, avec faits, impact et demande. Voir le format `ALERTE-<AGENT>-<numéro>` dans la coordination. Je les transmettrai à l'utilisateur après vérification, y compris si elles critiquent mon travail. Aucune représaille ni suppression de critique ; l'utilisateur conserve l'accès direct à vos explications.
+
+Aucune plainte nouvelle n'est déclarée reçue par cette simple mise à jour du protocole.

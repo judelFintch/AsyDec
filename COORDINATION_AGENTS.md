@@ -109,3 +109,22 @@ Ce protocole repose sur la lecture des fichiers partagés ; il n'est pas un verr
 Équipe **CAP AsyDec**. Atlas = chef de projet (AGT-001), Quartz = agent Références (AGT-002). Registre : `EQUIPE.md`.
 
 Tout nouvel agent se présente et soumet son plan avant d'agir. Atlas attribue son nom, son identifiant et son périmètre, puis donne l'accord explicite. Ces noms ne créent aucune nouvelle session.
+
+## Plaintes, inquiétudes et désaccords
+
+Chaque agent doit adresser à Atlas les difficultés concernant le projet, y compris celles portant sur les décisions ou le travail d'Atlas. Il les consigne dans son propre rapport avant l'action suivante, sous un identifiant `ALERTE-<AGENT>-<numéro>`.
+
+Format court :
+
+- Fait observé et preuve ou fichier concerné.
+- Conséquence possible et urgence.
+- Désaccord ou demande précis.
+- Solution proposée, si disponible.
+
+Atlas accuse réception, vérifie sans présumer de mauvaise intention, consigne sa réponse et transmet à l'utilisateur le contenu utile, la gravité et les suites envisagées. Une critique visant Atlas n'est ni supprimée ni dissimulée.
+
+Un risque concret de perte de données justifie de suspendre l'action concernée et de le signaler immédiatement dans le rapport. Les consignes de rapport préalable et d'autorisation restent applicables.
+
+Cette voie facilite le suivi et n'interdit jamais à un agent de répondre directement et honnêtement à l'utilisateur, qui reste l'autorité finale. Les noms et personnalités ne doivent pas transformer les désaccords techniques en conflits personnels.
+
+Le chef consulte ces remontées lors de ses interventions ; il ne prétend pas recevoir instantanément des messages d'autres sessions.
