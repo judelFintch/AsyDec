@@ -15,11 +15,13 @@ import service_references as service
 from ui import theme
 from ui.theme import nombre
 
-# Changement de statut, correction et onglet Marchandises (avec export) : conservés
-# mais ni construits ni déclenchables tant qu'une tâche dédiée ne les active pas.
+# Correction d'événement et onglet Marchandises (avec export) : conservés mais ni
+# construits ni déclenchables tant qu'une tâche dédiée ne les active pas.
 ACTIONS_ACTIVES = False
 # REF-102 : l'import a sa propre autorisation, indépendante des autres actions.
 IMPORT_ACTIF = True
+# REF-103 : changement de statut des documents, avec sa propre autorisation.
+STATUTS_ACTIFS = True
 FUSEAU = ZoneInfo("Africa/Lubumbashi")
 TOUS = "Tous"
 ORIGINES = {"Importé": "importe", "Généré": "genere"}
@@ -28,7 +30,7 @@ POLITIQUES = {
     "Non vérifiées uniquement": ("non_verifie",),
     "Acceptées et non vérifiées": ("accepte", "non_verifie"),
 }
-ACTIONS = [("accepte", "Accepter…"), ("rejete", "Rejeter…"), ("exclu", "Exclure…"),
+ACTIONS = [("accepte", "Accepté dans SYDONIA…"), ("rejete", "Rejeter…"), ("exclu", "Exclure…"),
            ("non_verifie", "Remettre « non vérifié »…")]
 
 
@@ -66,11 +68,11 @@ class DialogueStatut(tk.Toplevel):
         libelle_preuve = "Preuve ou référence" + (" (obligatoire)" if preuve_requise else "")
         self.var_preuve = tk.StringVar(value=preuve or "")
         self.var_date = tk.StringVar()
-        self.var_auteur = tk.StringVar(value=auteur or "")
         lignes = [(libelle_preuve, ttk.Entry(cadre, textvariable=self.var_preuve, width=60)),
                   ("Date effective (AAAA-MM-JJ)", ttk.Entry(cadre, textvariable=self.var_date, width=14))]
         if not correction:
-            lignes.append(("Auteur", ttk.Entry(cadre, textvariable=self.var_auteur, width=30)))
+            # Auteur = utilisateur connecté, affiché mais non modifiable.
+            lignes.append(("Auteur", ttk.Label(cadre, text=auteur or "—")))
         for k, (texte, champ) in enumerate(lignes, 1):
             ttk.Label(cadre, text=texte).grid(row=k, column=0, sticky="w", pady=4, padx=(0, 10))
             champ.grid(row=k, column=1, sticky="w", pady=4)
@@ -93,7 +95,7 @@ class DialogueStatut(tk.Toplevel):
 
     def valeurs(self):
         return {"preuve": self.var_preuve.get(), "date_effective": self.var_date.get(),
-                "auteur": self.var_auteur.get(), "commentaire": self.commentaire.get("1.0", "end").strip()}
+                "commentaire": self.commentaire.get("1.0", "end").strip()}
 
     def enregistrer(self):
         try:
@@ -193,7 +195,7 @@ class PageReferences(ttk.Frame):
         self.label_statut = ttk.Label(entete, textvariable=self.var_statut_doc)
         self.label_statut.pack(side="left", padx=12)
         self.boutons_statut = {}
-        for statut, texte in reversed(ACTIONS if ACTIONS_ACTIVES else []):
+        for statut, texte in reversed(ACTIONS if STATUTS_ACTIFS else []):
             b = theme.bouton(entete, texte, lambda s=statut: self.changer_statut(s), principal=(statut == "accepte"))
             b.pack(side="right", padx=(6, 0))
             self.boutons_statut[statut] = b
@@ -367,15 +369,18 @@ class PageReferences(ttk.Frame):
 
     # ------------------------------------------------------------- statuts
     def changer_statut(self, nouveau):
-        if not ACTIONS_ACTIVES:  # hors REF-101 : désactivé
+        if not STATUTS_ACTIFS or not self.detail:
             return
-        if not self.detail:
+        if self.import_en_cours:
+            self.message.afficher("alerte", "Import en cours", ["Les statuts se changent une fois l'import terminé."])
             return
         document_id = self.detail["document"]["id"]
         acceptation = nouveau == "accepte"
+        # Les règles (preuve, motif, dates, historique en ajout seul) restent celles du service.
         dialogue = DialogueStatut(
             self, f"{dict(ACTIONS)[nouveau].rstrip('…')} — {self.detail['document']['nom_initial']}",
-            lambda **v: service.enregistrer_statut(self.conn(), document_id, nouveau, **v),
+            lambda **v: service.enregistrer_statut(self.conn(), document_id, nouveau,
+                                                   auteur=self.app.utilisateur, **v),
             preuve=self.detail["preuve_suggeree"] if acceptation else "", auteur=self.app.utilisateur,
             preuve_requise=acceptation)
         self.wait_window(dialogue)
@@ -455,6 +460,7 @@ class PageReferences(ttk.Frame):
         self.bouton_annuler.configure(state="normal")
         self.message.afficher("alerte", f"Import de {len(chemins)} fichier(s) lancé…")
         self.tache.demarrer()
+        self._etat_boutons()  # statuts indisponibles pendant l'import
         self._suivi = self.after(100, self._suivre)
 
     def _suivre(self):

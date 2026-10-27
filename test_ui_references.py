@@ -1,4 +1,5 @@
 """REF-101 / REF-102 : bibliothèque des références — consultation, import de fond, fermeture, reset."""
+import gc
 import os
 import sqlite3
 import tempfile
@@ -49,6 +50,9 @@ def ouverture_retardee(liberer, commencee, echec=None):
 
 class Temporaire(unittest.TestCase):
     def setUp(self):
+        # Les variables Tkinter des tests précédents sont ramassées ici, dans le fil principal ;
+        # sinon le ramasse-miettes peut s'exécuter dans le fil d'import et y attendre Tcl.
+        gc.collect()
         self.tmp = tempfile.TemporaryDirectory()
         self.dossier = Path(self.tmp.name)
         self.base = self.dossier / 'DONNEES' / 'asydec.db'
@@ -188,6 +192,7 @@ class TacheImportTest(Temporaire):
 
     def test_fin_publiee_seulement_apres_fermeture(self):
         liberer, commencee = threading.Event(), threading.Event()
+        self.addCleanup(liberer.set)
         tache = import_fond.TacheImport(self.fichiers(2), self.base)
         with patch.object(B, 'ouvrir', ouverture_retardee(liberer, commencee)):
             tache.demarrer()
@@ -232,6 +237,7 @@ class TacheImportTest(Temporaire):
 
     def test_arret_borne_puis_fin_propre(self):
         libere, commence = threading.Event(), threading.Event()
+        self.addCleanup(libere.set)
         original = I.importer_fichier
 
         def bloquant(*args, **kwargs):
@@ -268,6 +274,7 @@ class PageTest(Temporaire):
         except tk.TclError as exc:
             self.skipTest(f'Tk indisponible : {exc}')
         self.racine.withdraw()
+        self.addCleanup(gc.collect)                              # après destruction, dans ce fil
         self.addCleanup(self.racine.destroy)
         self.conn = None
 
@@ -295,13 +302,15 @@ class PageTest(Temporaire):
             textes += self.textes_des_boutons(enfant)
         return textes
 
-    def test_import_autorise_seul(self):
+    def test_import_et_statuts_autorises_seuls(self):
         self.assertTrue(R.IMPORT_ACTIF)
+        self.assertTrue(R.STATUTS_ACTIFS)
         self.assertFalse(R.ACTIONS_ACTIVES)
         boutons = self.textes_des_boutons(self.page)
-        self.assertIn('Importer des XML…', boutons)
-        self.assertIn('Importer un dossier…', boutons)
-        for interdit in ('Accepter', 'Rejeter', 'Exclure', 'Remettre', 'Corriger', 'Exporter'):
+        for permis in ('Importer des XML…', 'Importer un dossier…', 'Accepté dans SYDONIA…', 'Rejeter…',
+                       'Exclure…', 'Remettre « non vérifié »…'):
+            self.assertIn(permis, boutons)
+        for interdit in ('Corriger', 'Exporter'):
             self.assertFalse([b for b in boutons if interdit in b], interdit)
         self.assertEqual([self.page.onglets.tab(i, 'text') for i in self.page.onglets.tabs()], ['Documents'])
         self.app.base_refs.assert_not_called()                   # rien d'ouvert à la construction
@@ -309,8 +318,98 @@ class PageTest(Temporaire):
     def test_autres_actions_sans_effet(self):
         for methode in ('calculer_marchandises', 'exporter_marchandises', 'corriger'):
             getattr(self.page, methode)()
-        self.page.changer_statut('accepte')
+        self.page.changer_statut('accepte')                      # aucun document ouvert : rien
         self.app.base_refs.assert_not_called()
+
+    # ------------------------------------------------------------- REF-103
+    def ouvrir_un_document(self, n=1):
+        self.page._importer(self.fichiers(n))
+        self.pomper(lambda: self.page.tache is None)
+        premier = self.page.liste.get_children()[-1]
+        self.page.liste.selection_set(premier)
+        self.page.ouvrir_document()
+        return int(premier)
+
+    def soumettre(self, statut, preuve='', commentaire='', date=''):
+        """Ouvre le dialogue de statut et le valide comme le ferait l'utilisateur."""
+        dialogues = []
+
+        def remplir_et_valider(dialogue):
+            dialogue.var_preuve.set(preuve)
+            dialogue.var_date.set(date)
+            dialogue.commentaire.insert('1.0', commentaire)
+            dialogue.enregistrer()
+            dialogue.texte_erreur = dialogue.erreur.cget('text') if dialogue.winfo_exists() else ''
+            dialogues.append(dialogue)
+            if dialogue.winfo_exists():                          # refusé : l'utilisateur annule
+                dialogue.destroy()
+
+        with patch.object(self.page, 'wait_window', remplir_et_valider):
+            self.page.changer_statut(statut)
+        gc.collect()                                             # variables du dialogue fermé
+        return dialogues[0] if dialogues else None
+
+    def test_acceptation_sydonia_exige_une_preuve_et_trace_l_auteur(self):
+        document = self.ouvrir_un_document()
+        refuse = self.soumettre('accepte', preuve='')
+        self.assertIsNone(refuse.resultat)
+        self.assertIn('preuve', refuse.texte_erreur)
+        self.assertEqual(S.historique_statuts(self.conn, document), [])
+        accepte = self.soumettre('accepte', preuve='Quittance Q 4437', date='2026-10-02')
+        self.assertIsNotNone(accepte.resultat)
+        evenement = S.historique_statuts(self.conn, document)[-1]
+        self.assertEqual((evenement['nouveau'], evenement['preuve'], evenement['auteur']),
+                         ('accepte', 'Quittance Q 4437', 'essai'))   # auteur = utilisateur connecté
+        self.assertEqual(self.page.var_statut_doc.get(), 'Accepté')   # fiche rafraîchie
+        self.assertIn('1 accepté(s)', self.page.var_compteurs.get())  # statistiques rafraîchies
+        self.assertEqual(str(self.page.boutons_statut['accepte'].cget('state')), 'disabled')
+
+    def test_rejet_exclusion_retour_exigent_un_motif(self):
+        document = self.ouvrir_un_document()
+        for statut in ('rejete', 'exclu'):
+            self.assertIsNone(self.soumettre(statut).resultat)
+        self.soumettre('rejete', commentaire='Valeur contestée')
+        self.assertIsNone(self.soumettre('non_verifie').resultat)
+        self.soumettre('non_verifie', commentaire='Erreur de saisie')
+        self.soumettre('exclu', commentaire='Dossier atypique')
+        self.assertEqual([e['nouveau'] for e in S.historique_statuts(self.conn, document)],
+                         ['rejete', 'non_verifie', 'exclu'])         # historique en ajout seul
+        self.assertEqual(len(self.page.historique.get_children()), 3)
+
+    def test_statut_persistant_apres_reouverture_et_import_jamais_accepte(self):
+        document = self.ouvrir_un_document(3)
+        self.soumettre('accepte', preuve='Enregistrement E 12')
+        statuts = {d['id']: d['statut'] for d in S.lister_documents(self.conn)}
+        self.assertEqual(sorted(statuts.values()), ['accepte', 'non_verifie', 'non_verifie'])
+        self.conn.close()
+        self.conn = None                                         # relance
+        self.assertEqual(S.statut(self.app.base_refs(), document), 'accepte')
+        self.page._importer(self.fichiers(5))                    # nouvel import : jamais accepté
+        self.pomper(lambda: self.page.tache is None)
+        self.assertEqual(S.compteurs(self.conn)['acceptes'], 1)
+
+    def test_statuts_indisponibles_pendant_un_import(self):
+        self.ouvrir_un_document()
+        libere, commence = threading.Event(), threading.Event()
+        original = I.importer_fichier
+
+        def bloquant(*args, **kwargs):
+            commence.set()
+            libere.wait(10)
+            return original(*args, **kwargs)
+
+        self.addCleanup(libere.set)                              # jamais de fil laissé bloqué
+        with patch.object(I, 'importer_fichier', bloquant):
+            self.page._importer([self.dossier / 'xml' / 'nouveau.xml'])
+            commence.wait(5)
+            self.assertTrue(all(str(b.cget('state')) == 'disabled' for b in self.page.boutons_statut.values()))
+            with patch.object(R, 'DialogueStatut') as dialogue:
+                self.page.changer_statut('rejete')
+            dialogue.assert_not_called()
+            self.assertEqual(self.page.message.titre.cget('text'), 'Import en cours')
+            libere.set()
+            self.pomper(lambda: self.page.tache is None)
+        self.assertEqual(str(self.page.boutons_statut['rejete'].cget('state')), 'normal')
 
     def test_import_de_fond_depuis_la_page(self):
         self.page._importer(self.fichiers(3) + [self.dossier / 'absent.xml'])
@@ -328,6 +427,7 @@ class PageTest(Temporaire):
 
     def test_suivi_conserve_jusqu_a_l_arret_du_fil(self):
         liberer, commencee = threading.Event(), threading.Event()
+        self.addCleanup(liberer.set)
         with patch.object(B, 'ouvrir', ouverture_retardee(liberer, commencee)):
             self.page._importer(self.fichiers(2))
             self.assertTrue(commencee.wait(5))                   # le fil ferme sa connexion
@@ -345,6 +445,7 @@ class PageTest(Temporaire):
 
     def test_annulation_depuis_la_page(self):
         libere = threading.Event()
+        self.addCleanup(libere.set)
         original = I.importer_fichier
 
         def lent(*args, **kwargs):
@@ -361,6 +462,7 @@ class PageTest(Temporaire):
 
     def test_arreter_import_borne_et_suivi_annule(self):
         libere, commence = threading.Event(), threading.Event()
+        self.addCleanup(libere.set)
         original = I.importer_fichier
 
         def bloquant(*args, **kwargs):

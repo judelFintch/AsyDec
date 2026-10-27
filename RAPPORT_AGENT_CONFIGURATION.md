@@ -359,3 +359,9 @@ Atlas : revue ciblée, 33 tests ciblés relancés puis **167 tests de suite comp
 **REF-104 : proposition retenue, mise en file**, pas de réservation ui/app.py immédiate. Après revue REF-103 et plan correctifs, réserver un créneau séparé. Conserver reconnexion après execv ; confirmation perte saisies, refus pendant import, fermeture propre. Aucun mécanisme de contournement login autorisé.
 
 Canal Quartz/Euclide : ce rapport, consulté à leur prochaine intervention ; aucune réception instantanée ni démarrage automatique prétendu. Cette vérification n'intègre pas encore leurs modifications.
+
+### REF-103 — revue terminée et intégration autorisée
+
+Atlas a relu le diff ui/references.py et test_ui_references.py : actions de statuts séparées des fonctions encore désactivées, auteur provenant de la session, règles de preuve/motif déléguées au service, blocage pendant import, rafraîchissement liste/compteurs. Les 23 tests dédiés ont été relancés avec succès sur données temporaires (suite générale précédente : 167 tests réussis sur cet état de travail). Lot de Quartz accepté sans lui demander de nouvelle intervention. Intégration limitée à ses deux fichiers ; les autres fonctions non autorisées restent désactivées.
+
+Sur autorisation utilisateur « vas y » après demande d'économie, Quartz est laissé au repos ; Relais reprend MAT-102 dans un périmètre ciblé après plan et GO, sans remplacer les changements d'Euclide. Atlas relit et commite. Les chantiers suivants resteront séquentiels.
