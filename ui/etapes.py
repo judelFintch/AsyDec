@@ -403,6 +403,7 @@ class PageVerifier(ttk.Frame):
         self.generer.pack(side="right")
         self.regenerer_bouton = theme.bouton(barre, "Régénérer un autre modèle", self.regenerer)
         self.regenerer_bouton.pack(side="left")
+        theme.bouton(barre, "Comparer avec un XML…", self.comparer_xml).pack(side="left", padx=8)
         self.finder = theme.bouton(barre, "Afficher dans le Finder", self.afficher_fichier)
         theme.bouton(barre, "←  Modifier les articles", lambda: app.montrer("articles")).pack(side="right", padx=8)
 
@@ -513,6 +514,21 @@ class PageVerifier(ttk.Frame):
             nombre(r["cif"]), nombre(r["taxes_articles"])))
         self.tableau.insert("", "end", tags=("total",), values=(
             "", "Taxes globales", "", "", "", "", "", nombre(r["taxes_globales"])))
+
+    def comparer_xml(self):
+        if not self.resultat or self.app.session_verrouillee:
+            return
+        chemin = filedialog.askopenfilename(parent=self, title="Comparer avec un XML fourni",
+                                            filetypes=[("XML", "*.xml")])
+        if not chemin:
+            return
+        try:
+            from comparaison_prediction import comparer
+            from ui.comparaison import afficher
+            rapport = comparer(self.resultat, self.app.base, chemin)
+            afficher(self, rapport)
+        except Exception as exc:
+            messagebox.showerror("Comparaison impossible", str(exc), parent=self)
 
     def enregistrer(self):
         if not self.resultat:

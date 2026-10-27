@@ -319,3 +319,9 @@ Périmètre proposé puis GO Atlas avant modification. Relais a modifié uniquem
 ### UI-109 — ratios visibles dans les propositions
 
 Relais, périmètre approuvé avant édition : ratio FOB/kg par article ajouté à Vérifier et générer, quatre décimales, recalcul à chaque aperçu et régénération ; totaux sans ratio. Intitulé existant clarifié dans Répartitions. Atlas a relu et relancé 16 tests ciblés réussis (affichage, adoption, régénération). Pas de recette graphique de ce lot. Aucun fichier tiers intégré.
+
+### UI-110 — comparaison de la prédiction avec un fichier XML fourni
+
+Relais, mission déléguée après clarification et GO : bouton « Comparer avec un XML… » dans Vérifier et générer, lecture seule d'un fichier local. Fenêtre Prévu / Fichier fourni / Écart / Écart % pour poids, FOB, colis, ratio, CIF et taxes par article et totaux. Correspondance par position d'origine et code ; manquants et codes différents signalés sans déplacement des positions. Écart = fourni moins prévu, pourcentage absent si prévu nul. Devise incompatible empêche les écarts FOB/ratio ; contexte fiscal différent signalé, aucune acceptation ni exactitude douanière déduite.
+
+Atlas : revue des quatre fichiers, 28 tests ciblés relancés et réussis ; fenêtre Tk construite et affichée avec 18 lignes sur XML temporaires. Aucun original modifié, aucune importation implicite, aucun fichier moteur ou lot tiers intégré. Rapport affiché seulement, sans persistance ajoutée.

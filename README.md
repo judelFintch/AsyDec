@@ -204,3 +204,7 @@ le futur service de décision fondé sur les observations acceptées et leur con
 Dans **Outils → Médiathèque XML**, ajoutez des fichiers ou un dossier entier (sous-dossiers inclus). Chaque contenu est archivé une seule fois. Les autres modules peuvent sélectionner ces archives via **XML déjà disponibles** ou **Médiathèque XML**, sans demander de nouveau le fichier original.
 
 La liste montre les positions présentes et l'utilisation possible. Les XML de moins de huit articles servent uniquement aux études et statistiques ; leurs positions restent celles du fichier. Seuls les XML complets aux positions 1 à 8, avec poids et FOB positifs, peuvent être proposés comme bases de génération, sous réserve des contrôles supplémentaires. L'import ne signifie pas une acceptation douanière : le statut reste suivi séparément dans la bibliothèque des références. Retirer un XML de la médiathèque conserve les originaux, exports et historiques.
+
+### Comparer une proposition à un fichier XML
+
+Dans **Vérifier et générer**, cliquez sur **Comparer avec un XML…**, puis sélectionnez votre fichier. La fenêtre affiche les valeurs prévues et celles du fichier, ainsi que les écarts absolus et en pourcentage pour les poids, FOB, colis, ratios, CIF et taxes. Le fichier fourni reste intact. Les positions et codes identifient les articles ; les absences ou différences de contexte sont signalées. Un écart ne prouve pas une erreur de calcul : vérifiez notamment le taux de change, les frais et les taux de taxes utilisés.
