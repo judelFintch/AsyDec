@@ -84,7 +84,7 @@ def _comparer(resultat, base, fourni, chemin_fourni, source_xml=False):
                     'Donnée absente' if ecart is None else 'Contexte différent / non vérifiable' if contextes and metrique in ('cif', 'taxes') else
                     'Identique' if ecart == 0 else 'Écart observé')
             lignes.append(dict(position=position, code=code, designation=nom, metrique=metrique,
-                libelle='Taxes totales CDF' if position == 'Total global' and metrique == 'taxes' else libelle, prevu=p, fourni=f, ecart=ecart, pourcentage=pourcentage, etat=etat))
+                libelle='Total déclaration CDF' if position == 'Total global' and metrique == 'taxes' else libelle, prevu=p, fourni=f, ecart=ecart, pourcentage=pourcentage, etat=etat))
     for position in sorted(set(predictions) | set(reels)):
         source, prevu = predictions.get(position, ({}, {}))
         actuel = reels.get(position, {})

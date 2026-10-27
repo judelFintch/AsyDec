@@ -28,7 +28,7 @@ def enregistrer_pdf(parent, nom, fabrique):
 def afficher(parent, rapport):
     fen = tk.Toplevel(parent)
     fen.title('Comparer le XML généré avec un fichier fourni')
-    fen.geometry('1240x720')
+    fen.geometry('1240x800')
     fen.transient(parent.winfo_toplevel())
     cadre = ttk.Frame(fen, padding=16)
     cadre.pack(fill='both', expand=True)
@@ -39,6 +39,13 @@ def afficher(parent, rapport):
         f"Taux XML généré : 1 {rapport['devise_prevue'] or '?'} = {nombre(rapport.get('taux_genere'), 4)} CDF · "
         f"taux fichier fourni : 1 {rapport['devise_fournie'] or '?'} = {nombre(rapport.get('taux_fourni'), 4)} CDF",
         wraplength=1150).pack(anchor='w', pady=6)
+    total = next((l for l in rapport['lignes'] if l['position'] == 'Total global' and l['metrique'] == 'taxes'), None)
+    if total:
+        ttk.Label(cadre, text=(f"Total déclaration estimé (XML généré) : {nombre(total['prevu'], 2)} CDF\n"
+            f"Total déclaration comparée : {nombre(total['fourni'], 2)} CDF\n"
+            f"Différence : {nombre(total['ecart'], 2)} CDF ({nombre(total['pourcentage'], 2)} %)"),
+            style='Section.TLabel', wraplength=1150).pack(anchor='w', pady=(8, 2))
+        ttk.Label(cadre, text='Taxes totales déclarées dans les deux XML.', style='Doux.TLabel').pack(anchor='w')
     globales = next((l for l in rapport['lignes'] if l['metrique'] == 'taxes_globales'), None)
     if globales:
         ttk.Label(cadre, text=(f"Taxes globales : XML généré {nombre(globales['prevu'], 2)} CDF · "

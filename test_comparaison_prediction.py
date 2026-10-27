@@ -134,7 +134,7 @@ class ComparaisonPredictionTest(unittest.TestCase):
                          (Decimal(50),Decimal(70),Decimal(20),Decimal(40)))
         self.assertEqual(articles['ecart'],0)
         self.assertEqual(totale['ecart'],20)
-        self.assertEqual(totale['libelle'],'Taxes totales CDF')
+        self.assertEqual(totale['libelle'],'Total déclaration CDF')
         self.assertEqual(rapport['taux_genere'],Decimal('2265.5'))
         self.assertEqual(rapport['taux_fourni'],Decimal('2265.5'))
 
@@ -144,6 +144,17 @@ class ComparaisonPredictionTest(unittest.TestCase):
         l=self.ligne(rapport,'Total global','taxes_globales')
         self.assertIsNone(l['fourni'])
         self.assertIsNone(l['ecart'])
+
+    def test_total_declaration_declares_reste_distinct_fob_cif_et_globales(self):
+        self.modifier('Financial/Amounts/Totals_taxes','300')
+        rapport=C.comparer_xmls(self.base,self.fourni)
+        total=self.ligne(rapport,'Total global','taxes')
+        self.assertEqual((total['prevu'],total['fourni'],total['ecart'],total['pourcentage']),
+                         (Decimal(250),Decimal(300),Decimal(50),Decimal(20)))
+        self.modifier('Financial/Amounts/Totals_taxes','')
+        total=self.ligne(C.comparer_xmls(self.base,self.fourni),'Total global','taxes')
+        self.assertIsNone(total['fourni'])
+        self.assertIsNone(total['ecart'])
 
 
 class ActionComparaisonTest(unittest.TestCase):

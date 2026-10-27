@@ -230,3 +230,5 @@ Dans **Outils → Modèles générés**, choisissez **Tous** ou **Validé locale
 Le téléchargement reprend le XML exact déjà exporté ou le XML final conservé du modèle, sans recalculer ni demander le fichier d'origine. Il est enregistré dans l'historique et permet ensuite la comparaison XML. Seuls les modèles validés localement peuvent être téléchargés par cette commande. Un remplacement de fichier demande confirmation.
 
 Un modèle validé peut aussi être imprimé via **Imprimer en PDF…** ; la fenêtre de comparaison propose **Enregistrer en PDF…**. Le PDF est un document de travail.
+
+La comparaison affiche aussi en tête **Total déclaration estimé (XML généré)** et **Total déclaration comparée**, puis leur différence en CDF et en pourcentage. Ces montants proviennent du total des taxes déclaré dans chaque XML (`Financial/Amounts/Totals_taxes`) ; ils restent distincts du FOB, du CIF et des seules taxes globales. Une donnée absente est affichée « — ». Le même récapitulatif figure dans le PDF de comparaison.

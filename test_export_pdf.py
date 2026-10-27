@@ -60,6 +60,9 @@ class ExportPdfTest(unittest.TestCase):
         octets = self.pdf.read_bytes()
         structure_valide(self, octets)
         self.assertIn(b'Taxes globales', octets)
+        self.assertIn('Total déclaration estimé'.encode('cp1252'), octets)
+        self.assertIn('Total déclaration comparée'.encode('cp1252'), octets)
+        self.assertIn('Différence'.encode('cp1252'), octets)
         self.assertIn('Écart'.encode('cp1252'), octets)
         self.assertEqual(self.empreintes(), avant)
 

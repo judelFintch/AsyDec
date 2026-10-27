@@ -232,6 +232,13 @@ def pdf_comparaison(rapport, chemin, utilisateur, maintenant=None):
                    f"Devise du XML généré : {rapport['devise_prevue'] or 'absente'} · devise fournie : {rapport['devise_fournie'] or 'absente'}\n"
                    f"Taux XML généré : 1 {rapport['devise_prevue'] or '?'} = {nombre(rapport.get('taux_genere'), 4)} CDF · "
                    f"taux fichier fourni : 1 {rapport['devise_fournie'] or '?'} = {nombre(rapport.get('taux_fourni'), 4)} CDF")
+    total = next((l for l in rapport['lignes'] if l['position'] == 'Total global' and l['metrique'] == 'taxes'), None)
+    if total:
+        doc.espace(4)
+        doc.paragraphe(f"Total déclaration estimé (XML généré) : {nombre(total['prevu'], 2)} CDF\n"
+                       f"Total déclaration comparée : {nombre(total['fourni'], 2)} CDF\n"
+                       f"Différence : {nombre(total['ecart'], 2)} CDF ({nombre(total['pourcentage'], 2)} %)", 11, True)
+        doc.paragraphe('Taxes totales déclarées dans les deux XML.')
     globales = next((l for l in rapport['lignes'] if l['metrique'] == 'taxes_globales'), None)
     if globales:
         doc.espace(4)
