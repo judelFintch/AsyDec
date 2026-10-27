@@ -172,13 +172,18 @@ class ActionComparaisonTest(unittest.TestCase):
         afficher.assert_not_called()
 
     def test_postexport_compare_fichier_reel_pas_resume(self):
-        page=SimpleNamespace(resultat={'resume':'ne pas utiliser'},fichier='export.xml',app=SimpleNamespace(session_verrouillee=False))
+        page=SimpleNamespace(resultat={'resume':'ne pas utiliser'},fichier='export.xml',
+                             app=SimpleNamespace(session_verrouillee=False,utilisateur='alice'))
         with patch.object(E.Path,'is_file',return_value=True),patch.object(E.filedialog,'askopenfilename',return_value='fourni.xml'), \
              patch('comparaison_prediction.comparer_xmls',return_value={'lignes':[]}) as comparer, \
-             patch('ui.comparaison.afficher') as afficher:
+             patch('ui.comparaison.afficher') as afficher, patch.object(E.Path,'read_bytes',return_value=b'export'), \
+             patch('modeles_generes.modele_par_export',return_value=4) as retrouver, \
+             patch('modeles_generes.noter_comparaison') as noter:
             E.PageVerifier.comparer_xml(page)
         comparer.assert_called_once_with('export.xml','fourni.xml')
         afficher.assert_called_once_with(page,{'lignes':[]})
+        retrouver.assert_called_once_with(b'export')
+        noter.assert_called_once_with(4,'fourni.xml',{'lignes':[]},'alice')
 
     def test_liste_proposition_non_exportee_blocage_avant_selecteur(self):
         import ui.modeles_generes as U
@@ -191,7 +196,8 @@ class ActionComparaisonTest(unittest.TestCase):
 
     def test_liste_compare_snapshot_exact_et_nettoie_fichier_temporaire(self):
         import ui.modeles_generes as U
-        page=SimpleNamespace(app=SimpleNamespace(session_verrouillee=False),selection=lambda:1)
+        page=SimpleNamespace(app=SimpleNamespace(session_verrouillee=False,utilisateur='alice'),selection=lambda:1,
+                             modeles={'1':{'plaque':'T546ECQ'}},afficher=Mock(),table=Mock())
         chemins=[]
         def comparer(source,fourni):
             chemins.append(Path(source))
@@ -199,9 +205,13 @@ class ActionComparaisonTest(unittest.TestCase):
             return {'lignes':[]}
         with patch.object(U.service,'lire_export',return_value=b'<ASYCUDA><!-- export exact --></ASYCUDA>'), \
              patch.object(U.filedialog,'askopenfilename',return_value='fourni.xml'), \
-             patch('comparaison_prediction.comparer_xmls',side_effect=comparer),patch('ui.comparaison.afficher') as afficher:
+             patch('comparaison_prediction.comparer_xmls',side_effect=comparer),patch('ui.comparaison.afficher') as afficher, \
+             patch.object(U.service,'noter_comparaison') as noter, patch.object(U,'rangement',return_value=None):
             U.PageModelesGeneres.comparer(page)
         afficher.assert_called_once()
+        self.assertEqual(afficher.call_args[0][1]['plaque'],'T546ECQ')
+        noter.assert_called_once()
+        self.assertEqual(noter.call_args[0][:2],(1,'fourni.xml'))
         self.assertFalse(chemins[0].exists())
 
 

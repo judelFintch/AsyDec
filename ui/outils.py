@@ -340,6 +340,7 @@ class PageHistorique(ttk.Frame):
         self.filtre = ttk.Combobox(barre, textvariable=self.var_filtre, state="readonly", width=30)
         self.filtre.pack(side="left")
         self.filtre.bind("<<ComboboxSelected>>", lambda e: self.afficher())
+        theme.bouton(barre, "Reprendre pour modifier", self.reprendre).pack(side="right", padx=8)
         theme.bouton(barre, "Ouvrir le dossier des déclarations",
                      lambda: subprocess.run(["open", generer.DEC], check=False)).pack(side="right")
         self.var_total = tk.StringVar()
@@ -367,6 +368,20 @@ class PageHistorique(ttk.Frame):
             self.liste.insert("", "end", iid=str(chemin), values=(
                 datetime.datetime.fromtimestamp(date).strftime("%d/%m/%Y %H:%M"), importateur, chemin.name))
         self.var_total.set(f"{len(visibles)} déclaration(s)")
+
+    def reprendre(self):
+        if self.app.session_verrouillee or not self.liste.selection():
+            return
+        chemin=Path(self.liste.selection()[0])
+        if not chemin.is_file():
+            messagebox.showinfo('XML introuvable',
+                'Ce fichier historique a été déplacé ou supprimé. Retrouvez sa copie conservée dans Modèles générés si elle existe.',parent=self)
+            return
+        from ui.reprise_modele import reprendre
+        try:
+            reprendre(self.app,chemin.read_bytes(),chemin.name,parent=self)
+        except OSError as exc:
+            messagebox.showerror('Reprise impossible',str(exc),parent=self)
 
     def ouvrir(self, _evenement=None):
         if self.liste.selection():

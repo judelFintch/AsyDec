@@ -1,7 +1,145 @@
 # Rapport — Quartz (AGT-002), agent Références
 
 Date : 27 octobre 2026, 13 h 50 (heure locale du poste).
-Statut : **retouche REF-102 livrée pour revue** (14 h 42, heure lue), non commitée. En attente d'Atlas.
+Statut : **plans IMP-MED et MIG-MOD déposés pour GO** (16 h 25, heure lue), lecture seule, aucune modification. REF-103 en revue Atlas ; REF-104 en file.
+
+## Réception des décisions d'Atlas sur 004/005/006, REF-103, REF-104 (16 h 25, heure lue)
+
+Lu. Merci pour la réponse franche et pour avoir pris la responsabilité du point 004 ; c'est apprécié. Je respecte l'ordre : **plans en lecture seule, aucune édition avant GO**, et `ui/app.py` non touché avant réservation.
+
+## Plan MIG-MOD — rapatrier `modeles_generes.db` dans la base commune (ALERTE-006)
+
+**Constat lu à 16 h 25** (lecture seule, `mode=ro`) : `DONNEES/modeles_generes.db` existe sur le poste de l'utilisateur, **0 modèle, 0 événement**, table `exports_xml` pas encore créée. **Aucune donnée réelle à migrer aujourd'hui.** Je recommande donc de faire MIG-MOD **avant** IMP-MED : chaque modèle enregistré d'ici là rendra la migration plus délicate.
+
+1. **Schéma** — migration 4 dans `base_references.py` (versionnée, atomique) recopiant **exactement** ta conception : tables `modeles_generes`, `modeles_evenements`, `modeles_exports`, mêmes colonnes, mêmes CHECK de statuts locaux (`en_attente/valide/rejete`, **non fusionnés** avec les statuts douaniers), mêmes déclencheurs d'immuabilité. Ajout : colonne `base_sha256` (empreinte de la base XML, déjà calculée dans `contenu['base']`), indexée, lien logique vers `documents.sha256` (sans clé étrangère stricte, la base n'étant pas forcément importée).
+2. **Octets exacts** — `base_xml`, `modele_xml` et `contenu` des exports restent en BLOB, copiés tels quels (aucune resérialisation) ; chaque BLOB est vérifié par SHA-256 avant et après copie. Le dédoublonnage avec `sources/` est remis à plus tard (optimisation, pas nécessaire).
+3. **API inchangée** — `modeles_generes.py` garde `enregistrer`, `lister`, `detail`, `changer_statut`, `lire_export`, `STATUTS`, `BASE`. Seul `_connexion` change de fichier cible. Point d'attention relevé à la lecture : `base_references.ouvrir` est en mode auto-validation (`isolation_level=None`) alors que ton module repose sur `with conn:` ; je garderai **ta** façon de se connecter (connexion courte, `timeout`, transaction implicite) sur le fichier commun, en appliquant seulement `base_references.migrer` à l'ouverture.
+4. **Reprise de l'existant** — nouveau `migrer_modeles.py`, idempotent : (a) sauvegarde préalable des **deux** bases (`base_references.sauvegarder` + copie de l'ancien fichier) ; (b) copie en **une transaction**, en conservant les identifiants (ou table de correspondance tracée si conflit) ; (c) contrôles : comptages identiques par table, SHA de chaque BLOB, dates, auteurs, statuts et ordre des événements ; (d) trace dans une table `reprises_donnees` (empreinte de l'ancien fichier) pour qu'une relance ne double rien ; (e) l'ancien fichier est **laissé intact** jusqu'à ta validation ; (f) retour arrière = restauration de la sauvegarde (a).
+5. **Sauvegarde** — dès lors, `sauvegarder/restaurer` couvrent les modèles. Le reset (CFG-001) n'a plus besoin de lister `modeles_generes.db` après validation ; je ne touche pas `gestion_locale.py` (ton fichier) : je te signalerai la ligne à retirer.
+6. **Tests** — schéma v4 et immuabilité ; ta suite `test_modeles_generes.py` repassée **sans modification** contre la base commune ; reprise : ancienne base temporaire avec modèles, événements et exports → copie exacte, contrôles, relance sans doublon, échec simulé en cours de copie → rien d'écrit ; sauvegarde puis restauration incluant les modèles.
+7. **Fichiers** : `base_references.py`, `modeles_generes.py` (`_connexion` seulement — **ton fichier ou celui de Relais : réservation nécessaire**), nouveaux `migrer_modeles.py` et `test_migration_modeles.py`. Aucun écran, moteur ni login.
+
+## Plan IMP-MED — import de la médiathèque en tâche de fond (ALERTE-005)
+
+**Constat lu** : `PageMediatheque.dossier` → `_ajouter` → `app.partager_xml` → `catalogue_xml.partager`, qui appelle pour **chaque** fichier `importer_fichier` puis `restaurer([empreinte])` (réécriture de `CONFIG_LOCAL/xml_retires.json` à chaque fichier), le tout dans le fil Tkinter.
+
+1. **Une seule tâche d'import pour toute l'application** — petit contrôleur `ui/import_partage.py` qui possède l'unique `import_fond.TacheImport` et diffuse progression et fin aux pages abonnées (Bibliothèque, Médiathèque). Une deuxième demande pendant un import est refusée avec un message clair (« garde import unique »). `arreter_import`, `preparer_reset` et la fermeture passent par ce contrôleur : la garde REF-102 couvre alors les deux pages.
+2. **Restauration volontaire des XML retirés préservée** — le fil d'import n'écrit **jamais** dans `CONFIG_LOCAL` (ton domaine). J'ajoute à `BilanImport` la liste `empreintes` de **tous** les fichiers traités (nouveaux et doublons). À la fin, dans le fil Tkinter, `catalogue_xml.restaurer(empreintes)` est appelé **une seule fois** : même effet qu'aujourd'hui, une écriture au lieu de N.
+3. **Médiathèque** — « Ajouter des XML… » et « Ajouter un dossier… » délèguent au contrôleur ; message de progression, bouton « Annuler l'import », liste rafraîchie à la fin ; boutons d'ajout grisés pendant un import.
+4. **Petits partages synchrones conservés** — `app.partager_xml` reste synchrone pour les autres pages (un ou quelques fichiers choisis par l'utilisateur), mais refuse pendant un import de fond (évite l'écriture concurrente relevée sur UI-105).
+5. **Tests** — gros lot importé sans bloquer (le fil Tkinter reste disponible) ; progression et annulation depuis la Médiathèque ; refus d'un second import ; empreintes de doublons restaurées en une seule écriture ; fermeture et reset refusés tant que la tâche tourne ; aucune écriture de `CONFIG_LOCAL` depuis le fil d'import.
+6. **Fichiers** : `import_references.py` (champ `empreintes`), nouveaux `ui/import_partage.py` et `test_import_partage.py`, `ui/references.py`, `ui/mediatheque.py`, raccordement minimal de `ui/app.py` (`_arreter_import_references` via le contrôleur ; garde dans `partager_xml`) — **réservations nécessaires** pour `ui/mediatheque.py` et `ui/app.py`.
+
+**Ordre proposé** : REF-103 (ta revue) → MIG-MOD (pendant que la base est vide) → IMP-MED → REF-104. J'attends ton GO, plan par plan.
+
+## REF-104 — proposition : bandeau « Nouvelle version disponible » et bouton « Recharger » (16 h 20, heure lue)
+
+**Décision de l'utilisateur** (« super pour le bouton recharger ») : il ferme AsyDec en permanence parce que les nouveautés n'apparaissent qu'après rechargement du code. Il veut être prévenu dans la fenêtre et recharger d'un clic.
+
+**Ce que je propose de faire, si tu me réserves `ui/app.py` le temps du lot** (Relais l'a modifié à 16 h 07 ; je ne veux pas écraser son travail) :
+1. Nouveau `rechargement.py` : empreinte du code (taille et date de chaque `.py` du projet et de `ui/`) relevée au démarrage, puis comparée toutes les 5 s via `after` dans le fil Tkinter (aucun fil supplémentaire).
+2. `ui/app.py`, ajouts minimaux : lancement de la surveillance dans `__init__` ; dans le bandeau, libellé « Nouvelle version disponible » et bouton « Recharger », masqués tant que rien ne change ; méthode `recharger()`.
+3. `recharger()` reprend ton ancienne approche (`rafraichir_projet` de `interface.py`) : confirmation (« saisies non enregistrées perdues ») ; **refus si un import de références tourne** (même garde que la fermeture, REF-102) ; préférences écrites, base des références fermée ; puis `os.execv(sys.executable, [sys.executable, asydec.py])`.
+4. Nouveau `test_rechargement.py` : empreinte modifiée par un changement de fichier ; bandeau affiché une seule fois ; refus pendant un import ; `execv` appelé avec les bons arguments et seulement après fermeture de la base (`execv` simulé, aucune vraie relance).
+
+**Point qui relève de ton domaine (CFG-003)** : avec `execv`, le programme repart de zéro et **la connexion est redemandée**. C'est sûr mais un peu pénible pour l'utilisateur. Conserver la session pendant un rechargement est une décision de sécurité : je ne la prends pas. Par défaut, je garde la reconnexion.
+
+**Fichiers** : `rechargement.py` et `test_rechargement.py` (nouveaux), `ui/app.py` (ajouts ciblés). Aucun moteur, schéma ni service touché.
+
+**Demande** : réserver `ui/app.py` pour REF-104 et donner le feu vert ; ou, si tu préfères le faire toi-même ou par Relais, l'indiquer ici et je relirai. Rappel : REF-103 attend toujours ta revue.
+
+## ALERTE-QUARTZ-006 — Deuxième base SQLite pour les modèles générés (16 h 07, heure lue) — urgence : moyenne, architecture
+
+- **Fait** : UI-111 (`d4729f6`) crée `DONNEES/modeles_generes.db` (`modeles_generes.py`, lignes 12-27), avec son propre schéma créé par `CREATE TABLE IF NOT EXISTS`, sans table de versions ni migrations. Ce besoin correspond à la section 15 du canevas (« historique persistant des modèles générés, validés et utilisés »), rattachée au lot 7 de mon chantier. Le canevas demande un seul schéma et un seul service (sections 8, 9 et 13) et prévoit des tables `allocation_models`, `model_events`… **reliées** à `documents` et `status_events`. CFG-001 (ton contrat) précise : « Le schéma SQLite reste la responsabilité de l'agent Références. » Je n'ai pas été consulté.
+- **Ce qui est bien** : instantanés immuables, événements en ajout seul, empreinte de dédoublonnage, validation locale distincte de l'acceptation SYDONIA, reset mis à jour. Je le dis sincèrement.
+- **Conséquences** :
+  1. aucun lien en base entre un modèle généré et le document de références de sa base XML (le lien n'existe que dans un JSON : `contenu['base']`) ; impossible d'interroger « quelles références ont produit ce modèle » ou « quels modèles viennent de ce dossier accepté » (section 15, critère final du module) ;
+  2. deux vocabulaires de statut parallèles (`non_verifie/accepte/rejete/exclu` et `en_attente/valide/rejete`) sans règle commune ;
+  3. les XML sont recopiés en BLOB alors que `DONNEES/sources/` les archive déjà par empreinte : double stockage ;
+  4. `base_references.sauvegarder/restaurer` ne couvre pas cette base : une restauration de références la laisserait désynchronisée ;
+  5. sans migrations versionnées, toute évolution du schéma devra être improvisée.
+- **Demande** : décider maintenant si cette base reste séparée ou rejoint le schéma commun, avant que des données réelles s'y accumulent.
+- **Complément 16 h 16** : UI-112 (`f9cde19`) ajoute à cette même base une table `exports_xml` (octets exacts et SHA des exports). Le schéma séparé évolue donc déjà sans migration versionnée, et les XML y sont désormais stockés en plus de `DONNEES/sources/`. La décision devient plus coûteuse à chaque lot.
+- **Solution proposée** (je me porte volontaire si tu me l'attribues) : migration 3 dans `asydec.db` reprenant ta conception (tables immuables, événements en ajout seul, mêmes statuts locaux), avec clé vers `documents.sha256` pour la base, réutilisation de l'archive `sources/` au lieu des BLOB, inclusion dans la sauvegarde ; `modeles_generes.py` garde son interface publique et devient une façade, pour que tes écrans et tes 53 tests ne changent pas. Minimum acceptable sinon : table de versions, lien explicite vers l'empreinte de la base, et prise en compte dans `sauvegarder/restaurer`.
+
+## Alertes Quartz — 15 h 40 (heure lue)
+
+### ALERTE-QUARTZ-004 — Lots commités sans relecture ni revue des livraisons en attente (urgence : moyenne, organisation)
+
+- **Fait** : la section « Instruction utilisateur — partage du travail et relecture croisée » a été ajoutée à `COORDINATION_AGENTS.md` à 15 h 29, sur instruction de l'utilisateur. UI-107 (`54fa322`) a été commité à 15 h 40 sans relecture par un autre agent. Ni ton rapport ni le tableau de bord ne mentionnent encore cette règle. REF-103 attend ta revue depuis 14 h 57 (≈ 45 min) ; quatre lots d'Atlas ont été commités depuis.
+- **Conséquence** : tes lots n'ont aucun regard extérieur ; les livraisons des contributeurs s'accumulent.
+- **Demande** : accuser réception de la règle, l'annoncer en tête du tableau de bord, puis l'appliquer aux prochains lots. Je ne présume aucune mauvaise volonté : la règle n'était pas dans ton point d'entrée habituel (`TABLEAU_DE_BORD.md`), que je ne peux pas modifier.
+
+### ALERTE-QUARTZ-005 — Deuxième chemin d'import, synchrone dans le fil Tkinter (urgence : moyenne, technique)
+
+- **Fait** : `ui/mediatheque.py` (UI-107), méthode `dossier` (lignes 54-57) puis `_ajouter` → `app.partager_xml` → `catalogue_xml.partager` → `import_references.importer_fichier`, **fichier par fichier dans le fil de l'interface**, sans progression, sans annulation. La bibliothèque (REF-102) importe déjà fichiers et dossiers, en tâche de fond, avec progression et annulation.
+- **Conséquences** : (1) un gros dossier peut figer la fenêtre — c'est précisément ce que ton ordre REF-102 interdisait (« ne pas bloquer Tkinter ») ; (2) deux pages pour la même action, ce qui va à l'inverse de la convergence P4 ; (3) écritures concurrentes possibles avec un import de fond (voir mon observation UI-105).
+- **Demande et solution proposée** : faire passer l'ajout de la médiathèque par `import_fond.TacheImport` (déjà testé : fil dédié, file d'événements, arrêt borné), ou renvoyer « Ajouter un dossier » vers l'import de la bibliothèque. Je peux m'en charger si tu me l'attribues ; sinon, je relis ta correction.
+
+Ce ne sont pas des reproches personnels. Tu réponds vite aux demandes de l'utilisateur, et c'est une qualité ; je souhaite simplement que la qualité de l'ensemble suive, y compris par des yeux autres que les tiens.
+
+## Proposition : relecture croisée de UI-106 après coup (15 h 30, heure lue)
+
+Avec l'accord de l'utilisateur, je propose d'appliquer pour la première fois la règle « relecture croisée » à UI-106 (`6ec46bd`), commité à 15 h 30, une minute après l'ajout de la règle : tu ne pouvais pas l'avoir lue, aucun reproche. Périmètre de relecture, si tu l'acceptes : lecture de `catalogue_xml.py`, `ui/selection_xml.py` et des parties UI-106 de `ui/app.py` / `ui/etapes.py`, exécution des tests ciblés et de la suite, **sans aucune modification**. Avis rendu ici : accord, réserves ou défauts, avec preuves.
+
+Premier point déjà relevé à la lecture du rapport, pour plus tard : les retraits vivent dans `CONFIG_LOCAL/xml_retires.json`, hors de la base ; le futur service de références actives (lot 6) devra donc lire ce fichier de configuration. On pourra en reparler à ce moment-là.
+
+J'attends ton feu vert avant de commencer.
+
+## Modification du règlement commun sur instruction de l'utilisateur (15 h 29, heure lue)
+
+Atlas, pour transparence : sur demande explicite de l'utilisateur (« ajoute dans la consigne »), j'ai **ajouté** à la fin de `COORDINATION_AGENTS.md` la section « Instruction utilisateur — partage du travail et relecture croisée ». Je n'ai rien modifié ni supprimé d'autre dans ce fichier, qui reste le tien.
+
+Contexte : l'utilisateur m'a demandé mon avis sur le partage dans l'équipe. J'ai répondu que tu partages très bien l'information, le mérite et les critiques, mais moins le travail et le contrôle : tu as réalisé CFG-102, UI-104, UI-105 et UI-106 pendant que REF-103 attend ta revue depuis 14 h 57, et tes propres lots ne sont relus par personne. Ce n'est pas un reproche personnel ; je pense que tu vas vite et que tu tiens à la qualité. Les quatre points ajoutés en découlent. Si tu veux en discuter l'application, je suis preneur.
+
+## Proposition pour UI-106 — « retrait de la liste partagée » (15 h 19, heure lue)
+
+Lu ta note UI-106. Si l'utilisateur choisit le retrait de la liste partagée, quelques contraintes de la base à connaître :
+- Un document qui a un historique de statut **ne peut pas être supprimé** : la clé étrangère de `status_events` (sans cascade) et ses déclencheurs l'empêchent, volontairement (traçabilité). Une suppression échouerait donc sur ces documents.
+- Supprimer un document sans historique ferait aussi disparaître ses articles, taxes et diagnostics (cascade) : perte d'observations.
+
+Proposition, **si tu me la confies** : une migration 3 (mon périmètre de schéma) ajoutant une table `documents_masques` (document, masqué le, auteur, motif, démasqué le), en ajout seul et réversible ; plus `masquer_document` / `demasquer_document` / filtre dans `service_references.py`, avec tests. Le catalogue n'aurait qu'à exclure les documents masqués. Aucun historique ni archive effacé ; les XML d'origine jamais touchés.
+
+Je n'engage rien sans ton feu vert. REF-103 reste en attente de revue.
+
+## Observation sur UI-105 (15 h 16, heure lue) — pas une alerte
+
+Lu `catalogue_xml.partager` et `AsyDec.partager_xml` (commit `7010078`). Le partage écrit dans la base par `importer_fichier` **dans le fil Tkinter** (connexion de l'interface), alors qu'un import de fond REF-102 peut écrire en même temps avec sa propre connexion. SQLite sérialise : l'écrivain en attente patiente jusqu'à 5 s (délai par défaut de `sqlite3`). Chaque document s'écrit en quelques millisecondes, donc en pratique cela passe ; au pire, l'utilisateur verrait « Partage XML incomplet : database is locked », sans perte ni corruption (transaction par document).
+
+Si tu le souhaites plus tard : soit désactiver le partage pendant un import de la bibliothèque (`app.pages["references"].import_en_cours`), soit le rejouer après la fin de l'import. Rien d'urgent ; je n'ai rien exécuté ni modifié pour cette observation.
+
+## UI-105 — réservation d'Atlas reçue (15 h 06, heure lue)
+
+Lu : Atlas prend UI-105 (catalogue XML partagé, première étape de ma proposition P4). Je ne modifie pas `ui/app.py`, `ui/outils.py`, `ui/etapes.py`, `catalogue_xml.py`, `ui/selection_xml.py` ni leurs tests pendant ce lot. Si le catalogue a besoin d'une requête sur les archives SQLite, je peux l'ajouter dans `service_references.py` avec son test, sur ta demande. REF-103 reste en attente de ta revue.
+
+## REF-103 — livraison pour revue (14 h 57, heure lue)
+
+**Terminé, non commité.** Statuts des documents activés dans la bibliothèque.
+
+**Fichiers** : `ui/references.py`, `test_ui_references.py`. Aucun moteur, login, schéma ni service modifié ; `ui/app.py` et `ui/etapes.py` non touchés (ce dernier est à toi pour UI-104).
+
+**Ce qui change dans `ui/references.py`** :
+- Drapeau propre `STATUTS_ACTIFS = True`. `ACTIONS_ACTIVES` reste `False` : correction d'événement et onglet Marchandises/export toujours ni construits ni déclenchables.
+- Boutons : « Accepté dans SYDONIA… », « Rejeter… », « Exclure… », « Remettre « non vérifié »… ». Les règles (preuve obligatoire pour accepté, motif pour les autres, dates, historique en ajout seul) viennent **uniquement** de `service_references.enregistrer_statut` ; l'écran n'en duplique aucune.
+- Auteur : `self.app.utilisateur`, transmis par l'écran et **affiché sans champ modifiable** dans le dialogue.
+- Pendant un import : boutons désactivés (appel à `_etat_boutons()` au lancement) et `changer_statut` refuse avec le message « Import en cours ». Fermeture et reset de REF-102 inchangés.
+- Après action : fiche, liste et compteurs rafraîchis.
+
+**Tests** (`test_ui_references.py`, 23 tests) — ajoutés : refus sans preuve puis acceptation avec auteur = utilisateur connecté, fiche et compteurs rafraîchis ; rejet / exclusion / retour refusés sans motif, historique en ajout seul ; statut retrouvé après réouverture et nouvel import jamais accepté ; statuts indisponibles pendant un import. Adapté : le test « seul l'import autorisé » exige maintenant les boutons de statut et interdit toujours « Corriger » et « Exporter ».
+- `python -B -m unittest test_ui_references` → **23 OK**, 3 passages stables.
+- `python -B -m unittest discover` → **96 OK**, 0 avertissement Tkinter (inclut ton `test_regeneration_verification.py` en cours et les tests d'Euclide).
+
+**Incident I-7 (tests, corrigé avant livraison)** : mes premiers tests REF-103 avaient deux erreurs (lecture d'un dialogue déjà fermé ; comparaison d'un état de bouton Tk avec une chaîne), qui laissaient un fil bloqué et faisaient échouer d'autres tests en cascade. Corrigées ; chaque test qui bloque un fil le libère désormais toujours (`addCleanup`).
+
+**Observation technique** : dans les tests, le ramasse-miettes de Python pouvait s'exécuter **dans le fil d'import** et y détruire des variables Tkinter d'anciennes fenêtres ; Tcl fait alors attendre ce fil ≈ 1 s par variable (« main thread is not in main loop »). Réglé côté tests par `gc.collect()` dans le fil principal (tests 4 fois plus rapides). Dans l'application, la boucle principale tourne et ces appels sont transmis normalement ; seul cas résiduel théorique : pendant l'attente bornée de 5 s d'`arreter_import`, une telle destruction retarderait le fil d'au plus ≈ 1 s. Sans risque de données ; signalé pour transparence.
+
+**Remarque amicale sur UI-104** (ton lot, je n'y touche pas) : `ui/etapes.py` contient en ce moment `import variantes` deux fois (lignes 11 et 12). Sans effet, juste à nettoyer.
+
+**Blocages** : aucun. **Action attendue** : ta revue.
+
+## REF-103 — reçu (14 h 50, heure lue)
+
+Ordre lu dans `RAPPORT_AGENT_CONFIGURATION.md` (« Verdict REF-102 / CFG-102 »). Périmètre : `ui/references.py` et tests dédiés ; drapeau propre aux statuts ; correction d'événement et export marchandises restent désactivés ; auteur = utilisateur authentifié, non modifiable ; aucun moteur, login ni schéma touché.
 
 ## REF-102 — retouche livrée (14 h 42, heure lue)
 

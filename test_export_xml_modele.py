@@ -125,7 +125,7 @@ class ActionExportXmlTest(unittest.TestCase):
     def test_nom_plaque_dossier_libre_confirmation_ecrasement(self):
         page=self.page()
         d={'id':7,'statut':'valide','nom':'modele.xml','resultat':{'info':{'camion':'ABC/123'}}}
-        with patch.object(U.service,'detail',return_value=d), \
+        with patch.object(U.service,'detail',return_value=d), patch.object(U,'rangement',return_value=None), \
              patch.object(U.filedialog,'asksaveasfilename',return_value='choix.xml') as choisir, \
              patch.object(U.service,'exporter_xml',return_value='choix.xml') as exporter,patch.object(U.messagebox,'showinfo'):
             U.PageModelesGeneres.telecharger_xml(page)
@@ -143,6 +143,8 @@ class ActionExportXmlTest(unittest.TestCase):
             page.comparer_bouton=Mock()
             page.pdf_bouton=Mock()
             page.xml_bouton=Mock()
+            page.plaque_bouton=Mock()
+            page.supprimer_bouton=Mock()
             U.PageModelesGeneres.actualiser_comparaison(page)
             page.xml_bouton.configure.assert_called_with(state=etat)
 

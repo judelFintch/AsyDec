@@ -33,6 +33,7 @@ def appliquer(fenetre):
     style.configure("Section.TLabel", font=(POLICE, 13, "bold"), foreground=TEXTE)
     style.configure("Doux.TLabel", font=(POLICE, 11), foreground=TEXTE_DOUX)
     style.configure("Valeur.TLabel", font=(POLICE, 18, "bold"), foreground=TEXTE)
+    style.configure("ValeurAccent.TLabel", font=(POLICE, 20, "bold"), foreground=ACCENT)
     style.configure("Entete.TLabel", font=(POLICE, 11, "bold"), foreground=TEXTE_DOUX)
     style.configure("Total.TLabel", font=(POLICE, 12, "bold"), foreground=TEXTE)
     style.configure("Ok.TLabel", font=(POLICE, 11, "bold"), foreground=OK)
@@ -64,15 +65,22 @@ def entete_page(parent, titre, sous_titre=""):
 class Carte(ttk.Frame):
     """Indicateur : petit libellé gris, grande valeur."""
 
-    def __init__(self, parent, libelle):
+    def __init__(self, parent, libelle, detail=False, style_valeur="Valeur.TLabel"):
         super().__init__(parent, padding=(14, 10))
         self.configure(relief="solid", borderwidth=1)
         ttk.Label(self, text=libelle, style="Doux.TLabel").pack(anchor="w")
         self.valeur = tk.StringVar(value="—")
-        ttk.Label(self, textvariable=self.valeur, style="Valeur.TLabel").pack(anchor="w")
+        self.etiquette = ttk.Label(self, textvariable=self.valeur, style=style_valeur)
+        self.etiquette.pack(anchor="w")
+        # Ligne secondaire facultative (décomposition, écart…), absente des cartes existantes.
+        self.detail = tk.StringVar(value="")
+        if detail:
+            ttk.Label(self, textvariable=self.detail, style="Doux.TLabel", wraplength=300).pack(anchor="w")
 
-    def definir(self, texte):
+    def definir(self, texte, detail=None):
         self.valeur.set(texte)
+        if detail is not None:
+            self.detail.set(detail)
 
 
 class Message(tk.Frame):

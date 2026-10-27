@@ -142,6 +142,20 @@ def nom_dossier(importateur, table):
     return re.sub(r"^SOCIETE\s+", "", importateur.upper()).replace(".", "").strip() or "INCONNU"
 
 
+# Rangement d'un importateur dans DEC FRIPERIE/<IMPORTATEUR>/ : un sous-dossier par type de fichier.
+RANGEMENT = {"historique": "1 - HISTORIQUE", "sources": "2 - VOS FICHIERS (bases et SYDONIA)",
+             "valides": "4 - XML VALIDES", "pdf": "5 - PDF"}  # « 3 - A ESSAYER » existe déjà chez certains
+
+
+def dossier_rangement(importateur, cle, table_imp=None, creer=True):
+    """Sous-dossier de rangement de l'importateur ; créé au besoin, jamais vidé ni déplacé."""
+    table = IMPORTATEURS_DEFAUT if table_imp is None else table_imp
+    chemin = os.path.join(DEC, nom_dossier(importateur or "", table), RANGEMENT[cle])
+    if creer:
+        os.makedirs(chemin, exist_ok=True)
+    return chemin
+
+
 def numero_suivant(dossier_imp):
     motif = re.compile(re.escape(dossier_imp) + r" .*KG (\d{2})(?:-\d{2})?(?: - .*)?\.xml$", re.I)
     maxi = 0
@@ -182,12 +196,20 @@ def ecrire_registre(reg):
 # Calcul d'une déclaration (utilisé par Excel et par l'interface)
 # --------------------------------------------------------------------------
 def produire(base, poids, ratios, table_imp, registre, mode="RATIOS", fob_total=None,
-             fob_saisis=None, colis_total=None, colis_saisis=None, enregistrer=True, profil=None):
+             fob_saisis=None, colis_total=None, colis_saisis=None, enregistrer=True, profil=None, plaque=None):
     """Calcule une déclaration. Si enregistrer=False, rien n'est écrit (aperçu).
     Renvoie un dictionnaire : chemin, nom, resume, alertes, fob, colis, info."""
     alertes = []
     arbre = moteur.charger(base)
     info = moteur.infos_dossier(arbre.getroot())
+    plaque = (plaque or "").strip() or None
+    if plaque:
+        # Plaque saisie à l'étape Dossier : elle remplace celle du XML de base.
+        ancienne = info["camion"]
+        plaque = moteur.ecrire_plaque(arbre.getroot(), plaque)
+        info = moteur.infos_dossier(arbre.getroot())
+        if plaque != ancienne:
+            alertes.append(f"Plaque inscrite dans le XML : {plaque} (XML de base : {ancienne or 'aucune'}).")
     n = len(info["fob_articles"])
     if n != 8:
         alertes.append(f"Le fichier de base a {n} articles (attendu 8).")
@@ -245,7 +267,7 @@ def produire(base, poids, ratios, table_imp, registre, mode="RATIOS", fob_total=
 
     resume = moteur.recalculer(arbre, list(zip(fob, poids)), colis)
     dossier_imp = nom_dossier(info["importateur"], table_imp)
-    dest = os.path.join(DEC, dossier_imp, "1 - HISTORIQUE")
+    dest = os.path.join(DEC, dossier_imp, RANGEMENT["historique"])
     nn = numero_suivant(dossier_imp)
     while True:
         nom = f"{dossier_imp} {fmt_nom(resume['fob'])}USD {fmt_nom(resume['poids'])}KG {nn:02d}.xml"
@@ -255,12 +277,12 @@ def produire(base, poids, ratios, table_imp, registre, mode="RATIOS", fob_total=
         nn += 1
     if enregistrer:
         os.makedirs(dest, exist_ok=True)
-        os.makedirs(os.path.join(DEC, dossier_imp, "2 - VOS FICHIERS (bases et SYDONIA)"), exist_ok=True)
+        os.makedirs(os.path.join(DEC, dossier_imp, RANGEMENT["sources"]), exist_ok=True)
         moteur.enregistrer(arbre, chemin)
         if cle:
             registre[cle] ={"fichier": nom, "poids": poids, "date": datetime.datetime.now().isoformat(timespec="minutes")}
     return {"chemin": chemin, "nom": nom, "resume": resume, "alertes": alertes,
-            "fob": fob, "colis": colis, "info": info, "mode": mode}
+            "fob": fob, "colis": colis, "info": info, "mode": mode, "plaque": plaque}
 
 
 # --------------------------------------------------------------------------

@@ -35,7 +35,65 @@ def comparer_xmls(chemin_genere, chemin_fourni):
         ('poids','poids_brut'),('fob','fob'),('cif','cif'),('taxes','taxes_article'))} for a in genere['articles']]
     rapport = _comparer(resultat,genere,fourni,chemin_fourni,source_xml=True)
     rapport['source'] = str(Path(chemin_genere))
+    rapport['plaque'] = genere['document']['camion'] or ''
+    rapport['importateur'] = genere['document']['importateur'] or ''
+    rapport['plaque_fournie'] = fourni['document']['camion'] or ''
+    rapport['taxes_detail'] = detail_taxes(genere, fourni)
     return rapport
+
+
+def _lignes_par_code(taxes):
+    """Clé (code, n-ième occurrence) : un code répété reste distinct, sans fusion silencieuse."""
+    vues, sortie = {}, {}
+    for t in taxes:
+        n = vues[t['code']] = vues.get(t['code'], 0) + 1
+        sortie[(t['code'], n)] = t
+    return sortie
+
+
+def detail_taxes(genere, fourni):
+    """Chaque ligne de taxe estimée (XML généré) face à la comparée (fichier fourni), écart = comparé − estimé."""
+    lignes, totaux = [], {}
+    def ajouter(position, article, taxe, e, c, cumuler=True):
+        me, mc = _decimal(e.get('montant')), _decimal(c.get('montant'))
+        ecart = mc - me if me is not None and mc is not None else None
+        if not e:
+            etat = 'Absente du XML généré'
+        elif not c:
+            etat = 'Absente du fichier fourni'
+        elif ecart is None:
+            etat = 'Donnée absente'
+        elif _decimal(e.get('taux')) != _decimal(c.get('taux')):
+            etat = 'Taux différent'
+        else:
+            etat = 'Identique' if ecart == 0 else 'Écart observé'
+        lignes.append(dict(position=position, article=article, taxe=taxe,
+            base_estimee=_decimal(e.get('base')), base_comparee=_decimal(c.get('base')),
+            taux_estime=_decimal(e.get('taux')), taux_compare=_decimal(c.get('taux')),
+            estime=me, compare=mc, ecart=ecart,
+            pourcentage=ecart / abs(me) * 100 if ecart is not None and me != 0 else None, etat=etat))
+        if cumuler:
+            total = totaux.setdefault(taxe, [Decimal(0), Decimal(0), True, True])
+            for i, m in ((0, me), (1, mc)):
+                if m is None:
+                    total[2 + i] = False
+                else:
+                    total[i] += m
+    articles_g = {a['position']: a for a in genere['articles']}
+    articles_f = {a['position']: a for a in fourni['articles']}
+    for position in sorted(set(articles_g) | set(articles_f)):
+        ag, af = articles_g.get(position, {}), articles_f.get(position, {})
+        tg, tf = _lignes_par_code(ag.get('taxes', [])), _lignes_par_code(af.get('taxes', []))
+        article = ag.get('code') or af.get('code') or '—'
+        for cle in list(tg) + [k for k in tf if k not in tg]:
+            ajouter(position, article, cle[0], tg.get(cle, {}), tf.get(cle, {}))
+    for code, (e, c, complet_e, complet_c) in totaux.items():
+        ajouter('Total', 'Articles', code, {'montant': e} if complet_e else {'montant': None},
+                {'montant': c} if complet_c else {'montant': None}, cumuler=False)
+    gg, gf = _lignes_par_code(genere['taxes_globales']), _lignes_par_code(fourni['taxes_globales'])
+    for cle in list(gg) + [k for k in gf if k not in gg]:
+        ajouter('Globale', '', cle[0], gg.get(cle, {}), gf.get(cle, {}), cumuler=False)
+    return lignes
 
 
 def _comparer(resultat, base, fourni, chemin_fourni, source_xml=False):
@@ -127,3 +185,53 @@ def _comparer(resultat, base, fourni, chemin_fourni, source_xml=False):
                 taux_genere=_decimal(resume.get('taux')), taux_fourni=_decimal(vf['taux_change']),
                 fichier=str(Path(chemin_fourni)), devise_prevue=base['document']['devise'],
                 devise_fournie= fourni['document']['devise'])
+
+
+def _fr(valeur, decimales=0):
+    """Format français : 1234567.5 -> « 1 234 567,50 »."""
+    return f'{valeur:,.{decimales}f}'.replace(',', ' ').replace('.', ',')
+
+
+def synthese_taxes(rapport):
+    """Totaux de taxes (estimé, comparé, écart, %) et explication en phrases simples."""
+    ligne = lambda metrique: next((l for l in rapport['lignes']
+                                   if l['position'] == 'Total global' and l['metrique'] == metrique), None)
+    total = ligne('taxes')
+    sortie = {'estime': None, 'compare': None, 'ecart': None, 'pourcentage': None, 'phrases': []}
+    if total is None or total['prevu'] is None or total['fourni'] is None:
+        sortie['phrases'].append("Le total des taxes manque dans l'un des deux XML : la comparaison du total est impossible.")
+        return sortie
+    estime, compare, ecart = total['prevu'], total['fourni'], total['ecart']
+    sortie.update(estime=estime, compare=compare, ecart=ecart, pourcentage=total['pourcentage'])
+    phrases = sortie['phrases']
+    if ecart == 0:
+        phrases.append('Le fichier comparé déclare exactement le même total de taxes que l’estimation.')
+        return sortie
+    sens = 'plus' if ecart > 0 else 'moins'
+    pourcentage = f" ({_fr(total['pourcentage'], 2)} %)" if total['pourcentage'] is not None else ''
+    phrases.append(f'Le fichier comparé déclare {_fr(abs(ecart))} CDF de {sens} que l’estimation{pourcentage}.')
+    taux_g, taux_f = rapport.get('taux_genere'), rapport.get('taux_fourni')
+    if taux_g and taux_f and taux_g != taux_f:
+        # Approximation : les taxes suivent surtout la valeur en CDF, donc le taux de change.
+        effet = estime * (taux_f / taux_g - 1)
+        phrase = (f'Le taux de change n’est pas le même ({_fr(taux_g, 2)} → {_fr(taux_f, 2)} CDF par unité de devise). '
+                  f'À lui seul, il représente environ {_fr(effet)} CDF')
+        reste = ecart - effet
+        if abs(reste) <= abs(ecart) / 10:
+            phrases.append(phrase + ' : presque tout l’écart vient du taux.')
+        else:
+            phrases.append(phrase + '.')
+            phrases.append(f'Le reste, environ {_fr(reste)} CDF, vient d’autres différences : voir « Détails des taxes… ».')
+    else:
+        phrases.append('Le taux de change est le même : l’écart vient des montants des articles ou des taxes globales. '
+                       'Voir « Détails des taxes… ».')
+    globales = ligne('taxes_globales')
+    if globales and globales['ecart']:
+        phrases.append(f"Taxes globales : {_fr(globales['ecart'])} CDF d'écart.")
+    articles = [l for l in rapport['lignes'] if l['metrique'] == 'taxes' and l['position'] != 'Total global'
+                and l['ecart'] is not None]
+    if articles:
+        pire = max(articles, key=lambda l: abs(l['ecart']))
+        if pire['ecart']:
+            phrases.append(f"Plus gros écart par article : art. {pire['position']} ({pire['code']}), {_fr(pire['ecart'])} CDF.")
+    return sortie

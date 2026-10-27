@@ -59,6 +59,34 @@ def articles(racine):
     return [it for it in racine.findall("Item") if _fl(_txt(it, "Tarification/Item_price"))]
 
 
+CHEMINS_PLAQUE = ("Transport/Means_of_transport/Departure_arrival_information/Identity",
+                  "Transport/Means_of_transport/Border_information/Identity")
+
+
+def normaliser_plaque(valeur):
+    """Plaque en majuscules ; lettres, chiffres, espaces, « - » et « / » seulement."""
+    import re
+    texte = " ".join(str(valeur or "").upper().split())
+    if not texte:
+        raise ValueError("Indiquez la plaque du camion.")
+    if len(texte) > 40 or not re.fullmatch(r"[A-Z0-9][A-Z0-9 /-]*", texte):
+        raise ValueError("Plaque invalide : lettres, chiffres, espaces, « - » ou « / » uniquement, 40 caractères au plus.")
+    return texte
+
+
+def ecrire_plaque(racine, plaque):
+    """Inscrit la plaque aux champs Identity d'arrivée et de frontière du transport."""
+    plaque = normaliser_plaque(plaque)
+    champs = [e for e in (racine.find(c) for c in CHEMINS_PLAQUE) if e is not None]
+    if not champs:
+        raise ValueError("Le XML de base n'a pas de champ plaque (Transport/Means_of_transport) : plaque non inscrite.")
+    for champ in champs:
+        for enfant in list(champ):  # <null/> éventuel
+            champ.remove(enfant)
+        champ.text = plaque
+    return plaque
+
+
 def infos_dossier(racine):
     nom = _txt(racine, "Traders/Consignee/Consignee_name").splitlines()
     its = articles(racine)

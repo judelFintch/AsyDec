@@ -47,7 +47,11 @@ def modeles():
 
 
 def signature(chemin):
-    r = moteur.charger(chemin).getroot()
+    return signature_racine(moteur.charger(chemin).getroot())
+
+
+def signature_racine(r):
+    """Codes, désignations normalisées et devise de chaque article d'un XML déjà lu."""
     return [(moteur._txt(i, 'Tarification/HScode/Commodity_code'),
              ' '.join(moteur._txt(i, 'Goods_description/Description_of_goods').casefold().split()),
              moteur._txt(r, 'Valuation/Gs_Invoice/Currency_code')) for i in moteur.articles(r)]
@@ -275,6 +279,25 @@ def evaluer(v, profil):
         if meilleur is None or distance < meilleur['distance']:
             meilleur = {'distance':distance, 'proximite':round(100*(1-distance),2), 'reference_proche':ref['nom']}
     return meilleur
+
+
+def distance_parts(v, ref):
+    """Écart moyen des parts de poids, FOB et colis entre deux répartitions (0 = mêmes proportions)."""
+    distance = 0
+    for cle in ('poids', 'fob', 'colis'):
+        a, b = v[cle], ref[cle]
+        if sum(a) <= 0 or sum(b) <= 0:
+            distance += 1/3
+        else:
+            distance += sum(abs(x/sum(a)-y/sum(b)) for x, y in zip(a, b))/6
+    return distance
+
+
+def plus_proche(propositions, modeles):
+    """Proposition la plus proche d'un des modèles retenus : (proposition, modèle, proximité %)."""
+    choix = min(((distance_parts(p, m), i, p, m) for i, p in enumerate(propositions) for m in modeles),
+                key=lambda t: (t[0], t[1]))
+    return choix[2], choix[3], round(100*(1-choix[0]), 2)
 
 
 def cle_variante(v):

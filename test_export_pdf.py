@@ -93,7 +93,7 @@ class BoutonPdfTest(unittest.TestCase):
     def page(self, statut, verrouillee=False):
         return SimpleNamespace(selection=lambda: 7, modeles={'7': {'statut': statut, 'exporte': False}},
             app=SimpleNamespace(session_verrouillee=verrouillee, utilisateur='alice'),
-            comparer_bouton=Mock(), pdf_bouton=Mock(), xml_bouton=Mock())
+            comparer_bouton=Mock(), pdf_bouton=Mock(), xml_bouton=Mock(), plaque_bouton=Mock(), supprimer_bouton=Mock())
 
     def test_bouton_actif_seulement_si_valide_et_session_libre(self):
         for statut, verrouillee, attendu in (('valide', False, 'normal'), ('en_attente', False, 'disabled'),

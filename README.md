@@ -232,3 +232,71 @@ Le téléchargement reprend le XML exact déjà exporté ou le XML final conserv
 Un modèle validé peut aussi être imprimé via **Imprimer en PDF…** ; la fenêtre de comparaison propose **Enregistrer en PDF…**. Le PDF est un document de travail.
 
 La comparaison affiche aussi en tête **Total déclaration estimé (XML généré)** et **Total déclaration comparée**, puis leur différence en CDF et en pourcentage. Ces montants proviennent du total des taxes déclaré dans chaque XML (`Financial/Amounts/Totals_taxes`) ; ils restent distincts du FOB, du CIF et des seules taxes globales. Une donnée absente est affichée « — ». Le même récapitulatif figure dans le PDF de comparaison.
+
+### Reprendre un modèle pour le modifier
+
+Dans **Outils → Modèles générés** (liste ou fiche) ou dans **Historique**, sélectionnez une déclaration puis **Reprendre pour modifier**. Le XML de base est rouvert comme dossier et les poids, FOB et colis conservés remplissent l'étape **Articles**, en saisie manuelle, prêts à être corrigés.
+
+- Le modèle, son XML exporté et sa validation locale restent intacts. Une répartition modifiée s'enregistre comme une nouvelle proposition.
+- Si un dossier est déjà ouvert, une confirmation est demandée avant de remplacer ses saisies.
+- Seuls les XML à huit articles valorisés aux positions 1 à 8 sont repris. Les poids doivent être des kilogrammes entiers, les FOB au centime et les colis entiers : aucune valeur n'est arrondie en silence.
+- Depuis l'Historique, le fichier doit encore exister ; sinon, passez par sa copie dans Modèles générés.
+
+### Plaque, comparaisons déjà faites et détail des taxes
+
+- **Plaque.** Sur un modèle **Validé localement**, cliquez sur **Plaque…** (liste ou fiche) pour saisir la plaque du camion, par exemple `T546ECQ/T618ECT` : lettres, chiffres, espaces, « - » et « / ». Elle apparaît dans la colonne **Plaque**, la fiche, les PDF, la comparaison et le nom proposé au téléchargement du XML. Chaque changement est daté dans l'historique ; sans saisie, la plaque inscrite dans le XML est utilisée.
+- **Déjà comparé ?** La colonne **Comparé** indique le nombre de comparaisons et la date de la dernière. La fiche et le PDF du modèle les rappellent, et l'historique nomme chaque fichier comparé avec l'écart du total de la déclaration. La trace est aussi enregistrée quand la comparaison est lancée depuis **Vérifier et générer**, si le XML exporté correspond exactement à un modèle conservé. Le fichier comparé n'est ni copié ni modifié.
+- **Détails des taxes.** Dans la fenêtre de comparaison, **Détails des taxes…** montre chaque ligne de taxe, article par article : base, taux et montant **estimés** (XML généré) et **comparés** (fichier fourni), écart et pourcentage. Suivent un total par code de taxe et les taxes globales. Un taux différent ou une ligne absente d'un côté est signalé ; un total auquel il manque une ligne reste vide plutôt que faux. Le PDF de comparaison contient le même détail.
+
+### Recharger après une mise à jour
+
+Le bandeau du haut contient un bouton **Recharger**. Toutes les 5 secondes, AsyDec vérifie si les fichiers du programme ont changé sur l'ordinateur ; si c'est le cas, « Nouvelle version disponible → » s'affiche à côté du bouton. Après confirmation, AsyDec se ferme proprement (préférences enregistrées, import arrêté, base fermée) puis redémarre sur la nouvelle version ; la connexion est redemandée. Les saisies non enregistrées sont perdues, les XML, modèles et références sont conservés. Pendant un import de références, le rechargement est refusé.
+
+### Revoir le détail d'un dossier
+
+Dans **Modèles générés**, sélectionnez un dossier puis **Détails…** (ou double-clic). Dans la fiche, **Détails des taxes…** affiche chaque ligne de taxe estimée. Si le dossier a déjà été comparé, les taxes du dernier XML comparé sont affichées en face, à condition que ce fichier soit toujours au même endroit et non modifié. Sinon, la fenêtre l'indique et montre l'estimé seul.
+
+### Supprimer un modèle
+
+Dans **Modèles générés**, sélectionnez un modèle puis **Supprimer…**. Après confirmation et un motif facultatif, il disparaît de la liste. Rien n'est effacé : son XML exporté, les fichiers et son historique sont conservés, et la suppression y est datée. Pour le retrouver, choisissez le filtre **Supprimés**, sélectionnez-le puis **Restaurer**.
+
+Quand une plaque a été saisie (**Plaque…**), **Télécharger le XML…** l'inscrit dans le XML, aux deux champs du transport (`Departure_arrival_information/Identity` et `Border_information/Identity`). Seule cette valeur change, le reste du fichier est identique, et c'est cette version qui sert ensuite aux comparaisons. Sans plaque saisie, le XML est téléchargé tel quel. La génération depuis **Vérifier et générer** reprend toujours la plaque du XML de base.
+
+**Quel fichier XML déposer ?** La liste des modèles affiche, dans la colonne **Fichier XML généré**, le nom du dernier XML créé pour chaque modèle. La fiche (**Détails…**) donne son chemin complet et vérifie le fichier sur le disque : « présent et identique au XML généré », « introuvable » ou « MODIFIÉ depuis la génération » (en rouge). Dans ces deux derniers cas, ce n'est plus le bon fichier : retéléchargez-le avec **Télécharger le XML…**.
+
+### Plaque facultative à la génération
+
+À l'étape **Dossier**, le champ **Plaque à inscrire (facultatif)** permet de changer la plaque du camion pour cette déclaration, par exemple `T546ECQ/T618ECT`. **Vide**, le XML garde la plaque du dossier, comme avant. **Rempli**, la plaque est inscrite dans le XML généré, aux deux champs du transport. L'aperçu **Vérifier et générer** le signale (« Plaque inscrite dans le XML : … »), et le modèle conservé, sa fiche et ses PDF reprennent cette plaque. Le champ se vide à l'ouverture d'un autre dossier ; **Reprendre pour modifier** le pré-remplit avec la plaque du modèle repris.
+
+### Générer une autre répartition depuis l'étape Articles
+
+À l'étape **Articles**, **Générer une autre répartition** remplit le tableau avec une nouvelle proposition, aux mêmes totaux : poids total, FOB total et colis total des champs, ou ceux du dossier. Les poids sont des kilogrammes entiers, les FOB sont au centime, et les fourchettes et taxes sont contrôlées avant l'affichage. Une répartition déjà proposée ne revient pas. Recommencez autant de fois que nécessaire, puis **Vérifier →**. Rien n'est exporté tant que vous ne cliquez pas sur **Générer le XML**. Si le poids total saisi n'est pas un nombre entier (par exemple après **Reprendre la base**), corrigez-le ou utilisez **Ajuster au poids total…** d'abord. La plaque facultative de l'étape Dossier est conservée.
+
+Sous le tableau des articles, **Total taxes estimé** donne le total des taxes de la répartition affichée (articles + globales), recalculé à chaque modification et à chaque nouvelle répartition, avec le même calcul que **Vérifier et générer**. Il affiche « — » tant que le tableau est incomplet ou hors fourchettes.
+
+### Cocher les bons modèles ★
+
+Dans **Modèles générés**, sélectionnez un modèle qui vous semble bon puis **☆ Cocher bon modèle**. Une ★ apparaît dans la première colonne ; le même bouton (**★ Retirer la coche**) l'enlève. Le filtre **Bons modèles ★** les regroupe. La coche ne valide rien et ne change aucune règle : elle sert seulement à guider **Générer une autre répartition** (étape Articles). Pour un dossier qui a les mêmes articles qu'un ou plusieurs modèles cochés, l'outil tire plusieurs répartitions valides et retient celle dont les proportions de poids, FOB et colis ressemblent le plus à un bon modèle. Le message indique lequel et le pourcentage de ressemblance. Sans modèle coché pour ces articles, le tirage reste libre.
+
+### Revoir une comparaison à tout moment
+
+Chaque comparaison est enregistrée en entier dans l'historique du modèle : la répartition (poids, FOB, colis par article), les taxes par article, les taxes globales, le total des taxes, les taux et le détail ligne par ligne. Elle reste consultable même si le fichier comparé est déplacé ou supprimé ; ce fichier lui-même n'est pas copié.
+
+- Dans la liste **Modèles générés**, la colonne **Écart taxes comparé** donne le dernier écart du total des taxes (▲ le fichier comparé déclare plus, ▼ moins, = identique) et le nombre de comparaisons.
+- Dans la fiche (**Détails…**), **Comparaisons enregistrées…** les liste avec leurs totaux. Double-cliquez une ligne, ou **Revoir la comparaison**, pour rouvrir la fenêtre complète.
+- La fenêtre de comparaison montre, article par article, la répartition (« a → b » quand le fichier comparé diffère) et les taxes, puis les taxes des articles, les taxes globales et le **TOTAL DES TAXES**.
+
+Les comparaisons faites avant cette version n'ont que leurs totaux.
+
+### Où sont rangés les fichiers
+
+Chaque importateur a son dossier dans `DEC FRIPERIE`, à côté de `OUTILS` :
+
+| Sous-dossier | Contenu | Proposé par |
+|---|---|---|
+| `1 - HISTORIQUE` | XML générés | **Générer le XML** (automatique) |
+| `2 - VOS FICHIERS (bases et SYDONIA)` | XML de base et XML SYDONIA à comparer | **Comparer avec un XML…** |
+| `4 - XML VALIDES` | XML des modèles validés | **Télécharger le XML…** |
+| `5 - PDF` | PDF des modèles et des comparaisons | **Imprimer / Enregistrer en PDF…** |
+
+Les fenêtres d'enregistrement et d'ouverture s'ouvrent directement dans le bon sous-dossier, avec un nom proposé (plaque, importateur, FOB, poids). Vous pouvez toujours choisir un autre emplacement. Les sous-dossiers sont créés au besoin ; rien n'est déplacé, renommé ni supprimé. Le numéro 3 reste libre pour les dossiers existants comme `3 - A ESSAYER`. Dans **Modèles générés**, **Ouvrir le dossier** affiche le dossier de l'importateur du modèle sélectionné dans le Finder.

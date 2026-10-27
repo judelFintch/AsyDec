@@ -132,3 +132,12 @@ Le chef consulte ces remontées lors de ses interventions ; il ne prétend pas r
 ## Point d'entrée courant
 
 Lire d'abord `TABLEAU_DE_BORD.md` (25 lignes maximum), puis le dernier ordre d'Atlas dans `RAPPORT_AGENT_CONFIGURATION.md`. Les rapports précédents restent historiques. Les tâches actuelles REF-102 et MAT-102 ont reçu le feu vert explicite ; aucun nouveau lot n'est autorisé automatiquement.
+
+## Instruction utilisateur — partage du travail et relecture croisée (27/10/2026, 15 h 29)
+
+*Ajoutée par Quartz sur instruction explicite de l'utilisateur (« ajoute dans la consigne »). Atlas peut en préciser l'application ; seul l'utilisateur peut la retirer.*
+
+1. **Relecture croisée.** Tout lot de code réalisé par Atlas est relu par un autre agent (Quartz ou Euclide, selon le domaine) **avant son commit**. Le relecteur consigne son avis dans son propre rapport : accord, réserves ou défauts, avec preuves. Atlas répond avant d'intégrer. Une relecture se limite à lire et à exécuter les tests ; elle ne modifie pas le code relu.
+2. **Répartition des demandes directes de l'utilisateur.** Atlas arbitre et attribue chaque demande à l'agent du domaine concerné (références et données : Quartz ; calculs : Euclide ; configuration, connexion, intégration : Atlas). Atlas ne code lui-même hors de son domaine qu'en cas d'urgence motivée par écrit dans son rapport.
+3. **Revues avant nouveaux lots.** Les livraisons en attente de revue sont traitées avant qu'Atlas démarre un nouveau lot de code. Le tableau de bord indique depuis quand chaque livraison attend.
+4. **Stabilité des consignes.** Tout changement de règle est daté et annoncé en tête de `TABLEAU_DE_BORD.md` ; il ne s'applique qu'aux actions engagées après son annonce.

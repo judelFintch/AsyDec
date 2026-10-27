@@ -21,6 +21,7 @@ from ui.references import PageReferences
 from ui.mediatheque import PageMediatheque
 from ui.modeles_generes import PageModelesGeneres
 import base_references
+import rechargement
 
 PREFERENCES = local.CONFIGURATION / "preferences.json"
 ETAPES = [("dossier", "1   Dossier"), ("articles", "2   Articles"), ("verifier", "3   Vérifier et générer")]
@@ -41,6 +42,9 @@ class AsyDec(tk.Tk):
         super().__init__()
         self.utilisateur = utilisateur
         self.reconnexion = False
+        self.rechargement = False
+        self._empreinte_code = rechargement.empreinte()
+        self._minuteur_code = None
         self._fermeture = False
         self._preparations_reset = []
         self.session_verrouillee = False
@@ -97,6 +101,7 @@ class AsyDec(tk.Tk):
         self.bind_all('<ButtonPress>', self._activite, add='+')
         self.bind_all('<Motion>', self._activite, add='+')
         self._minuteur_session = self.after(1000, self._surveiller_session)
+        self._minuteur_code = self.after(5000, self._surveiller_code)
         if erreur_reglages:
             self.after_idle(lambda: messagebox.showwarning('Paramètres à vérifier', erreur_reglages, parent=self))
 
@@ -107,6 +112,11 @@ class AsyDec(tk.Tk):
         tk.Label(bandeau, text="AsyDec", font=(theme.POLICE, 17, "bold"), fg="white",
                  bg=theme.TEXTE).pack(side="left")
         theme.bouton(bandeau, 'Verrouiller', self.verrouiller).pack(side='right', padx=4)
+        self.recharger_bouton = theme.bouton(bandeau, 'Recharger', self.recharger)
+        self.recharger_bouton.pack(side='right', padx=4)
+        self.var_version = tk.StringVar(value='')
+        tk.Label(bandeau, textvariable=self.var_version, font=(theme.POLICE, 12, 'bold'), fg='#FBBF24',
+                 bg=theme.TEXTE).pack(side='right', padx=8)
         theme.bouton(bandeau, 'Paramètres', lambda: self.montrer('parametres')).pack(side='right', padx=4)
         self.var_bandeau = tk.StringVar(value="Aucun dossier ouvert  ·  ⌘O pour ouvrir un XML de base")
         tk.Label(bandeau, textvariable=self.var_bandeau, font=(theme.POLICE, 12), fg="#D1D5DB",
@@ -162,6 +172,8 @@ class AsyDec(tk.Tk):
             messagebox.showerror("XML de base", str(exc))
             return False
         self.base, self.info, self.reference, self.profil = chemin, info, chemin, profil
+        if "dossier" in getattr(self, "pages", {}):
+            self.pages["dossier"].var_plaque.set("")  # nouvelle base : plaque du XML par défaut
         recents = [chemin] + [p for p in self.prefs.get("recents", []) if p != chemin]
         if self.reglages['memoriser_recents']:
             self.prefs["recents"] = recents[:8]
@@ -182,6 +194,8 @@ class AsyDec(tk.Tk):
             'Le XML reste disponible dans la bibliothèque. Les originaux et fichiers exportés sont conservés.', parent=self):
             return False
         self.base = self.info = self.reference = self.profil = None
+        if "dossier" in getattr(self, "pages", {}):
+            self.pages["dossier"].var_plaque.set("")
         articles = self.pages['articles']
         if articles._attente:
             articles.after_cancel(articles._attente)
@@ -292,10 +306,15 @@ class AsyDec(tk.Tk):
             self.base, v["poids"], self.profil["ratios"], self.table_imp, registre,
             mode=v["mode"], fob_total=v["fob_total"], fob_saisis=v["fob"],
             colis_total=v["colis_total"], colis_saisis=v["colis"],
-            enregistrer=enregistrer, profil=self.profil)
+            enregistrer=enregistrer, profil=self.profil, plaque=AsyDec.plaque_saisie(self))
         if enregistrer:
             generer.ecrire_registre(registre)
         return res
+
+    def plaque_saisie(self):
+        """Plaque facultative de l'étape Dossier ; chaîne vide = plaque du XML de base."""
+        page = getattr(self, "pages", {}).get("dossier")
+        return page.var_plaque.get() if page is not None and hasattr(page, "var_plaque") else ""
 
     def _ecrire_prefs(self):
         try:
@@ -324,6 +343,9 @@ class AsyDec(tk.Tk):
         if self._minuteur_session is not None:
             self.after_cancel(self._minuteur_session)
             self._minuteur_session = None
+        if getattr(self, '_minuteur_code', None) is not None:
+            self.after_cancel(self._minuteur_code)
+            self._minuteur_code = None
         AsyDec.fermer_base_refs(self)  # appel explicite : fonctionne aussi sur un objet de test minimal
         self.destroy()
 
@@ -383,6 +405,28 @@ class AsyDec(tk.Tk):
         if not self._fermeture:
             self._minuteur_session = self.after(1000, self._surveiller_session)
 
+    def _surveiller_code(self):
+        """Toutes les 5 s, dans le fil Tkinter : signale qu'une nouvelle version est sur le disque."""
+        self._minuteur_code = None
+        if rechargement.empreinte() != self._empreinte_code:
+            self.var_version.set('Nouvelle version disponible →')
+        if not self._fermeture:
+            self._minuteur_code = self.after(5000, self._surveiller_code)
+
+    def recharger(self):
+        """Ferme proprement (préférences, import, base) puis main() relance le programme."""
+        if self.session_verrouillee:
+            return
+        if not messagebox.askyesno('Recharger AsyDec',
+                'Recharger la version du programme présente sur cet ordinateur ?\n\n'
+                'Les saisies et simulations non enregistrées seront perdues. Les XML, modèles '
+                'et références déjà enregistrés sont conservés. La connexion sera redemandée.', parent=self):
+            return
+        self.rechargement = True
+        self.quitter()
+        if not self._fermeture:  # fermeture refusée (import en cours) : on reste ici
+            self.rechargement = False
+
     def verrouiller(self):
         if self.session_verrouillee:
             return
@@ -417,5 +461,9 @@ def main():
             return
         app = AsyDec(utilisateur)
         app.mainloop()
+        if getattr(app, 'rechargement', False) is True:  # booléen strict : jamais de relance implicite
+            # Nouveau processus : tous les modules sont relus depuis le disque.
+            commande = rechargement.commande()
+            os.execv(commande[0], commande)
         if not app.reconnexion:
             return

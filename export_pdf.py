@@ -193,6 +193,10 @@ def pdf_modele(d, chemin, utilisateur, maintenant=None):
     doc = Document()
     doc.titre(f"Modèle validé n° {d['id']} · {d['importateur']}")
     doc.paragraphe(f"Proposition : {d['nom']} · créée le {date_locale(d['cree_utc'])} par {d['auteur']}")
+    doc.paragraphe(f"Plaque : {d.get('plaque') or '—'}", gras=True)
+    comparaisons = [date_locale(e['date_utc']) for e in d['evenements'] if e['action'] == 'comparaison']
+    doc.paragraphe(f"Comparé avec un XML : {len(comparaisons)} fois, dernière le {comparaisons[-1]}"
+                   if comparaisons else 'Comparé avec un XML : jamais')
     doc.paragraphe('Statut : Validé localement. ' + MENTION_MODELE, gras=True)
     if resume.get('taux') is not None:
         doc.paragraphe(f"Taux de change du XML de base : {nombre(resume['taux'], 4)} CDF")
@@ -216,10 +220,9 @@ def pdf_modele(d, chemin, utilisateur, maintenant=None):
     doc.espace(10)
     doc.paragraphe('Historique', 11, True)
     doc.espace(2)
-    from modeles_generes import STATUTS
-    doc.tableau([('Date', 14, 'w'), ('Auteur', 12, 'w'), ('Action', 16, 'w'), ('Détail', 58, 'w')],
-                [((date_locale(e['date_utc']), e['auteur'], STATUTS.get(e['statut'], e['action']), e['detail']), False)
-                 for e in d['evenements']])
+    from modeles_generes import resume_evenement
+    doc.tableau([('Date', 15, 'w'), ('Auteur', 12, 'w'), ('Événement', 73, 'w')],
+                [((date_locale(e['date_utc']), e['auteur'], resume_evenement(e)), False) for e in d['evenements']])
     return doc.enregistrer(chemin, _pied(utilisateur, MENTION_MODELE, maintenant))
 
 
@@ -232,6 +235,8 @@ def pdf_comparaison(rapport, chemin, utilisateur, maintenant=None):
                    f"Devise du XML généré : {rapport['devise_prevue'] or 'absente'} · devise fournie : {rapport['devise_fournie'] or 'absente'}\n"
                    f"Taux XML généré : 1 {rapport['devise_prevue'] or '?'} = {nombre(rapport.get('taux_genere'), 4)} CDF · "
                    f"taux fichier fourni : 1 {rapport['devise_fournie'] or '?'} = {nombre(rapport.get('taux_fourni'), 4)} CDF")
+    if rapport.get('plaque') or rapport.get('plaque_fournie'):
+        doc.paragraphe(f"Plaque : {rapport.get('plaque') or '—'} · plaque du fichier fourni : {rapport.get('plaque_fournie') or '—'}", gras=True)
     total = next((l for l in rapport['lignes'] if l['position'] == 'Total global' and l['metrique'] == 'taxes'), None)
     if total:
         doc.espace(4)
@@ -239,6 +244,11 @@ def pdf_comparaison(rapport, chemin, utilisateur, maintenant=None):
                        f"Total déclaration comparée : {nombre(total['fourni'], 2)} CDF\n"
                        f"Différence : {nombre(total['ecart'], 2)} CDF ({nombre(total['pourcentage'], 2)} %)", 11, True)
         doc.paragraphe('Taxes totales déclarées dans les deux XML.')
+        from comparaison_prediction import synthese_taxes
+        doc.espace(4)
+        doc.paragraphe('Ce qu’il faut retenir', 11, True)
+        for phrase in synthese_taxes(rapport)['phrases']:
+            doc.paragraphe(f'- {phrase}')
     globales = next((l for l in rapport['lignes'] if l['metrique'] == 'taxes_globales'), None)
     if globales:
         doc.espace(4)
@@ -258,6 +268,18 @@ def pdf_comparaison(rapport, chemin, utilisateur, maintenant=None):
     doc.tableau([('Position · Code', 13, 'w'), ('Mesure', 14, 'w'), ('XML généré', 13, 'e'),
                  ('Fichier fourni', 13, 'e'), ('Écart', 12, 'e'), ('Écart %', 8, 'e'),
                  ('Observation', 27, 'w')], lignes)
+    if rapport.get('taxes_detail'):
+        doc.paragraphe('Détails des taxes : estimé (XML généré) / comparé (fichier fourni)', 11, True)
+        doc.espace(2)
+        doc.tableau([('Art. · Code', 10, 'w'), ('Taxe', 6, 'w'), ('Base estimée', 11, 'e'), ('Base comparée', 11, 'e'),
+                     ('Taux est.', 7, 'e'), ('Taux comp.', 7, 'e'), ('Estimé', 11, 'e'), ('Comparé', 11, 'e'),
+                     ('Écart', 10, 'e'), ('Écart %', 6, 'e'), ('Observation', 14, 'w')],
+                    [(((f"{l['position']} · {l['article']}" if l['article'] else str(l['position'])), l['taxe'],
+                       nombre(l['base_estimee'], 2), nombre(l['base_comparee'], 2),
+                       nombre(l['taux_estime'], 3), nombre(l['taux_compare'], 3),
+                       nombre(l['estime'], 2), nombre(l['compare'], 2), nombre(l['ecart'], 2),
+                       nombre(l['pourcentage'], 2), l['etat']), l['position'] in ('Total', 'Globale'))
+                     for l in rapport['taxes_detail']])
     details = rapport['contexte'] + rapport['avertissements']
     if details:
         doc.paragraphe('Détails du contexte et des données', 11, True)
