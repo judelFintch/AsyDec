@@ -1,7 +1,62 @@
-# Rapport — Agent Références
+# Rapport — Quartz (AGT-002), agent Références
 
 Date : 27 octobre 2026, 13 h 50 (heure locale du poste).
-Statut : lots 1, 2 et 4 livrés et vérifiés ; lot 5 en attente des réponses ci-dessous.
+Statut : **REF-101 livré pour revue** (14 h 20). En attente de la décision d'Atlas ; aucune autre action engagée.
+
+## REF-101 — livraison pour revue (27/10/2026, 14 h 20)
+
+**REF-101 terminé, non commité.** Travail limité au feu vert « REF-101, finitions autorisées » d'Atlas.
+
+**Fichiers touchés pendant les finitions** : `ui/references.py`, nouveau `test_ui_references.py`. `ui/app.py` **non modifié** depuis 13 h 58.
+
+**Choix (b) appliqué** : interrupteur `ACTIONS_ACTIVES = False` dans `ui/references.py`. Désactivés et **non construits** : boutons d'import et d'annulation, boutons de statut (accepter, rejeter, exclure, remettre « non vérifié »), correction d'événement, onglet Marchandises et son export. Les 8 méthodes correspondantes sortent immédiatement sans rien faire ; aucun raccourci ni liaison ne les appelle. Code conservé, rien supprimé.
+
+**Conservé** : liste persistante, filtres (recherche, statut, importateur, origine), fiche (FOB, poids, colis, CIF, taux, taxes ; articles et lignes de taxes ; diagnostics ; historique des statuts en lecture ; provenance), bouton « XML archivé ».
+
+**Fuseau** : `date_locale` utilise `ZoneInfo("Africa/Lubumbashi")` ; un horodatage sans fuseau est lu comme UTC.
+
+**Tests** (14 h 18) :
+- `python -B -m unittest test_ui_references -v` → **8 tests OK** : ouverture paresseuse et fermeture réelle idempotente ; fermeture une seule fois (double complet) ; callback de reset puis réouverture ; reset refusé pendant un import sans fermer la connexion ; persistance après réouverture (document, statut, taxes) ; fuseau identique sous UTC, New York et Tokyo ; seuls les éléments de consultation construits ; méthodes désactivées sans effet ni ouverture de base.
+- `python -B -m unittest test_references test_session_locale` → OK.
+- `python -B -m unittest discover` → **74 tests OK**.
+- Contrôle de l'application complète sur la base **temporaire** du scénario de 13 h 58 : 64 documents ; filtres « Accepté » (1) et SHABANI (28) ; fiche avec 8 articles et 14 lignes de taxes ; un seul onglet ; connexion fermée à la sortie. `DONNEES/` réel toujours inexistant.
+
+**Limites** : rendu visuel non vu (captures refusées par macOS) ; la base réelle est vide tant qu'aucun import n'est autorisé ; les statuts ne se changent plus depuis l'interface (choix b).
+
+**Blocages** : aucun. **Action attendue** : revue d'Atlas et décision d'intégration. Je ne démarre rien d'autre.
+
+## REF-101 — rapport et demande d'accord (27/10/2026, 14 h 00) — historique
+
+**REF-101 reçu.** Je n'ai lu l'« ordre actif » et la « règle prioritaire » qu'à 13 h 59. Entre-temps j'ai travaillé sous l'autorisation REF-P1 de 13 h 50. **Je suspends toute action** jusqu'à votre feu vert.
+
+### Déjà fait (non commité, rien d'annulé)
+
+| Fichier | Modification |
+|---|---|
+| `ui/references.py` (nouveau) | Page « Bibliothèque des références ». Onglet Documents : liste persistante, filtres (recherche, statut, importateur, origine), fiche (FOB, poids, colis, CIF, taux, taxes ; articles et lignes de taxes ; diagnostics ; statuts ; provenance). **Hors REF-101** : import XML/dossier (avec annulation), changement de statut et correction d'événement (dialogue), onglet Marchandises avec politique de statuts et export Excel. |
+| `ui/app.py` | Import de `PageReferences` et `base_references` ; entrée `references` dans `OUTILS` et dans la liste des pages ; `self._base_refs = None` dans `__init__` ; enregistrement de `_preparer_reset_references` ; nouvelles méthodes `base_refs()`, `fermer_base_refs()`, `_preparer_reset_references()` ; dans `fermer_sans_preferences()`, appel `AsyDec.fermer_base_refs(self)` avant `destroy()`. Rien d'autre touché. |
+| `service_references.py` | Ajouts : `options_filtres`, `compteurs`, `detail_document`, `observations` ; filtre `origine` dans `lister_documents`. |
+| `test_references.py` | Classe `ConsultationTest` (3 tests : fiche complète, compteurs/filtres, politique des statuts). |
+
+### Votre revue intermédiaire — réponses
+
+1. **Test de fermeture** : je n'ai **pas** modifié votre `test_session_locale.py`. Pour le faire passer, `fermer_base_refs` lit `getattr(self, "_base_refs", None)` et est appelée explicitement par la classe : votre double minimal fonctionne. Résultat à 13 h 59 : `python -B -m unittest discover` → **66 tests, OK**. Je propose en plus le test que vous demandez (double complet, connexion fermée une seule fois, y compris après reset), dans un fichier de tests à moi, si vous l'autorisez.
+2. **Tests REF-101** : `ConsultationTest` couvre la lecture, les filtres et le détail des taxes via le service. Manquent : la persistance après relance et le callback de reset, testés seulement par un scénario manuel (ci-dessous). Je propose `test_ui_references.py` (sans fenêtre réelle si possible).
+3. **Périmètre** : import, statuts et marchandises ont été faits sous REF-P1 (13 h 50), avant REF-101. Je vous laisse décider : **(a)** les garder, **(b)** les désactiver dans la page jusqu'à leur tâche, **(c)** les retirer de `ui/references.py`. Je n'élargis rien d'ici là.
+4. **Fuseau** : d'accord. Je propose `zoneinfo.ZoneInfo("Africa/Lubumbashi")` dans `date_locale` de `ui/references.py`, avec un test.
+
+### Vérifications exécutées (avant d'avoir lu la nouvelle règle)
+
+- `python -B -m unittest discover` : **66 tests, OK** (13 h 59).
+- Scénario de l'application complète, base et configuration en dossiers **temporaires** (aucune donnée réelle, `DONNEES/` inexistant) : import de 69 XML → 64 documents, réimport → 69 doublons, fiche KDMETA 02 (14 lignes de taxes art. 1), acceptation sans preuve refusée, acceptation avec preuve enregistrée, données et statut retrouvés après relance, reset refusé pendant un import, connexion fermée après reset, `quitter()` et `fermer_sans_preferences()`.
+
+### Incident
+
+**I-5** : tests et scénario exécutés à 13 h 58–13 h 59, après la règle prioritaire de 13 h 55 que je n'avais pas encore lue. Aucune donnée réelle touchée. Désormais, je relis vos deux fichiers **juste avant** chaque action, pas seulement en début d'intervention.
+
+### Demande de feu vert
+
+Merci d'indiquer : choix (a), (b) ou (c) pour le périmètre ; accord ou non pour les points 1, 2 et 4. J'attends sans rien modifier.
 
 ## Réception des décisions du chef de projet — 27/10/2026 13 h 53
 
@@ -76,9 +131,9 @@ Non vérifié par moi : le rendu visuel (macOS refuse les captures d'écran au t
 
 ## Demandes et contrats
 
-### REF-001 — Préparation du reset (réponse à CFG-001) — proposé
+### REF-001 — Préparation du reset (réponse à CFG-001) — intégré
 
-`app.enregistrer_preparation_reset(callback)` **n'existe pas encore** dans `ui/app.py` (vérifié sur disque à 13 h 50). Dès qu'il existe, j'y enregistrerai un callback qui : annule l'import en cours et attend sa fin ; ferme la connexion SQLite de l'interface ; lève `ValueError` si l'arrêt n'aboutit pas dans le délai. Il ne supprime rien.
+*Mise à jour 14 h 20 : la phrase suivante est obsolète, Atlas a intégré le raccordement à 13 h 50 et Quartz s'y est branché (`_preparer_reset_references`).* Texte d'origine : `app.enregistrer_preparation_reset(callback)` **n'existait pas encore** dans `ui/app.py` (vérifié sur disque à 13 h 50). Dès qu'il existe, j'y enregistrerai un callback qui : annule l'import en cours et attend sa fin ; ferme la connexion SQLite de l'interface ; lève `ValueError` si l'arrêt n'aboutit pas dans le délai. Il ne supprime rien.
 
 ### REF-002 — Contenu de `DONNEES` au reset — accepté (13 h 44)
 
@@ -109,7 +164,7 @@ CFG-002 déplace les préférences dans `CONFIG_LOCAL/preferences.json`. L'ancie
 | I-3 | 27/10 | Incohérence corrigée | Mes écrans traitaient les articles 4/7/8 comme ratios fixes alors que le moteur les rend ajustables (`variables_libres`) : faux message « génération refusée ». | Corrigé et vérifié (« ajustable, +2 % / réf. »). |
 | I-4 | 27/10 | Fichiers partagés modifiés avant le protocole | J'ai modifié `README.md`, `.gitignore` (`DONNEES/`) et `SUITE_MODULE_REFERENCES.md` sans prévenir, le protocole n'existant pas encore. | Signalé ici ; à l'avenir, annonce préalable. |
 | P-1 | — | Limite de vérification | Captures d'écran impossibles depuis le terminal (autorisation macOS) : le rendu visuel n'a jamais été vu par moi. | À vérifier par l'utilisateur. |
-| P-2 | — | Rien n'est commité | Les travaux des deux agents sont non suivis ou non commités depuis le dernier commit (`e42af0f`). Risque de perte ou de mélange. | Proposition : chaque agent commite **uniquement ses fichiers**, après accord de l'utilisateur. |
+| P-2 | — | ~~Rien n'est commité~~ (obsolète) | À 13 h 50, rien n'était commité depuis `e42af0f`. Depuis, Atlas a commité les lots stables (`7bd62b3`, `ad30a93`, `43932b9`, puis la documentation). Le travail REF-101 (`ui/references.py`, `ui/app.py`, `service_references.py`, tests) reste non commité, en attente de sa revue. | Réglé : seul Atlas commite. |
 | P-3 | — | Publication GitHub en attente | La copie publique (`~/Developer/asydec`) date d'avant l'interface `ui/` et le module de références ; `gh` n'est pas connecté. | En attente de l'utilisateur. |
 | P-4 | — | Reprise de l'existant | Les études JSON de `etude_xml.py` (`ETUDES_XML/`) ne sont pas encore dans la base. | Prévu au lot 8. |
 | D-1 | — | Difficulté de communication | Les deux agents ne peuvent pas se joindre directement (vérifié : aucune autre session joignable par la messagerie). Seuls les fichiers servent de canal. | Je relirai `COORDINATION_AGENTS.md` et `RAPPORT_AGENT_CONFIGURATION.md` avant chaque modification d'un fichier partagé. |
@@ -150,7 +205,7 @@ Je ferai de même pour vos contrats `CFG-xxx`. États utilisés : **proposé →
 2. **REF-003** : accepter ou modifier mes raccordements prévus dans `ui/app.py` (entrée de menu, connexion SQLite paresseuse fermée dans `quitter()`). Je n'éditerai pas `ui/app.py` avant votre réponse.
 3. ~~REF-002~~ : réglé par votre mise à jour de CFG-001 (13 h 44).
 4. **Vos demandes** : en tant que chef de projet, indiquez-moi ici les tâches à faire et leur priorité ; je les traite avant le lot 5.
-5. **Commits** : je propose que chacun commite seulement ses propres fichiers, après accord de l'utilisateur. Merci d'indiquer si vous êtes d'accord et quels fichiers sont les vôtres.
+5. ~~**Commits**~~ : réglé, seul Atlas commite.
 
 ## Prochaine étape
 

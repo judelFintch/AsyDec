@@ -1,39 +1,48 @@
-# Demande d'intégration — équipe CAP AsyDec
+# Rapport MAT-101 — revue mathématique ciblée
 
 Date : 27 octobre 2026.
-Statut : proposition transmise, en attente de décision d'Atlas.
+Statut : tâche exécutée sur feu vert d'Atlas ; en attente de revue.
 
 ## Présentation
 
 - Session : assistant Copilot SDK dans VS Code, conversation actuelle.
-- Identifiant et nom d'équipe : à attribuer par Atlas ; je ne m'en attribue pas.
+- Identifiant et nom d'équipe : Euclide, AGT-003 (attribué par Atlas).
 - Rôle proposé : appui en analyse mathématique et validation des calculs.
 
-## Tâche demandée
+## Périmètre et vérification
 
-Examiner les calculs de ratios, répartitions, arrondis et scores afin d'identifier
-les cas limites à tester et de formuler des recommandations vérifiables. La première
-étape serait une revue et une proposition de tests ; aucune règle métier ni aucun
-code ne seraient modifiés sans accord explicite.
+Mandat MAT-101 : lecture de `moteur.py` et `variantes.py`, tests ciblés existants,
+puis jusqu'à trois cas limites reproductibles. Aucun code ni test n'a été modifié.
+Aucun XML réel ni donnée persistante n'a été utilisé.
 
-## Fichiers concernés
+Commande exécutée :
 
-Périmètre de lecture et, après accord seulement, tests ciblés :
+```text
+.venv/bin/python -B -m unittest test_generer test_variantes
+Ran 15 tests — OK
+```
 
-- `moteur.py`
-- `variantes.py`
-- `ratios.py`
-- `etude_xml.py`
-- tests mathématiques correspondants
+## Constats — deux cas reproductibles
 
-## Vérifications envisagées
+1. **Moyen — colis gradués, cas d'égalité et total minimal.**  
+   `moteur.colis_gradues([1]*8, [1]*8, 108)` lève `ValueError`, alors que
+   `[10,11,12,13,14,15,16,17]` est une répartition valide, distincte, d'au moins
+   10 colis par article et de somme 108. Le cas expose une limite de l'algorithme
+   de départage lorsque les parts sont égales.
 
-Après autorisation : exécuter les tests ciblés existants, proposer des cas limites
-reproductibles, puis rendre un bilan avec résultats et limites. Aucun import de
-données réelles, reset, commit ou changement de règles de calcul n'est demandé.
+2. **Moyen — ratios identiques au ratio global.**  
+   `variantes.generer(800, 800, 108, [1.0]*8, nombre=1)` lève `ValueError` :
+   la garde exige strictement `min(limites) < FOB/poids < max(limites)`. Ici,
+   les huit articles peuvent avoir chacun 100 kg et 100 USD ; la moyenne cible
+   égale exactement les ratios et les totaux sont cohérents. Le cas n'est pas
+   couvert par les 15 tests ciblés.
 
-## Décision attendue
+Les deux constats sont reproductibles en mémoire. Le premier provient d'un appel
+direct au répartiteur de colis ; le second de l'API de génération. Aucune correction
+ni proposition de modification du code n'est incluse dans ce mandat.
 
-Atlas est invité à accepter ou refuser la demande, attribuer un identifiant et un nom
-si elle est acceptée, et préciser la tâche prioritaire ainsi que le périmètre autorisé.
-Dans l'attente, aucune action sur le code ou les données du projet n'est engagée.
+## Suite attendue
+
+Atlas peut décider si ces cas doivent être transformés en tests et autoriser une
+tâche de correction distincte. Je n'engage pas d'autre modification ni test sans
+nouvelle consigne.

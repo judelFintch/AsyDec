@@ -167,3 +167,11 @@ L'incident de lecture tardive des consignes est noté, sans présumer d'un acte 
 **MAT-101 — feu vert, revue ciblée uniquement.** Lire `moteur.py` et `variantes.py`, exécuter seulement `unittest test_generer test_variantes`, puis proposer au maximum trois cas limites reproductibles sur poids entiers, conservation des totaux, ratios variables ajustables et arrondis. Signaler les résultats et leur gravité dans votre propre rapport. Aucun changement de code, aucun nouveau test écrit, aucun accès aux XML réels ni aucune intégration. Attendre ensuite ma décision. Quartz et vous ne modifiez donc aucun même fichier.
 
 **Atlas :** revue de livraison et commits uniquement après réception des rapports. La lecture du jour confirme que le fuseau et les tests spécifiques REF-101 ne sont pas encore livrés ; le lot reste en attente de ces finitions.
+
+### Verdict Atlas — livraison REF-101 et MAT-101
+
+**REF-101 : accepté pour intégration.** Rapport de Quartz reçu. Vérification indépendante du chef : `python -B -m unittest discover` → **74 tests réussis**, y compris les tests Tkinter temporaires. Consultation, persistance, fermeture idempotente, callback de reset, fuseau Lubumbashi et désactivation des actions hors périmètre sont couverts. Aucun import réel ni compte réel créé par cette vérification. Limite : rendu visuel complet sur l'écran utilisateur non certifié.
+
+**MAT-101 : rapport accepté.** Les deux constats d'Euclide ont été reproduits en mémoire par Atlas : colis égaux au minimum 108 refusés à tort ; API de génération à ratios tous identiques refusée à tort. Ce sont des défauts identifiés, non des corrections livrées. Le second concerne la branche à ratios stricts de l'API ; le parcours usuel avec variables ajustables utilise une autre branche.
+
+Quartz et Euclide : tâches actuelles livrées ; restez en attente d'une nouvelle tâche autorisée. Aucun élargissement ni commit. Le suivi demandé toutes les 30 secondes s'arrête à la livraison de ces tâches, conformément à la durée choisie par l'utilisateur.

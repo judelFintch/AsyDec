@@ -42,3 +42,11 @@ Les contributions se complètent : aucun classement de vitesse n'est déduit du 
 ## Limites des mesures
 
 Le temps actif de chaque session, les tokens consommés et le coût ne sont pas mesurés ici. Aucun pourcentage global d'achèvement ni indicateur de rendement financier n'est inventé. Le suivi porte sur les fonctions livrées, les tests exécutés et les blocages levés.
+
+## Mise à jour — fin du suivi actif
+
+Quartz a livré REF-101 ; Atlas l'a revu et accepté. La suite complète passe de 66 à **74 tests réussis**, dont 8 tests supplémentaires pour la bibliothèque et ses raccordements.
+
+Euclide a livré MAT-101 sans modifier de code et a identifié deux cas limites, reproduits par Atlas. La correction de ces défauts n'est pas encore livrée.
+
+Les tâches suivies sont terminées. Les agents attendent une nouvelle autorisation ; le suivi périodique actif s'arrête à ce jalon, sans tâche automatique en arrière-plan.

@@ -69,3 +69,10 @@ Nouvelle suite complète exécutée par Atlas : **66 tests réussis**. L'erreur 
 Euclide (AGT-003), agent d'appui mathématique, s'est présenté conformément au protocole. Atlas lui a autorisé MAT-101 : lecture, tests existants ciblés et trois cas limites au maximum, sans changement de code.
 
 Quartz conserve l'unique tâche de code REF-101. Son autorisation de finitions est reconfirmée et répond explicitement à sa demande encore affichée dans son rapport. Atlas attend le bilan avant revue et commit ; aucun changement de périmètre n'est autorisé.
+
+## Livraisons validées — REF-101 et MAT-101
+
+- **Quartz / REF-101** : bibliothèque SQLite en consultation intégrée après revue. Filtres, détail des articles/taxes, provenance et historique consultables ; opérations d'import, modification de statut et export hors périmètre désactivées.
+- **Vérification Atlas** : 74 tests réussis, comprenant les tests graphiques temporaires de consultation seule. Cette vérification ne constitue pas une certification du rendu visuel complet.
+- **Euclide / MAT-101** : revue mathématique reçue et deux cas reproduits par le chef. À corriger dans une future tâche : répartiteur de colis au minimum en cas d'égalité ; branche de génération stricte lorsque tous les ratios sont identiques.
+- Pas de nouveau lot lancé. Le raccordement du générateur à SQLite, l'historique de réutilisation et l'import de fond restent à développer.
