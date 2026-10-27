@@ -289,3 +289,19 @@ Catalogue commun ajouté dans `catalogue_xml.py` et sélecteur `ui/selection_xml
 Vérifications : six tests de catalogue ; contrôle ciblé de 16 tests réussi ; scénario graphique de partage entre quatre pages réussi (un document, statut non vérifié inchangé, aucun fichier redemandé) ; suite complète sur l'état de travail : **107 tests réussis**. Tous les imports de vérification et paramètres étaient temporaires. Le scénario a d'abord été corrigé pour fournir un chemin absolu au sélecteur de base ; aucun correctif de cette nature n'était nécessaire dans l'application, dont les dialogues fournissent déjà des chemins absolus.
 
 Aucun fichier réservé à Quartz ou Euclide n'a été modifié. Les travaux REF-103 et MAT-102 ne sont pas intégrés dans le commit UI-105. Les règles de décision fondées sur les observations acceptées restent une étape distincte du partage des fichiers.
+
+### UI-106 — fermeture et retrait des XML, Atlas
+
+Demande utilisateur : possibilité de supprimer un XML chargé. Première action indépendante : « Fermer le XML chargé » dans Dossier, sans suppression de fichier ni d'historique, avec confirmation des saisies perdues. La distinction entre fermeture seule et retrait de la liste partagée a été demandée à l'utilisateur ; aucun effacement réel de XML n'est exécuté.
+
+Fichiers réservés par Atlas : `ui/app.py`, `ui/etapes.py`, `ui/selection_xml.py`, `catalogue_xml.py` et tests dédiés si retrait demandé. Le schéma des références et ses historiques immuables ne seront pas supprimés.
+
+### UI-106 — livré par Atlas
+
+Choix utilisateur reçu : fermer le dossier et retirer le XML de la liste partagée, en conservant l'original. Deux commandes explicites : « Fermer le XML chargé » dans Dossier ; « Supprimer de la liste… » dans le sélecteur partagé, avec confirmation et fermeture du contexte actif concerné.
+
+Retrait logique persistant par empreinte dans `CONFIG_LOCAL/xml_retires.json` : pas de suppression SQL des historiques immuables, pas de changement de statut ni suppression d'archive/original/export. Copies identiques retirées du catalogue, cache des propositions vidé, analyses retirées des sélections. Rechargement volontaire via le catalogue rétablit le document existant sans doublon. Le reset archive aussi ce fichier de préférences. Les observations et archives restent consultables dans la bibliothèque pour l'historique : les futurs services de décision devront tenir compte des retraits du catalogue lorsqu'ils recherchent des références actives.
+
+Vérification : 17 tests ciblés, scénario graphique temporaire avec confirmation et suppression depuis le sélecteur, puis **113 tests réussis** sur l'état de travail. Aucun XML réel supprimé ; origine/archives/historique conservés et vérifiés. Nettoyage de l'import `variantes` dupliqué signalé par Quartz (sans changement de calcul).
+
+Fichiers de Quartz et d'Euclide non modifiés ni intégrés dans ce lot.

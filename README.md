@@ -191,3 +191,10 @@ jamais acceptation automatique. Les documents rejetés ou exclus ne sont pas
 proposés dans le catalogue destiné à la génération. Les anciens modèles sur disque
 restent accessibles. Cette étape partage les fichiers ; elle ne remplace pas encore
 le futur service de décision fondé sur les observations acceptées et leur contexte.
+
+### Fermer ou retirer un XML
+
+- Dans **Dossier**, « Fermer le XML chargé » vide le dossier actif et les saisies non enregistrées, sans retirer le document de la bibliothèque.
+- Dans **XML déjà disponibles…**, sélectionner un ou plusieurs fichiers puis « Supprimer de la liste… ». Après confirmation, ils disparaissent du catalogue partagé et des sélections d'analyse ; le dossier actif est fermé s'il utilise l'un d'eux.
+- Le retrait est conservé après redémarrage et s'applique aux copies identiques. Les originaux, exports et archives/historiques de la bibliothèque ne sont pas effacés.
+- Pour rendre un fichier retiré à nouveau disponible, le charger volontairement via « Ouvrir un nouveau XML » ou « Nouveaux XML ». Son historique et son statut antérieur sont conservés.

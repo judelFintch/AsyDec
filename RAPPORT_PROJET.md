@@ -88,3 +88,7 @@ La demande utilisateur de régénérer directement depuis « Vérifier et géné
 ## UI-105 — XML partagés entre les pages
 
 Le chargement répété d'un même XML n'est plus nécessaire : catalogue persistant commun et bouton « XML déjà disponibles… » dans les pages concernées. Un fichier ouvert comme dossier devient accessible aux analyses et aux répartitions ; les imports de la bibliothèque sont également réutilisables. Contenu dédoublonné et statuts préservés. Vérification indépendante : **107 tests réussis** sur l'état de travail, plus scénario graphique entre quatre pages sur base temporaire.
+
+## UI-106 — fermeture et retrait des XML
+
+Commandes disponibles pour fermer le dossier actif et supprimer des XML du catalogue partagé après confirmation. Retraits persistants, aucun effacement d'original/export ni purge d'historique. Rechargement volontaire possible sans doublon. Scénario graphique temporaire réussi et **113 tests réussis** sur l'état de travail. Les références SQL historiques sont conservées ; le futur moteur de décision devra distinguer ces documents des références encore actives dans le catalogue.

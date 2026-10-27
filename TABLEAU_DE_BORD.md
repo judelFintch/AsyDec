@@ -1,7 +1,7 @@
 # CAP AsyDec — tableau de bord actuel
 Date : 27 octobre 2026. Responsable : Atlas. Les anciens rapports servent d'historique.
 Objectif : données XML persistantes → références contrôlées → propositions → choix → export et suivi.
-Dernière suite sur état de travail : 107 tests réussis ; partage XML entre pages vérifié (UI-105).
+Dernière suite sur état de travail : 113 tests réussis ; fermeture et retrait XML vérifiés (UI-106).
 
 | Agent | Tâche autorisée | Livrable attendu |
 |---|---|---|
