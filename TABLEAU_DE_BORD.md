@@ -1,20 +1,20 @@
 # CAP AsyDec — tableau de bord actuel
-Date : 27 octobre 2026. Responsable : Atlas. Les anciens rapports servent d'historique.
-Objectif : données XML persistantes → références contrôlées → propositions → choix → export et suivi.
-Dernière suite sur état de travail : 113 tests réussis ; fermeture et retrait XML vérifiés (UI-106).
+Date : 27 octobre 2026. Responsable : Atlas.
+Règle utilisateur reçue : relecture croisée avant commit des lots Atlas ; revue des livraisons avant nouveaux lots.
+Objectif : références persistantes → propositions contrôlées → export XML → comparaison → suivi.
+Dernière suite : 167 tests réussis (UI-113). Cela ne lève pas les réserves ci-dessous.
 
-| Agent | Tâche autorisée | Livrable attendu |
+| Agent | Priorité | État / action |
 |---|---|---|
-| Quartz (AGT-002) | REF-103 livré, revue attendue | Activer les statuts avec preuve/motif/auteur, sans activer les exports. |
-| Euclide (AGT-003) | MAT-102 en revue | Interdire tout FOB nul dans la nouvelle branche homogène ; régression 9 kg / 0,01 USD. |
-| Atlas (AGT-001) | Revue, arbitrage et intégration | Vérifier les rapports et tests, puis commiter chaque lot séparément. |
+| Atlas | 1 | Revue REF-103, livré depuis 14 h 57, avant nouveau lot. |
+| Euclide | 1 | MAT-102 : corriger FOB nuls, cas 9 kg / 0,01 USD / ratio .003. GO ciblé confirmé. |
+| Quartz | 2 | Plan import médiathèque en fond et migration vers base commune ; lecture seule avant GO édition. |
+| Quartz | 3 | REF-104 Recharger retenu ; réservation ui/app.py à venir, reconnexion maintenue. |
+| Relais | Terminé | UI-108 à UI-113 livrés, relus, testés et commités ; audit architecture confirmé. |
 
-Autorisation détaillée : dernières sections de `RAPPORT_AGENT_CONFIGURATION.md`.
-Attendu de chaque contributeur : réception → travail dans son périmètre → rapport → attente de revue.
-Fichiers partagés : `ui/app.py` réservé aux raccordements autorisés de Quartz ; moteurs réservés à MAT-102.
-Commits : Atlas uniquement. Aucune publication ni import de données réelles par les agents.
-
-À suivre ensuite, pas encore autorisé : références SQLite du générateur,
-contrôle contextualisé des ratios variables, historique des utilisations/réutilisations et reprise des études.
-Ratios variables : restent ajustables ; aucun plafond arbitraire ajouté par ce mandat.
-Réserves : recette visuelle complète et acceptation effective SYDONIA non garanties par les tests.
+Alertes fondées : gros imports synchrones ; sauvegarde références omet la base modèles.
+Décision : base commune versionnée, migration sans perte à préparer, aucune suppression de données.
+Validation locale et acceptation douanière restent deux notions distinctes.
+Fichiers des contributeurs non commités restent réservés à leurs lots.
+Détails et réponses : dernière section RAPPORT_AGENT_CONFIGURATION.md.
+Canal externe : fichiers partagés, lus à la prochaine intervention des agents.
