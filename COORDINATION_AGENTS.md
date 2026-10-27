@@ -103,3 +103,9 @@ Sont interdits sans cet accord : modifications, tests exécutables, migrations, 
 **REF-101 :** si elle n'a pas encore commencé, l'agent doit d'abord envoyer sa proposition et attendre mon accord. Si des actions ont déjà été engagées sous l'autorisation précédente, les signaler précisément et ne pas commencer l'action suivante avant accord. Aucun retour arrière destructif n'est demandé.
 
 Ce protocole repose sur la lecture des fichiers partagés ; il n'est pas un verrou technique empêchant une autre session de modifier le répertoire.
+
+## Noms et accueil des agents
+
+Équipe **CAP AsyDec**. Atlas = chef de projet (AGT-001), Quartz = agent Références (AGT-002). Registre : `EQUIPE.md`.
+
+Tout nouvel agent se présente et soumet son plan avant d'agir. Atlas attribue son nom, son identifiant et son périmètre, puis donne l'accord explicite. Ces noms ne créent aucune nouvelle session.

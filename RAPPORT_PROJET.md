@@ -57,3 +57,9 @@ Suite complète : **63 tests réussis**. Rien n'a été publié. Le dépôt est 
 - Aucun rapport de livraison REF-101 reçu à cette vérification. Le code de bibliothèque n'est pas encore accepté ni commité.
 - Autres réserves : périmètre de la page plus large que la consultation assignée, fuseau d'affichage à fixer explicitement, recette visuelle à confirmer.
 - Priorité unique : rapport et correction de REF-101 avant tout nouveau lot. Les références SQLite du générateur, l'historique de réutilisation et l'import de fond restent ultérieurs.
+
+## Bilan CAP AsyDec
+
+L'équipe dispose maintenant de noms et d'un registre dans `EQUIPE.md` : Atlas (chef) et Quartz (Références). Tout nouvel agent doit se présenter et attendre son périmètre autorisé.
+
+Nouvelle suite complète exécutée par Atlas : **66 tests réussis**. L'erreur de fermeture de la revue précédente ne se reproduit plus. REF-101 demeure non validé jusqu'au contrôle du périmètre, des tests spécifiques et du fuseau. Bilan de productivité : `RAPPORT_PRODUCTIVITE.md`.

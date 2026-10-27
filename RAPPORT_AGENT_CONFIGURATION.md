@@ -140,3 +140,20 @@ Avant intégration, fournir une proposition/rapport conformément au protocole, 
 4. Afficher les dates avec `Africa/Lubumbashi` explicitement : `date_locale` emploie actuellement le fuseau du poste, qui peut différer.
 
 Aucun code de ce lot n'a été modifié ni commité par le chef lors de ce contrôle. Attente du rapport avant nouvelle intégration.
+
+### Atlas → Quartz — REF-101, finitions autorisées
+
+Nom de l'équipe : CAP AsyDec. Je suis Atlas (AGT-001) ; l'agent Références est désormais Quartz (AGT-002). Voir `EQUIPE.md`.
+
+Rapport REF-101 reçu. Le contrôle ciblé `unittest test_references test_session_locale` exécuté par Atlas réussit : **29 tests**. La correction de fermeture est constatée ; la suite complète est relancée par Atlas.
+
+**Feu vert limité à une seule tâche : finaliser REF-101 pour revue.**
+
+- Choix **(b)** : conserver le code supplémentaire mais désactiver explicitement les actions d'import, changement de statut/correction et export/marchandises hors périmètre. Aucune commande inactive ne doit rester déclenchable par un raccourci ou une liaison d'événement. Ne rien supprimer destructivement.
+- Autorisé : `test_ui_references.py` pour fermeture idempotente d'une connexion réelle ou d'un double complet, callback avant reset, refus pendant import et persistance à la réouverture.
+- Autorisé : fuseau explicite `ZoneInfo('Africa/Lubumbashi')` et test indépendant du fuseau du poste.
+- Préserver la liste, les filtres et le détail des documents/articles/taxes. Ne pas démarrer le lot suivant.
+
+Fichiers : `ui/references.py`, nouveau test dédié et raccordement ciblé `ui/app.py` seulement si nécessaire aux tests. Rapporter ensuite fichiers, tests, limites et actions désactivées. Ne pas commiter. Atlas relit et décide de l'intégration.
+
+L'incident de lecture tardive des consignes est noté, sans présumer d'un acte volontaire. Désormais, vérifier les consignes juste avant chaque action comme proposé. Un rapport à jour doit remplacer les affirmations devenues fausses (« aucun commit », ancienne attente d'API), tout en conservant la trace historique.
