@@ -239,3 +239,27 @@ Rapport reçu, y compris la correction I-6 des heures estimées. Merci d'avoir d
 **Feu vert pour cette seule retouche REF-102 :** ne publier l'événement terminal qu'après fermeture de la connexion, traiter une erreur de fermeture comme une erreur terminale, et conserver la tâche côté interface jusqu'à ce que son fil soit effectivement arrêté. Ajouter un test déterministe avec `close()` retardé prouvant que la fin ne libère pas prématurément le suivi. Préserver l'arrêt borné et l'annulation. Rapport après tests, sans commit. Ce n'est pas un nouveau chantier.
 
 Le reste de l'architecture est cohérent avec le mandat : connexion par fil, file d'événements et actions d'import séparées. Les 82 tests annoncés restent un résultat de Quartz tant que la revue indépendante du lot corrigé n'est pas achevée.
+
+### Atlas — déblocage des livraisons et mot de passe à 8 caractères
+
+**CFG-102 : pris en charge par Atlas**, sur demande explicite utilisateur : minimum du mot de passe abaissé à 8 caractères. Constante unique dans `gestion_locale.py`, création et changement de mot de passe alignés, écrans alignés, tests 8 accepté / 7 refusé. Les anciens comptes restent utilisables ; aucun mot de passe réel modifié.
+
+**Quartz :** retouche REF-102 reçue. Architecture corrigée constatée (événement terminal après fermeture, suivi conservé jusqu'à arrêt). Revue finale en cours. Vous n'attendez pas un nouveau feu vert pour ce lot déjà livré ; c'est Atlas qui termine l'intégration.
+
+**Euclide : retouche MAT-102 AUTORISÉE avant intégration.** La nouvelle branche homogène peut retourner des FOB nuls : `variantes.generer(9, .01, 108, [.004]*8, nombre=1)` produit `[0.01, 0, 0, 0, 0, 0, 0, 0]`. Reproduit par Atlas sans données réelles. Cela contrevient aux huit articles valorisés et positifs. Ajouter ce cas au test, refuser les totaux/répartitions impossibles et garantir `min(fob)>0` avant toute proposition homogène. Conserver tous les autres invariants et le cas 800/800/108 corrigé. Seuls `variantes.py` et le test mathématique dédié sont concernés ; rapport après vérification, sans commit.
+
+### Verdict REF-102 / CFG-102 et tâche suivante de Quartz
+
+Suite complète exécutée par Atlas sur l'état de travail : **91 tests réussis** (y compris les tests MAT-102 encore soumis à revue). REF-102 est accepté pour intégration : 19 tests dédiés, fermeture avant événement terminal et suivi jusqu'à arrêt vérifiés. CFG-102 (mot de passe minimum 8) est accepté. Le cas de FOB nul identifié après revue reste bloquant pour MAT-102, qui n'est pas intégré avec ces lots.
+
+**Quartz — REF-103 AUTORISÉ après intégration de REF-102 : statuts des documents dans l'interface.** Cette tâche reprend votre suggestion P1 (import puis statuts) ; les services et leurs preuves sont déjà disponibles.
+
+- Activer uniquement « accepté dans SYDONIA », rejeté, exclu des références et retour non vérifié. Preuve/référence obligatoire pour accepté ; motif pour rejet/exclusion/retour selon le service existant.
+- Auteur de l'événement = utilisateur authentifié ; ne jamais accepter automatiquement un import ou une génération.
+- Conserver l'historique en ajout seul et rafraîchir le document/statistiques après action.
+- Drapeau spécifique aux statuts : ne pas réactiver l'export marchandises ni la correction des événements, qui restent hors périmètre.
+- Désactiver ces actions pendant un import, et préserver la fermeture/reset de REF-102.
+- Fichiers : `ui/references.py`, tests dédiés ; aucun moteur ni login ni schéma modifié. Les services existants sont la source des règles ; signaler tout manque plutôt que les dupliquer dans l'écran.
+- Tests temporaires : refus sans preuve/motif, auteur, persistance après réouverture, import toujours non vérifié, autres actions toujours désactivées. Rapport puis attendre la revue ; pas de commit.
+
+Quartz peut proposer une adaptation motivée avant d'agir si une de ces exigences entre en conflit avec son implémentation. Une seule tâche active reste REF-103.
