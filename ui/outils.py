@@ -58,7 +58,7 @@ class PageRepartitions(ttk.Frame):
         ttk.Label(self, text="Détail de la proposition", style="Section.TLabel").pack(anchor="w", pady=(14, 6))
         cadre, self.detail = theme.tableau(self, [
             ("art", "Art.", 50, "center"), ("poids", "Poids kg", 110, "e"), ("fob", "FOB USD", 110, "e"),
-            ("colis", "Colis", 80, "e"), ("ratio", "Ratio", 90, "e"), ("regle", "Contrôle", 220, "w")], 9)
+            ("colis", "Colis", 80, "e"), ("ratio", "Ratio FOB/kg", 110, "e"), ("regle", "Contrôle", 220, "w")], 9)
         cadre.pack(fill="both", expand=True)
 
     def afficher(self):

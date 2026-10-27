@@ -315,3 +315,7 @@ Validation : 12 tests catalogue dont positions 1/4, archive réutilisable et exc
 ### UI-108 — adoption depuis la médiathèque, déléguée à Relais
 
 Périmètre proposé puis GO Atlas avant modification. Relais a modifié uniquement PageRepartitions et ajouté test_adoption_repartition.py. Sans dossier actif, la base compatible de la simulation est proposée avec confirmation importateur/référence/taux/fret/assurance. Alternative autre archive existante et annulation disponibles. Disponibilité génération et signature contrôlées avant ouverture. Atlas a relu le diff et relancé les 25 tests ciblés : réussis. Pas de recette graphique sur ce lot. Aucun changement Quartz/Euclide intégré.
+
+### UI-109 — ratios visibles dans les propositions
+
+Relais, périmètre approuvé avant édition : ratio FOB/kg par article ajouté à Vérifier et générer, quatre décimales, recalcul à chaque aperçu et régénération ; totaux sans ratio. Intitulé existant clarifié dans Répartitions. Atlas a relu et relancé 16 tests ciblés réussis (affichage, adoption, régénération). Pas de recette graphique de ce lot. Aucun fichier tiers intégré.

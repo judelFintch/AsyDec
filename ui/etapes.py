@@ -408,7 +408,8 @@ class PageVerifier(ttk.Frame):
 
         cadre, self.tableau = theme.tableau(self, [
             ("art", "Art.", 50, "center"), ("nom", "Marchandise", 260, "w"), ("poids", "Poids kg", 100, "e"),
-            ("fob", "FOB USD", 110, "e"), ("colis", "Colis", 70, "e"), ("cif", "CIF CDF", 140, "e"),
+            ("fob", "FOB USD", 110, "e"), ("ratio", "Ratio FOB/kg", 110, "e"),
+            ("colis", "Colis", 70, "e"), ("cif", "CIF CDF", 140, "e"),
             ("taxes", "Taxes CDF", 130, "e")], 10)
         cadre.pack(fill="both", expand=True)
 
@@ -504,13 +505,14 @@ class PageVerifier(ttk.Frame):
         noms = res["info"]["designations"]
         for k, a in enumerate(r["articles"]):
             nom = (noms[k] if k < len(noms) else "") or generer.ARTICLES[k]
+            ratio = nombre(a["fob"] / a["poids"], 4) if a["poids"] > 0 else "—"
             self.tableau.insert("", "end", values=(k + 1, nom, nombre(a["poids"]), nombre(a["fob"], 2),
-                                                   int(res["colis"][k]), nombre(a["cif"]), nombre(a["taxes"])))
+                                                   ratio, int(res["colis"][k]), nombre(a["cif"]), nombre(a["taxes"])))
         self.tableau.insert("", "end", tags=("total",), values=(
-            "", "Total articles", nombre(r["poids"]), nombre(r["fob"], 2), int(sum(res["colis"])),
+            "", "Total articles", nombre(r["poids"]), nombre(r["fob"], 2), "", int(sum(res["colis"])),
             nombre(r["cif"]), nombre(r["taxes_articles"])))
         self.tableau.insert("", "end", tags=("total",), values=(
-            "", "Taxes globales", "", "", "", "", nombre(r["taxes_globales"])))
+            "", "Taxes globales", "", "", "", "", "", nombre(r["taxes_globales"])))
 
     def enregistrer(self):
         if not self.resultat:
