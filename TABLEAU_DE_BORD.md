@@ -1,12 +1,12 @@
 # CAP AsyDec — tableau de bord actuel
 Date : 27 octobre 2026. Responsable : Atlas. Les anciens rapports servent d'historique.
 Objectif : données XML persistantes → références contrôlées → propositions → choix → export et suivi.
-Dernière suite sur état de travail : 91 tests réussis ; REF-102 et mot de passe 8 validés, MAT-102 en revue.
+Dernière suite sur état de travail : 107 tests réussis ; partage XML entre pages vérifié (UI-105).
 
 | Agent | Tâche autorisée | Livrable attendu |
 |---|---|---|
-| Quartz (AGT-002) | REF-103 autorisé après REF-102 validé | Activer les statuts avec preuve/motif/auteur, sans activer les exports. |
-| Euclide (AGT-003) | MAT-102 : dernière retouche autorisée | Interdire tout FOB nul dans la nouvelle branche homogène ; régression 9 kg / 0,01 USD. |
+| Quartz (AGT-002) | REF-103 livré, revue attendue | Activer les statuts avec preuve/motif/auteur, sans activer les exports. |
+| Euclide (AGT-003) | MAT-102 en revue | Interdire tout FOB nul dans la nouvelle branche homogène ; régression 9 kg / 0,01 USD. |
 | Atlas (AGT-001) | Revue, arbitrage et intégration | Vérifier les rapports et tests, puis commiter chaque lot séparément. |
 
 Autorisation détaillée : dernières sections de `RAPPORT_AGENT_CONFIGURATION.md`.

@@ -275,3 +275,17 @@ Contrat : mêmes totaux, même dossier et références ; poids entiers ; nouvell
 Bouton « Régénérer un autre modèle » ajouté directement à l'étape 3 « Vérifier et générer ». La recherche conserve le dossier, la référence et les trois totaux, impose les poids entiers et exclut les répartitions déjà affichées dans ce contexte. L'aperçu et le tableau Articles sont mis à jour uniquement après validation complète sans écriture XML. En cas d'absence de solution ou d'erreur de recalcul, l'ancien modèle reste inchangé.
 
 Vérification : 5 tests unitaires dédiés réussis. Scénario graphique temporaire exécuté par Atlas : bouton visible/activable, nouvelle répartition différente, mêmes totaux, poids entiers et aucun XML créé. XML de référence lu sans modification. Aucun fichier de Quartz ou d'Euclide touché.
+
+### UI-105 — partage des XML entre pages, pris par Atlas
+
+Demande utilisateur : éviter de redemander le même fichier sur plusieurs pages. Je reprends la proposition P4 de Quartz, sous forme d'une première étape sans supprimer les pages : catalogue partagé appuyé sur les archives SQLite, sélection « XML déjà disponibles » et enregistrement des chargements hors bibliothèque. Les statuts ne sont pas modifiés par la réutilisation ; dossier et référence restent choisis explicitement.
+
+Réservation : `ui/app.py`, `ui/outils.py`, `ui/etapes.py`, nouveaux `catalogue_xml.py`, `ui/selection_xml.py` et tests dédiés. Quartz ne modifie pas ces fichiers pendant UI-105 ; sa page `ui/references.py` n'est pas touchée. Aucun schéma ni service métier de références modifié ; moteurs laissés à Euclide.
+
+### UI-105 — livré et vérifié par Atlas
+
+Catalogue commun ajouté dans `catalogue_xml.py` et sélecteur `ui/selection_xml.py`. Les chargements hors bibliothèque sont enregistrés via le service d'import existant ; le même contenu conserve son document et son statut. Les copies SQLite et les anciens modèles deviennent sélectionnables dans Dossier, Répartitions, Études et Ratios, sans nouveau sélecteur de fichier externe. Les noms originaux restent affichés. Les documents rejetés/exclus ne sont pas réintroduits par une ancienne copie dans le catalogue de génération.
+
+Vérifications : six tests de catalogue ; contrôle ciblé de 16 tests réussi ; scénario graphique de partage entre quatre pages réussi (un document, statut non vérifié inchangé, aucun fichier redemandé) ; suite complète sur l'état de travail : **107 tests réussis**. Tous les imports de vérification et paramètres étaient temporaires. Le scénario a d'abord été corrigé pour fournir un chemin absolu au sélecteur de base ; aucun correctif de cette nature n'était nécessaire dans l'application, dont les dialogues fournissent déjà des chemins absolus.
+
+Aucun fichier réservé à Quartz ou Euclide n'a été modifié. Les travaux REF-103 et MAT-102 ne sont pas intégrés dans le commit UI-105. Les règles de décision fondées sur les observations acceptées restent une étape distincte du partage des fichiers.

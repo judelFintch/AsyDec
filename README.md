@@ -173,3 +173,21 @@ Les données locales sont exclues de Git. `MODELES_XML` contient les modèles de
 Tests : `.venv/bin/python -B -m unittest discover`.
 Dans l'ancienne interface, le bouton Refresh recharge le code local et réinitialise les
 saisies non enregistrées.
+
+## Réutiliser un XML entre les pages
+
+Un XML ouvert comme dossier ou ajouté depuis les pages Ratios, Études ou Modèles
+est également conservé dans la bibliothèque SQLite. Les imports faits depuis la
+bibliothèque sont disponibles aux autres pages via **« XML déjà disponibles… »**.
+Il n'est plus nécessaire de sélectionner à nouveau le fichier sur le disque.
+
+- **Dossier** : choisir un XML déjà disponible pour ouvrir le dossier, ou charger un nouveau fichier.
+- **Répartitions** : les XML partagés compatibles peuvent servir de modèles ; une sélection de modèles est possible.
+- **Récupération des ratios / Étude des XML** : sélectionner un ou plusieurs XML déjà disponibles.
+
+Les copies archivées restent utilisables si les fichiers originaux sont déplacés.
+Un contenu identique conserve un seul document et son statut : le partage ne vaut
+jamais acceptation automatique. Les documents rejetés ou exclus ne sont pas
+proposés dans le catalogue destiné à la génération. Les anciens modèles sur disque
+restent accessibles. Cette étape partage les fichiers ; elle ne remplace pas encore
+le futur service de décision fondé sur les observations acceptées et leur contexte.

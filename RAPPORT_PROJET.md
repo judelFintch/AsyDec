@@ -84,3 +84,7 @@ Quartz conserve l'unique tâche de code REF-101. Son autorisation de finitions e
 ## UI-104 — régénération à l'étape 3
 
 La demande utilisateur de régénérer directement depuis « Vérifier et générer » est réalisée. Le bouton calcule un autre aperçu avec les mêmes totaux et références ; aucune écriture XML n'a lieu avant le bouton de génération. Cinq tests ciblés et un scénario graphique temporaire sont réussis. Les exports antérieurs restent intacts et la proposition actuelle est conservée si la recherche échoue.
+
+## UI-105 — XML partagés entre les pages
+
+Le chargement répété d'un même XML n'est plus nécessaire : catalogue persistant commun et bouton « XML déjà disponibles… » dans les pages concernées. Un fichier ouvert comme dossier devient accessible aux analyses et aux répartitions ; les imports de la bibliothèque sont également réutilisables. Contenu dédoublonné et statuts préservés. Vérification indépendante : **107 tests réussis** sur l'état de travail, plus scénario graphique entre quatre pages sur base temporaire.
