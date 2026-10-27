@@ -9,6 +9,7 @@ from tkinter import filedialog, messagebox, simpledialog, ttk
 import generer
 import moteur
 import variantes
+import variantes
 from ui import theme
 from ui.theme import nombre
 
@@ -367,6 +368,7 @@ class PageVerifier(ttk.Frame):
         super().__init__(parent)
         self.app = app
         self.resultat = self.fichier = None
+        self.deja_vues = {}
         theme.entete_page(self, "Vérifier et générer", "Aperçu complet de la déclaration. Rien n'est enregistré "
                           "avant « Générer le XML ».")
         self.message = theme.Message(self)
@@ -387,6 +389,8 @@ class PageVerifier(ttk.Frame):
         barre = pied(self)
         self.generer = theme.bouton(barre, "Générer le XML", self.enregistrer, principal=True)
         self.generer.pack(side="right")
+        self.regenerer_bouton = theme.bouton(barre, "Régénérer un autre modèle", self.regenerer)
+        self.regenerer_bouton.pack(side="left")
         self.finder = theme.bouton(barre, "Afficher dans le Finder", self.afficher_fichier)
         theme.bouton(barre, "←  Modifier les articles", lambda: app.montrer("articles")).pack(side="right", padx=8)
 
@@ -405,18 +409,77 @@ class PageVerifier(ttk.Frame):
             self.resultat = None
             self.message.afficher("erreur", "Déclaration impossible en l'état", [str(exc)])
             self.generer.configure(state="disabled")
+            self.regenerer_bouton.configure(state="disabled")
             for carte in self.cartes.values():
                 carte.definir("—")
             self.var_fichier.set("")
             return
+        self._presenter(res)
+
+    def _presenter(self, res):
         self.resultat = res
+        self.tableau.delete(*self.tableau.get_children())
         self._montrer(res)
+        self.deja_vues.setdefault(self._contexte_regeneration(res), set()).add(
+            variantes.cle_variante(self._repartition(res)))
+        self.regenerer_bouton.configure(state="normal")
         self.generer.configure(state="normal", text="Générer le XML")
         if res["alertes"]:
             self.message.afficher("alerte", f"{len(res['alertes'])} point(s) à vérifier avant de générer",
                                   ["•  " + a for a in res["alertes"]])
         else:
             self.message.afficher("ok", "Aucune alerte  ·  la déclaration peut être générée")
+
+    @staticmethod
+    def _repartition(res):
+        return {"poids": [a["poids"] for a in res["resume"]["articles"]],
+                "fob": res["fob"], "colis": res["colis"]}
+
+    def _contexte_regeneration(self, res):
+        profil = self.app.profil
+        return (self.app.base, self.app.reference, res["resume"]["poids"],
+                round(res["resume"]["fob"], 2), sum(res["colis"]),
+                tuple(profil["bornes"]), bool(profil.get("variables_libres")))
+
+    def regenerer(self):
+        """Propose un autre aperçu avec les mêmes totaux, sans exporter de fichier."""
+        if not self.resultat or self.app.session_verrouillee:
+            return
+        ancien = self.resultat
+        self.regenerer_bouton.configure(state="disabled")
+        self.update_idletasks()
+        try:
+            cle = self._contexte_regeneration(ancien)
+            vues = self.deja_vues.setdefault(cle, set())
+            vues.add(variantes.cle_variante(self._repartition(ancien)))
+            profil = self.app.profil
+            total_poids, total_fob = ancien["resume"]["poids"], ancien["resume"]["fob"]
+            total_colis = sum(ancien["colis"])
+            propositions = variantes.generer(total_poids, total_fob, total_colis, profil["ratios"],
+                nombre=1, profil=profil, exclure=vues)
+            v = propositions[0]
+            if variantes.cle_variante(v) in vues:
+                raise ValueError("La recherche n'a pas trouvé de nouvelle répartition.")
+            if (sum(v["poids"]) != total_poids or round(sum(v["fob"]), 2) != round(total_fob, 2)
+                    or sum(v["colis"]) != total_colis):
+                raise ValueError("La proposition ne respecte pas les totaux demandés.")
+            variantes.controler(v, profil)
+            # Vérification complète avant de toucher aux valeurs du tableau.
+            res = generer.produire(self.app.base, v["poids"], profil["ratios"], self.app.table_imp,
+                generer.lire_registre(), mode="SAISI", fob_total=total_fob, fob_saisis=v["fob"],
+                colis_total=total_colis, colis_saisis=v["colis"], enregistrer=False, profil=profil)
+        except Exception as exc:
+            messagebox.showinfo("Proposition actuelle conservée", str(exc), parent=self)
+            return
+        finally:
+            self.regenerer_bouton.configure(state="normal")
+        self.app.pages["articles"].remplir(v["poids"], v["fob"], v["colis"], mode="SAISI")
+        self.fichier = None
+        self.finder.pack_forget()
+        self._presenter(res)
+        if not res["alertes"]:
+            self.message.afficher("ok", "Nouvelle proposition calculée — mêmes totaux, rien d'exporté",
+                ["Vérifiez les articles et les taxes. Vous pouvez régénérer ou choisir « Générer le XML »."])
 
     def _montrer(self, res):
         r = res["resume"]
