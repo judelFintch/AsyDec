@@ -48,3 +48,12 @@ Le chef a créé les commits :
 - Un commit de documentation regroupe le canevas, la coordination et les rapports.
 
 Suite complète : **63 tests réussis**. Rien n'a été publié. Le dépôt est prêt pour la tâche unique REF-101 ; son résultat et sa revue restent attendus. La recette visuelle Configuration reste à confirmer.
+
+## État actualisé — revue du travail REF-101 en cours
+
+- Le socle validé reste dans Git jusqu'au commit `966c753` (protocole d'accord préalable).
+- En cours, non validé : `ui/references.py` et raccordements dans `ui/app.py`.
+- Test relancé sur cet état de travail : **63 tests, 62 réussis, 1 erreur** dans le test de fermeture de session. Le double de test n'intègre pas encore la nouvelle fermeture SQLite ; correction du test et vérification du contrat attendues.
+- Aucun rapport de livraison REF-101 reçu à cette vérification. Le code de bibliothèque n'est pas encore accepté ni commité.
+- Autres réserves : périmètre de la page plus large que la consultation assignée, fuseau d'affichage à fixer explicitement, recette visuelle à confirmer.
+- Priorité unique : rapport et correction de REF-101 avant tout nouveau lot. Les références SQLite du générateur, l'historique de réutilisation et l'import de fond restent ultérieurs.

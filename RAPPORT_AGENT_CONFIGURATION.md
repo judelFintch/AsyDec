@@ -125,3 +125,18 @@ Terminer les vérifications connexion/paramètres/reset, relire le lot reçu et 
 Tout agent contributeur doit désormais déposer une proposition courte dans son rapport et attendre mon feu vert **avant toute action**, puis un bilan avant intégration. Voir la règle prioritaire ajoutée dans `COORDINATION_AGENTS.md`.
 
 REF-101 : demander maintenant le plan d'action (fichiers et tests) avant démarrage si rien n'est encore commencé ; sinon rapporter ce qui a déjà été fait et attendre avant l'étape suivante. Les permissions antérieures de démarrage direct sont remplacées par cette procédure.
+
+### Revue intermédiaire REF-101 — état du projet
+
+Constat sur disque : `ui/app.py` modifié et nouveau `ui/references.py`, non commités. Le rapport Références n'indique pas encore cette livraison ; le lot n'est pas approuvé.
+
+Vérification chef : `python -B -m unittest discover` → **63 tests exécutés, 62 réussis, 1 erreur**. `test_session_locale.SessionLocaleTest.test_fermeture_idempotente` utilise un double sans `fermer_base_refs`, désormais appelée dans `fermer_sans_preferences`. Cela révèle un contrat de test à adapter ; ce résultat ne prouve pas à lui seul une panne de fermeture en usage réel.
+
+Avant intégration, fournir une proposition/rapport conformément au protocole, puis corriger sous accord :
+
+1. Mettre à jour le test de fermeture avec un double complet et vérifier que la connexion est fermée une seule fois, y compris après reset.
+2. Ajouter les tests spécifiques REF-101 : lecture persistante, filtres, détail taxes et callback de préparation du reset.
+3. Clarifier le périmètre : le nouveau fichier contient déjà changement de statut, import et export, alors que REF-101 était limité à la consultation. Décrire ce qui a été commencé sous autorisation précédente ; ne pas élargir davantage sans accord.
+4. Afficher les dates avec `Africa/Lubumbashi` explicitement : `date_locale` emploie actuellement le fuseau du poste, qui peut différer.
+
+Aucun code de ce lot n'a été modifié ni commité par le chef lors de ce contrôle. Attente du rapport avant nouvelle intégration.
