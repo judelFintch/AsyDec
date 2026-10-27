@@ -12,8 +12,13 @@ registre.json
 MODELES_XML/
 ETUDES_XML/
 SIMULATIONS/
+DONNEES/
 
 # Local settings and operating system files
 .env
 .env.*
 .DS_Store
+
+# Local administrator credentials, preferences, and reset recovery archives
+CONFIG_LOCAL/
+SAUVEGARDES/
