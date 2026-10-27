@@ -29,7 +29,7 @@ def demander_connexion(parent=None):
     ttk.Label(cadre, text='Identifiant').pack(anchor='w', pady=(15, 3))
     entree_id = ttk.Entry(cadre, textvariable=identifiant)
     entree_id.pack(fill='x')
-    ttk.Label(cadre, text='Mot de passe' + (' — 12 caractères minimum' if creation else '')).pack(anchor='w', pady=(12, 3))
+    ttk.Label(cadre, text='Mot de passe' + (f' — {local.MIN_MOT_DE_PASSE} caractères minimum' if creation else '')).pack(anchor='w', pady=(12, 3))
     entree_mdp = ttk.Entry(cadre, textvariable=mot_de_passe, show='•')
     entree_mdp.pack(fill='x')
     if creation:

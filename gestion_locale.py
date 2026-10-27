@@ -17,6 +17,7 @@ import time
 
 RACINE = Path(__file__).resolve().parent
 CONFIGURATION = RACINE / 'CONFIG_LOCAL'
+MIN_MOT_DE_PASSE = 8
 ITERATIONS = 600_000
 MAX_ECHECS = 5
 DELAI_BLOCAGE = 60
@@ -72,8 +73,8 @@ def _lire_compte(configuration=None):
 
 
 def _verifier_mot_de_passe(mot_de_passe):
-    if not isinstance(mot_de_passe, str) or len(mot_de_passe) < 12:
-        raise ErreurCompte('Choisissez un mot de passe d’au moins 12 caractères.')
+    if not isinstance(mot_de_passe, str) or len(mot_de_passe) < MIN_MOT_DE_PASSE:
+        raise ErreurCompte(f'Choisissez un mot de passe d’au moins {MIN_MOT_DE_PASSE} caractères.')
 
 
 def _empreinte(mot_de_passe, sel):

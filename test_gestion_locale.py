@@ -41,6 +41,19 @@ class GestionLocaleTest(unittest.TestCase):
             local.creer_compte('admin', 'court', autre)
         self.assertFalse(local.compte_existe(autre))
 
+    def test_creation_accepte_8_caracteres_et_refuse_7(self):
+        autre = self.racine / 'compte-8'
+        local.creer_compte('admin8', 'abcdefgh', autre)
+        self.assertTrue(local.authentifier('admin8', 'abcdefgh', autre))
+        with self.assertRaisesRegex(local.ErreurCompte, '8 caractères'):
+            local.creer_compte('admin7', 'abcdefg', self.racine / 'compte-7')
+
+    def test_changement_accepte_8_caracteres_et_refuse_7(self):
+        with self.assertRaisesRegex(local.ErreurCompte, '8 caractères'):
+            local.changer_mot_de_passe(MDP, 'abcdefg', self.config)
+        local.changer_mot_de_passe(MDP, 'abcdefgh', self.config)
+        self.assertTrue(local.authentifier('Administrateur', 'abcdefgh', self.config))
+
     def test_blocage_temporaire_persistant(self):
         for _ in range(5):
             self.assertFalse(local.authentifier('Administrateur', 'faux', self.config, maintenant=1000))

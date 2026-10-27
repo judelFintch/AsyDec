@@ -45,7 +45,7 @@ class PageParametres(ttk.Frame):
         ttk.Label(compte, text='Administrateur : ' + app.utilisateur, style='Section.TLabel').pack(anchor='w')
         ttk.Label(compte, text='Changer le mot de passe', style='Section.TLabel').pack(anchor='w', pady=(20, 6))
         self.ancien, self.nouveau, self.confirmer = tk.StringVar(), tk.StringVar(), tk.StringVar()
-        for titre, variable in (('Mot de passe actuel', self.ancien), ('Nouveau mot de passe — 12 caractères minimum', self.nouveau), ('Confirmer le nouveau mot de passe', self.confirmer)):
+        for titre, variable in (('Mot de passe actuel', self.ancien), (f'Nouveau mot de passe — {local.MIN_MOT_DE_PASSE} caractères minimum', self.nouveau), ('Confirmer le nouveau mot de passe', self.confirmer)):
             ttk.Label(compte, text=titre).pack(anchor='w', pady=(10, 3))
             ttk.Entry(compte, textvariable=variable, show='•', width=45).pack(anchor='w')
         theme.bouton(compte, 'Changer le mot de passe', self.changer_mdp, principal=True).pack(anchor='w', pady=15)
