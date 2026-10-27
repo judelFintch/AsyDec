@@ -6,6 +6,7 @@ CAP : Contrôle, Analyse, Production.
 |---|---|---|---|
 | AGT-001 | Atlas | Codex, conversation principale | Chef de projet : arbitrage, configuration, revue, intégration et commits. |
 | AGT-002 | Quartz | Claude Code `outils-65` / `19dadd` (identité déclarée dans son rapport) | Références XML, données SQLite, consultation et analyse. |
+| AGT-003 | Euclide | Copilot SDK dans VS Code (session déclarée dans son rapport) | Revue mathématique et cas limites, sans modification des règles. |
 
 Ces noms sont des identifiants de travail pour les agents existants, pas des agents supplémentaires.
 
@@ -22,4 +23,4 @@ Avant toute action, un nouvel agent déclare dans son rapport : session, rôle p
 - Pas d'engagement implicite d'un nouveau lot après une livraison.
 - Communication par fichiers : pas de réveil automatique des autres sessions.
 
-Rapports : `RAPPORT_AGENT_CONFIGURATION.md` (Atlas), `RAPPORT_AGENT_REFERENCES.md` (Quartz), `RAPPORT_PRODUCTIVITE.md` (bilan).
+Rapports : `RAPPORT_AGENT_CONFIGURATION.md` (Atlas), `RAPPORT_AGENT_REFERENCES.md` (Quartz), `RAPPORT_AGENT_MATHEMATIQUES.md` (Euclide), `RAPPORT_PRODUCTIVITE.md` (bilan).

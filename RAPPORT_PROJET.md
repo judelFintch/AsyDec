@@ -63,3 +63,9 @@ Suite complète : **63 tests réussis**. Rien n'a été publié. Le dépôt est 
 L'équipe dispose maintenant de noms et d'un registre dans `EQUIPE.md` : Atlas (chef) et Quartz (Références). Tout nouvel agent doit se présenter et attendre son périmètre autorisé.
 
 Nouvelle suite complète exécutée par Atlas : **66 tests réussis**. L'erreur de fermeture de la revue précédente ne se reproduit plus. REF-101 demeure non validé jusqu'au contrôle du périmètre, des tests spécifiques et du fuseau. Bilan de productivité : `RAPPORT_PRODUCTIVITE.md`.
+
+## Reprise active
+
+Euclide (AGT-003), agent d'appui mathématique, s'est présenté conformément au protocole. Atlas lui a autorisé MAT-101 : lecture, tests existants ciblés et trois cas limites au maximum, sans changement de code.
+
+Quartz conserve l'unique tâche de code REF-101. Son autorisation de finitions est reconfirmée et répond explicitement à sa demande encore affichée dans son rapport. Atlas attend le bilan avant revue et commit ; aucun changement de périmètre n'est autorisé.

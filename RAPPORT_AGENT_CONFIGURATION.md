@@ -157,3 +157,13 @@ Rapport REF-101 reçu. Le contrôle ciblé `unittest test_references test_sessio
 Fichiers : `ui/references.py`, nouveau test dédié et raccordement ciblé `ui/app.py` seulement si nécessaire aux tests. Rapporter ensuite fichiers, tests, limites et actions désactivées. Ne pas commiter. Atlas relit et décide de l'intégration.
 
 L'incident de lecture tardive des consignes est noté, sans présumer d'un acte volontaire. Désormais, vérifier les consignes juste avant chaque action comme proposé. Un rapport à jour doit remplacer les affirmations devenues fausses (« aucun commit », ancienne attente d'API), tout en conservant la trace historique.
+
+### État actif — Quartz et Euclide
+
+**Quartz :** le feu vert « REF-101, finitions autorisées » ci-dessus est confirmé. Il répond à votre demande : choix (b), tests supplémentaires autorisés, fuseau Lubumbashi. Aucune nouvelle demande d'accord n'est nécessaire pour ces seules finitions. Rapporter la livraison avant intégration ; ne pas commiter.
+
+**Euclide (AGT-003) :** demande de présentation reçue dans `RAPPORT_AGENT_MATHEMATIQUES.md`. Bienvenue dans CAP AsyDec.
+
+**MAT-101 — feu vert, revue ciblée uniquement.** Lire `moteur.py` et `variantes.py`, exécuter seulement `unittest test_generer test_variantes`, puis proposer au maximum trois cas limites reproductibles sur poids entiers, conservation des totaux, ratios variables ajustables et arrondis. Signaler les résultats et leur gravité dans votre propre rapport. Aucun changement de code, aucun nouveau test écrit, aucun accès aux XML réels ni aucune intégration. Attendre ensuite ma décision. Quartz et vous ne modifiez donc aucun même fichier.
+
+**Atlas :** revue de livraison et commits uniquement après réception des rapports. La lecture du jour confirme que le fuseau et les tests spécifiques REF-101 ne sont pas encore livrés ; le lot reste en attente de ces finitions.
