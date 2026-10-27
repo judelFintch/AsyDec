@@ -7,6 +7,7 @@ CAP : Contrôle, Analyse, Production.
 | AGT-001 | Atlas | Codex, conversation principale | Chef de projet : arbitrage, configuration, revue, intégration et commits. |
 | AGT-002 | Quartz | Claude Code `outils-65` / `19dadd` (identité déclarée dans son rapport) | Références XML, données SQLite, consultation et analyse. |
 | AGT-003 | Euclide | Copilot SDK dans VS Code (session déclarée dans son rapport) | Revue mathématique et cas limites, sans modification des règles. |
+| AGT-004 | Relais | Sous-agent Codex `/root/simplifier_totaux` | Lots ciblés attribués par Atlas, rapport préalable, tests et livraison sans commit. |
 
 Ces noms sont des identifiants de travail pour les agents existants, pas des agents supplémentaires.
 

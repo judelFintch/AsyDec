@@ -1,6 +1,5 @@
 """Point d'entrée commun des archives XML réutilisables dans les autres modules."""
-from pathlib import Path
-from tkinter import ttk, filedialog, messagebox
+from tkinter import ttk, messagebox
 from ui import theme
 
 
@@ -11,6 +10,8 @@ class PageMediatheque(ttk.Frame):
         self.documents = []
         theme.entete_page(self, 'Médiathèque XML',
             'Ajoutez vos fichiers une seule fois. Retrouvez-les ensuite dans Dossier, Répartitions, Ratios et Étude. '
+            'Les ajouts utilisent l’import de fond de la Bibliothèque, avec progression et annulation. '
+            'Le repérage initial des fichiers dans un dossier peut prendre du temps. '
             'Un import ne constitue pas une acceptation douanière. Les XML partiels servent uniquement aux études.')
         barre = ttk.Frame(self)
         barre.pack(fill='x', pady=8)
@@ -40,21 +41,27 @@ class PageMediatheque(ttk.Frame):
         self.message.afficher('ok', f'{len(self.documents)} XML disponible(s)',
             ['Dans chaque module, cliquez sur « XML déjà disponibles » ou « Médiathèque XML » pour utiliser ces archives.'])
 
-    def _ajouter(self, chemins):
-        if chemins:
-            erreurs = self.app.partager_xml(chemins)
-            self.afficher()
-            if erreurs:
-                self.message.afficher('alerte', 'Import partiel', erreurs[:8])
+    def _importer_bibliotheque(self, dossier=False):
+        if self.app.session_verrouillee:
+            return
+        self.app.montrer('references')
+        page = self.app.pages['references']
+        if page.tache is not None:
+            page.message.afficher('alerte', 'Un import est déjà en cours',
+                ['Suivez sa progression ici ou demandez son annulation avant un nouvel ajout.'])
+            return
+        page.message.afficher('alerte', 'Ajout à la médiathèque commune',
+            ['L’import s’exécute en tâche de fond ; sa progression et son annulation sont disponibles ici.'])
+        if dossier:
+            page.importer_dossier()
+        else:
+            page.importer_fichiers()
 
     def ajouter(self):
-        self._ajouter(filedialog.askopenfilenames(parent=self, title='Ajouter à la médiathèque',
-                                                 filetypes=[('XML', '*.xml')]))
+        self._importer_bibliotheque()
 
     def dossier(self):
-        dossier = filedialog.askdirectory(parent=self, title='Dossier XML (sous-dossiers inclus)')
-        if dossier:
-            self._ajouter(sorted(p for p in Path(dossier).rglob('*') if p.is_file() and p.suffix.lower() == '.xml'))
+        self._importer_bibliotheque(dossier=True)
 
     def retirer(self):
         documents = [self.documents[int(k)] for k in self.table.selection()]

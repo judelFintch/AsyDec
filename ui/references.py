@@ -8,6 +8,7 @@ from tkinter import filedialog, ttk
 from zoneinfo import ZoneInfo
 
 import generer
+import catalogue_xml
 import import_fond
 import import_references
 import ratios
@@ -426,13 +427,13 @@ class PageReferences(ttk.Frame):
         return self.tache is not None and self.tache.en_cours()
 
     def importer_fichiers(self):
-        if not IMPORT_ACTIF:
+        if not IMPORT_ACTIF or getattr(self.app, "session_verrouillee", False) or self.tache is not None:
             return
         self._importer(filedialog.askopenfilenames(title="XML à importer dans la base", initialdir=generer.DEC,
                                                    filetypes=[("XML", "*.xml")]))
 
     def importer_dossier(self):
-        if not IMPORT_ACTIF:
+        if not IMPORT_ACTIF or getattr(self.app, "session_verrouillee", False) or self.tache is not None:
             return
         dossier = filedialog.askdirectory(title="Dossier de XML (sous-dossiers inclus)", initialdir=generer.DEC)
         if dossier:
@@ -447,7 +448,7 @@ class PageReferences(ttk.Frame):
 
     def _importer(self, chemins, nom=None):
         """Lance l'import dans une tâche de fond ; l'interface reste libre pendant ce temps."""
-        if not IMPORT_ACTIF:
+        if not IMPORT_ACTIF or getattr(self.app, "session_verrouillee", False):
             return
         chemins = list(chemins)
         if not chemins or self.tache is not None:
@@ -504,7 +505,23 @@ class PageReferences(ttk.Frame):
             if bilan.etat == "annule":
                 lignes.append(f"{bilan.trouves - bilan.traites} fichier(s) non traité(s) ; ceux déjà importés sont conservés.")
             lignes += [f"✘ {f} : {r}" for f, r in bilan.refus[:5]]
-            self.message.afficher("ok" if bilan.etat == "termine" and not bilan.refuses else "alerte", titre, lignes)
+            retablissement_echoue = False
+            try:
+                masques = catalogue_xml.retraits()
+                ids = sorted(set(getattr(bilan, 'documents_traites', [])))
+                a_retablir = []
+                if masques:
+                    for debut in range(0, len(ids), 500):
+                        bloc = ids[debut:debut+500]
+                        requete = 'SELECT sha256 FROM documents WHERE id IN (' + ','.join('?' for _ in bloc) + ')'
+                        a_retablir += [r['sha256'] for r in self.conn().execute(requete, bloc) if r['sha256'] in masques]
+                if a_retablir:
+                    catalogue_xml.restaurer(a_retablir)
+                    lignes.append(f'{len(a_retablir)} XML retiré(s) rendu(s) disponible(s) après ce rechargement volontaire.')
+            except Exception as exc:
+                retablissement_echoue = True
+                lignes.append(f'Import conservé, mais réactivation dans la médiathèque impossible : {exc}')
+            self.message.afficher("ok" if bilan.etat == "termine" and not bilan.refuses and not retablissement_echoue else "alerte", titre, lignes)
         self._etat_boutons()
         if self.winfo_exists():
             self.afficher_compteurs()

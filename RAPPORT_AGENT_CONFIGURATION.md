@@ -369,3 +369,9 @@ Sur autorisation utilisateur « vas y » après demande d'économie, Quartz est 
 ### MAT-102 — intégré après correction ciblée
 
 Reprise de Relais autorisée par l'utilisateur pour économiser les tokens de Quartz/Euclide. Plan et GO avant édition. Diff Euclide conservé (colis au minimum 108 et génération à ratios homogènes), complété par refus d'un total inférieur à huit centimes et filtre de tout FOB nul dans les candidats homogènes. Deux régressions ajoutées : 9 kg / 0,01 USD / ratio .003 refusé ; recherche secondaire positive à 24 kg / 0,08 USD. Atlas a relu et relancé les 22 tests mathématiques/génération/variantes : réussis. Limite conservée : recherche secondaire homogène bornée à 100000 kg, échec de recherche distinct d'une impossibilité prouvée. Aucun XML réel modifié.
+
+### ALERTE-QUARTZ-005 — correction minimale intégrée après délégation
+
+Plan de Relais puis GO Atlas ; quatre fichiers. Médiathèque : les boutons d'ajout renvoient au mécanisme d'import de fond existant de la Bibliothèque, avec progression, annulation et garde import unique/session. BilanImport.documents_traites ajoute, de manière rétrocompatible, les identifiants des succès et doublons ; seuls ces documents peuvent être réactivés dans le catalogue après un rechargement volontaire. Refus et non traités restent masqués, statut accepté inchangé. Limite : découverte/tri initial des fichiers d'un dossier encore synchrones ; traitement XML en fond. Atlas a relu et relancé 43 tests ciblés puis **176 tests de suite complète réussis**. Aucun XML réel importé ou modifié.
+
+Économie : Quartz non sollicité ; Relais a traité séquentiellement MAT-102 puis cette correction, sans nouvelle délégation. Relais (AGT-004) est désormais inscrit au registre. Migration de la base modèles et bouton Recharger restent des lots distincts non réalisés ; pas d'annonce de livraison sur ces deux points.

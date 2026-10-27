@@ -30,6 +30,7 @@ class BilanImport:
     etat: str = "en_cours"
     refus: list = field(default_factory=list)       # (fichier, raison)
     documents: list = field(default_factory=list)   # identifiants des documents nouveaux
+    documents_traites: list = field(default_factory=list)  # réussis et doublons, pour réactivation volontaire
 
 
 # --------------------------------------------------------------------------
@@ -308,6 +309,7 @@ def importer_lot(chemins, conn=None, origine="importe", nom_lot=None, progressio
                 break
             try:
                 resultat, document_id = importer_fichier(conn, chemin, bilan.lot_id, origine)
+                bilan.documents_traites.append(document_id)
                 if resultat == "importe":
                     bilan.importes += 1
                     bilan.documents.append(document_id)
