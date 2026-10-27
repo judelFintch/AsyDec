@@ -305,3 +305,9 @@ Retrait logique persistant par empreinte dans `CONFIG_LOCAL/xml_retires.json` : 
 Vérification : 17 tests ciblés, scénario graphique temporaire avec confirmation et suppression depuis le sélecteur, puis **113 tests réussis** sur l'état de travail. Aucun XML réel supprimé ; origine/archives/historique conservés et vérifiés. Nettoyage de l'import `variantes` dupliqué signalé par Quartz (sans changement de calcul).
 
 Fichiers de Quartz et d'Euclide non modifiés ni intégrés dans ce lot.
+
+### UI-107 — médiathèque commune
+
+Atlas : page « Médiathèque XML » dédiée, ajout de fichiers ou d'un dossier avec sous-dossiers, liste des positions présentes, usage autorisé et retrait logique. Archives persistantes et dédoublonnage existants réutilisés ; accès ajouté à l'étude. Les XML partiels restent consultables et leurs positions d'origine sont conservées dans les observations, sans admission dans les sélections de génération, y compris les anciens fichiers non archivés. L'import technique ne confère pas le statut accepté.
+
+Validation : 12 tests catalogue dont positions 1/4, archive réutilisable et exclusion des XML partiels ; suite complète 116 tests réussis. Fichiers en cours de Quartz/Euclide laissés hors de ce lot.

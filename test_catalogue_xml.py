@@ -108,6 +108,28 @@ class CatalogueXmlTest(unittest.TestCase):
         self.assertEqual(C.lister(self.conn,[self.source,copie]),[])
         self.assertTrue(copie.exists())
 
+    def test_xml_partiel_positions_conservees_et_generation_interdite(self):
+        self.source.write_bytes(declaration([item(), '<Item/>', '<Item/>', item(code='6304')]))
+        C.partager(self.conn, [self.source])
+        document = C.lister(self.conn)[0]
+        self.assertEqual(document['positions'], [1, 4])
+        self.assertEqual(document['usage'], 'Étude uniquement')
+        self.assertEqual(C.lister(self.conn, [self.source], generation=True), [])
+        observations = S.observations(self.conn, statuts=('non_verifie',))
+        self.assertEqual([o['position'] for o in observations], [1, 4])
+
+    def test_ancien_xml_partiel_jamais_propose_pour_generation(self):
+        self.assertEqual(C.lister(self.conn, [self.source], generation=True), [])
+
+    def test_xml_complet_reutilisable_depuis_archive(self):
+        self.source.write_bytes(declaration([item(code=str(k)) for k in range(8)]))
+        C.partager(self.conn, [self.source])
+        self.source.unlink()
+        documents = C.lister(self.conn, generation=True)
+        self.assertEqual(len(documents), 1)
+        self.assertEqual(documents[0]['positions'], list(range(1, 9)))
+        self.assertEqual(documents[0]['usage'], 'Génération et étude')
+
 
 if __name__=='__main__':
     unittest.main()

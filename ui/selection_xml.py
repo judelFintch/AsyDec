@@ -5,7 +5,7 @@ import service_references
 from ui import theme
 
 
-def choisir(parent, documents, multiple=False, titre='XML déjà disponibles', retirer=None):
+def choisir(parent, documents, multiple=False, titre='Médiathèque XML', retirer=None):
     fen=tk.Toplevel(parent)
     fen.title(titre)
     fen.geometry('970x480')
@@ -19,7 +19,7 @@ def choisir(parent, documents, multiple=False, titre='XML déjà disponibles', r
     ttk.Label(cadre,text='Rechercher par fichier ou importateur').pack(anchor='w')
     ttk.Entry(cadre,textvariable=recherche).pack(fill='x',pady=4)
     zone,tableau=theme.tableau(cadre,[('nom','Fichier',420,'w'),('importateur','Importateur',200,'w'),
-                                    ('statut','Statut',140,'w'),('source','Origine',130,'w')],9)
+                                    ('statut','Statut',140,'w'),('source','Origine',130,'w'), ('usage','Utilisation',160,'w')],9)
     tableau.configure(selectmode='extended' if multiple else 'browse')
     zone.pack(fill='both',expand=True)
     message=tk.StringVar()
@@ -31,7 +31,7 @@ def choisir(parent, documents, multiple=False, titre='XML déjà disponibles', r
             if mot and mot not in (d['nom']+' '+d['importateur']).casefold():
                 continue
             tableau.insert('','end',iid=str(k),values=((f"[{d['id']}] " if d['id'] is not None else '')+d['nom'],d['importateur'],
-                service_references.STATUTS.get(d['statut'],d['statut']),d['source']))
+                service_references.STATUTS.get(d['statut'],d['statut']),d['source'],d.get('usage','Étude uniquement')))
         message.set(f'{len(tableau.get_children())} XML disponible(s).'+(' Sélection multiple possible.' if multiple else ''))
     recherche.trace_add('write',filtrer)
     def valider(event=None):

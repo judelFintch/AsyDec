@@ -3,6 +3,7 @@ import hashlib
 from pathlib import Path
 import import_references
 import service_references
+import etude_xml
 
 
 def partager(conn, chemins):
@@ -47,7 +48,21 @@ def lister(conn, supplementaires=(), generation=False):
                              'importateur':'','statut':'non_verifie','source':'Modèle existant','articles':None})
         except OSError:
             continue
-    return resultat
+    disponibles = []
+    for document in resultat:
+        try:
+            etude = etude_xml.analyser(document['chemin'])
+        except (OSError, ValueError, SyntaxError):
+            continue
+        positions = [a['article'] for a in etude['articles']]
+        complet = positions == list(range(1, 9)) and all(
+            a['poids'] is not None and a['poids'] > 0 and
+            a['fob'] is not None and a['fob'] > 0 for a in etude['articles'])
+        document.update(articles=len(positions), positions=positions,
+                        usage='Génération et étude' if complet else 'Étude uniquement')
+        if not generation or complet:
+            disponibles.append(document)
+    return disponibles
 
 
 def _fichier_retraits(configuration=None):

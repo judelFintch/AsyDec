@@ -198,3 +198,9 @@ le futur service de décision fondé sur les observations acceptées et leur con
 - Dans **XML déjà disponibles…**, sélectionner un ou plusieurs fichiers puis « Supprimer de la liste… ». Après confirmation, ils disparaissent du catalogue partagé et des sélections d'analyse ; le dossier actif est fermé s'il utilise l'un d'eux.
 - Le retrait est conservé après redémarrage et s'applique aux copies identiques. Les originaux, exports et archives/historiques de la bibliothèque ne sont pas effacés.
 - Pour rendre un fichier retiré à nouveau disponible, le charger volontairement via « Ouvrir un nouveau XML » ou « Nouveaux XML ». Son historique et son statut antérieur sont conservés.
+
+### Médiathèque XML partagée
+
+Dans **Outils → Médiathèque XML**, ajoutez des fichiers ou un dossier entier (sous-dossiers inclus). Chaque contenu est archivé une seule fois. Les autres modules peuvent sélectionner ces archives via **XML déjà disponibles** ou **Médiathèque XML**, sans demander de nouveau le fichier original.
+
+La liste montre les positions présentes et l'utilisation possible. Les XML de moins de huit articles servent uniquement aux études et statistiques ; leurs positions restent celles du fichier. Seuls les XML complets aux positions 1 à 8, avec poids et FOB positifs, peuvent être proposés comme bases de génération, sous réserve des contrôles supplémentaires. L'import ne signifie pas une acceptation douanière : le statut reste suivi séparément dans la bibliothèque des références. Retirer un XML de la médiathèque conserve les originaux, exports et historiques.

@@ -174,6 +174,7 @@ class PageEtude(ttk.Frame):
                           "Sélectionnez la référence dans la liste, puis « Analyser ».")
         barre = ttk.Frame(self)
         barre.pack(fill="x")
+        theme.bouton(barre, "Médiathèque XML…", self.choisir_disponibles).pack(side="left", padx=6)
         theme.bouton(barre, "Ajouter des XML…", self.ajouter_fichiers).pack(side="left")
         theme.bouton(barre, "Ajouter un dossier…", self.ajouter_dossier).pack(side="left", padx=6)
         theme.bouton(barre, "Exporter Excel…", self.exporter).pack(side="right")
