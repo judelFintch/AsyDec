@@ -190,7 +190,7 @@ def apercu_reset(racine=None):
             if chemin.is_symlink():
                 raise ValueError(f'Reset refusé : {nom} est un lien symbolique.')
             resultat.append(nom)
-    for nom in ('reglages.json', 'preferences.json'):
+    for nom in ('reglages.json', 'preferences.json', 'xml_retires.json'):
         if (racine / 'CONFIG_LOCAL' / nom).exists():
             resultat.append('CONFIG_LOCAL/' + nom)
     return resultat

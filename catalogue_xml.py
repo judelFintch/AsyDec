@@ -12,6 +12,8 @@ def partager(conn, chemins):
         try:
             _, identifiant = import_references.importer_fichier(conn, chemin)
             identifiants.append(identifiant)
+            empreinte=conn.execute('SELECT sha256 FROM documents WHERE id=?',(identifiant,)).fetchone()[0]
+            restaurer([empreinte])
         except Exception as exc:  # un fichier refusé ne bloque pas le partage des autres
             erreurs.append(f'{Path(chemin).name} : {exc}')
     return identifiants, erreurs
@@ -19,7 +21,11 @@ def partager(conn, chemins):
 
 def lister(conn, supplementaires=(), generation=False):
     resultat, vus = [], set()
+    retires=retraits()
     for d in service_references.lister_documents(conn):
+        if d['sha256'] in retires:
+            vus.add(d['sha256'])
+            continue
         if generation and d['statut'] in ('rejete', 'exclu'):
             # Ne pas réintroduire ce même contenu par une ancienne copie sur disque.
             vus.add(d['sha256'])
@@ -34,7 +40,7 @@ def lister(conn, supplementaires=(), generation=False):
         try:
             p=Path(p)
             empreinte=hashlib.sha256(p.read_bytes()).hexdigest()
-            if empreinte in vus:
+            if empreinte in vus or empreinte in retires:
                 continue
             vus.add(empreinte)
             resultat.append({'id':None,'empreinte':empreinte,'chemin':str(p),'nom':p.name,
@@ -42,3 +48,46 @@ def lister(conn, supplementaires=(), generation=False):
         except OSError:
             continue
     return resultat
+
+
+def _fichier_retraits(configuration=None):
+    import gestion_locale
+    return (Path(configuration) if configuration is not None else gestion_locale.CONFIGURATION) / 'xml_retires.json'
+
+
+def retraits(configuration=None):
+    import json
+    chemin=_fichier_retraits(configuration)
+    if not chemin.exists():
+        return {}
+    valeurs=json.loads(chemin.read_text(encoding='utf-8'))
+    if not isinstance(valeurs,dict):
+        raise ValueError('La liste des XML retirés est illisible.')
+    return valeurs
+
+
+def retirer(documents,auteur='',configuration=None):
+    """Retrait logique et traçable ; aucun fichier ni événement historique n'est effacé."""
+    import datetime
+    import gestion_locale
+    valeurs=retraits(configuration)
+    for d in documents:
+        valeurs[d['empreinte']]={'nom':d['nom'],'auteur':auteur,
+            'retire_utc':datetime.datetime.now(datetime.timezone.utc).isoformat()}
+    gestion_locale._ecrire_json(_fichier_retraits(configuration),valeurs)
+
+
+def restaurer(empreintes,configuration=None):
+    import gestion_locale
+    valeurs=retraits(configuration)
+    for empreinte in empreintes:
+        valeurs.pop(empreinte,None)
+    if _fichier_retraits(configuration).exists():
+        gestion_locale._ecrire_json(_fichier_retraits(configuration),valeurs)
+
+
+def est_retire(chemin,configuration=None):
+    try:
+        return hashlib.sha256(Path(chemin).read_bytes()).hexdigest() in retraits(configuration)
+    except OSError:
+        return False

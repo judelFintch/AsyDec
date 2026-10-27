@@ -171,6 +171,42 @@ class AsyDec(tk.Tk):
         self.pages["articles"].nouvelle_base()
         return True
 
+    def fermer_dossier(self, confirmer=True):
+        """Décharge le dossier actif ; les originaux, archives et exports restent intacts."""
+        if self.session_verrouillee:
+            return False
+        if confirmer and self.base and not messagebox.askyesno('Fermer le XML chargé',
+            'Fermer ce dossier et vider les saisies non enregistrées ?\n\n'
+            'Le XML reste disponible dans la bibliothèque. Les originaux et fichiers exportés sont conservés.', parent=self):
+            return False
+        self.base = self.info = self.reference = self.profil = None
+        articles = self.pages['articles']
+        if articles._attente:
+            articles.after_cancel(articles._attente)
+            articles._attente = None
+        articles.var_fob_total.set('')
+        articles.var_colis_total.set('')
+        articles.remplir(None, mode='RATIOS')
+        articles.message.vider()
+        for label in articles.ratios:
+            label.configure(text='')
+        for label in articles.etats:
+            label.configure(text='')
+        for label in articles.totaux:
+            label.configure(text='')
+        verifier = self.pages['verifier']
+        verifier.resultat = verifier.fichier = None
+        verifier.finder.pack_forget()
+        verifier.tableau.delete(*verifier.tableau.get_children())
+        verifier.generer.configure(state='disabled')
+        verifier.regenerer_bouton.configure(state='disabled')
+        verifier.var_fichier.set('')
+        for carte in verifier.cartes.values():
+            carte.definir('—')
+        self.var_bandeau.set('Aucun dossier ouvert · choisissez un XML déjà disponible ou ouvrez un nouveau fichier')
+        self.montrer('dossier')
+        return True
+
     def partager_xml(self, chemins):
         """Conserve les fichiers pour les autres pages, sans leur attribuer une acceptation."""
         if self.session_verrouillee:
@@ -201,10 +237,36 @@ class AsyDec(tk.Tk):
         if not documents:
             messagebox.showinfo('XML disponibles', 'Aucun XML disponible. Chargez un dossier ou importez des XML dans la bibliothèque.', parent=self)
             return []
-        return choisir_xml_partage(self, documents, multiple=multiple)
+        return choisir_xml_partage(self, documents, multiple=multiple, retirer=self.retirer_xml)
+
+    def retirer_xml(self, documents):
+        if self.session_verrouillee:
+            raise ValueError('La session est verrouillée.')
+        catalogue_xml.retirer(documents,self.utilisateur)
+        self.prefs['recents'] = [p for p in self.prefs.get('recents', []) if not catalogue_xml.est_retire(p)]
+        self._ecrire_prefs()
+        if any(p and catalogue_xml.est_retire(p) for p in (self.base,self.reference)):
+            self.fermer_dossier(confirmer=False)
+        elif self.base:
+            self.choisir_reference(self.reference)
+        # Les sélections dérivées ne doivent pas continuer à utiliser un XML retiré.
+        repartitions=self.pages['repartitions']
+        repartitions.propositions=[]
+        repartitions.liste.delete(*repartitions.liste.get_children())
+        repartitions.detail.delete(*repartitions.detail.get_children())
+        repartitions.selection_modeles=None
+        ratios=self.pages['ratios']
+        ratios.chemins=[p for p in ratios.chemins if not catalogue_xml.est_retire(p)]
+        if ratios.chemins:
+            ratios.calculer()
+        else:
+            ratios.vider()
+        self.pages['etude'].afficher()
 
     def choisir_reference(self, chemin, profil=None):
         try:
+            if catalogue_xml.est_retire(chemin):
+                raise ValueError('Ce XML a été retiré de la liste. Rechargez-le volontairement pour le réutiliser.')
             profil = profil or variantes.construire_profil(chemin, self.chemins_xml_disponibles(generation=True))
             if variantes.signature(self.base) != profil["signature"]:
                 raise ValueError("Ce modèle n'a pas les mêmes articles (codes et désignations) que le dossier.")

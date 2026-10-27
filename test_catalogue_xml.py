@@ -1,6 +1,8 @@
 """XML partagés persistants, sans double compte ni transfert de validation."""
 import tempfile
 import unittest
+from unittest.mock import patch
+import gestion_locale as L
 from pathlib import Path
 import base_references as B
 import catalogue_xml as C
@@ -13,6 +15,9 @@ class CatalogueXmlTest(unittest.TestCase):
         self.tmp=tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.racine=Path(self.tmp.name)
+        patcher=patch.object(L,'CONFIGURATION',self.racine/'CONFIG_LOCAL')
+        patcher.start()
+        self.addCleanup(patcher.stop)
         self.base=self.racine/'DONNEES'/'asydec.db'
         self.conn=B.ouvrir(self.base)
         self.addCleanup(lambda:self.conn.close())
@@ -68,6 +73,40 @@ class CatalogueXmlTest(unittest.TestCase):
         self.assertEqual(len(ids),1)
         self.assertEqual(len(erreurs),1)
         self.assertIn('autre.xml',erreurs[0])
+
+    def test_retrait_persistant_sans_effacer_origine_archive_ni_statut(self):
+        ids,_=C.partager(self.conn,[self.source])
+        S.enregistrer_statut(self.conn,ids[0],'accepte',preuve='preuve test')
+        document=C.lister(self.conn)[0]
+        archive=Path(document['chemin'])
+        C.retirer([document],auteur='admin test')
+        self.assertEqual(C.lister(self.conn,[self.source]),[])
+        self.conn.close()
+        self.conn=B.ouvrir(self.base)
+        self.assertEqual(C.lister(self.conn),[])
+        self.assertTrue(self.source.exists())
+        self.assertTrue(archive.exists())
+        self.assertEqual(S.statut(self.conn,ids[0]),'accepte')
+        self.assertTrue(S.historique_statuts(self.conn,ids[0]))
+        self.assertEqual(C.retraits()[document['empreinte']]['auteur'],'admin test')
+
+    def test_rechargement_volontaire_restaure_sans_dupliquer(self):
+        ids,_=C.partager(self.conn,[self.source])
+        C.retirer(C.lister(self.conn))
+        self.assertTrue(C.est_retire(self.source))
+        ids_recharges,erreurs=C.partager(self.conn,[self.source])
+        self.assertEqual(ids_recharges,ids)
+        self.assertEqual(erreurs,[])
+        self.assertFalse(C.est_retire(self.source))
+        self.assertEqual(len(C.lister(self.conn)),1)
+
+    def test_retrait_ancien_modele_bloque_toutes_les_copies(self):
+        document=C.lister(self.conn,[self.source])[0]
+        C.retirer([document])
+        copie=self.racine/'copie.xml'
+        copie.write_bytes(self.source.read_bytes())
+        self.assertEqual(C.lister(self.conn,[self.source,copie]),[])
+        self.assertTrue(copie.exists())
 
 
 if __name__=='__main__':

@@ -1,11 +1,11 @@
 """Sélecteur commun des XML déjà disponibles : aucune boîte d'ouverture de fichier."""
 import tkinter as tk
-from tkinter import ttk
+from tkinter import ttk, messagebox
 import service_references
 from ui import theme
 
 
-def choisir(parent, documents, multiple=False, titre='XML déjà disponibles'):
+def choisir(parent, documents, multiple=False, titre='XML déjà disponibles', retirer=None):
     fen=tk.Toplevel(parent)
     fen.title(titre)
     fen.geometry('970x480')
@@ -40,8 +40,30 @@ def choisir(parent, documents, multiple=False, titre='XML déjà disponibles'):
             return
         fen.resultat=[documents[int(k)]['chemin'] for k in choix]
         fen.destroy()
+    def supprimer_selection():
+        indices=[int(k) for k in tableau.selection()]
+        if not indices:
+            return
+        selection=[documents[k] for k in indices]
+        if not messagebox.askyesno('Supprimer de la liste partagée',
+            f"Retirer {len(selection)} XML de la liste partagée ?\n\n"
+            "Le dossier actif sera fermé s’il utilise l’un de ces XML. "
+            "Les originaux, exports et historiques de la bibliothèque restent conservés. "
+            "Un nouveau chargement volontaire permettra de le rendre disponible à nouveau.",parent=fen):
+            return
+        try:
+            retirer(selection)
+        except Exception as exc:
+            messagebox.showerror('Suppression non effectuée',str(exc),parent=fen)
+            return
+        for k in sorted(indices,reverse=True):
+            documents.pop(k)
+        filtrer()
+
     barre=ttk.Frame(cadre)
     barre.pack(fill='x',pady=4)
+    if retirer is not None:
+        theme.bouton(barre,'Supprimer de la liste…',supprimer_selection).pack(side='left',padx=4)
     if multiple:
         theme.bouton(barre,'Tout sélectionner',lambda:tableau.selection_set(tableau.get_children())).pack(side='left')
     theme.bouton(barre,'Utiliser la sélection',valider,principal=True).pack(side='right')

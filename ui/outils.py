@@ -7,6 +7,7 @@ from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
 import etude_xml
+import catalogue_xml
 import generer
 import moteur
 import variantes
@@ -196,7 +197,7 @@ class PageEtude(ttk.Frame):
     def afficher(self):
         self.etudes, erreurs = etude_xml.charger()
         noms = {d['empreinte']: d['nom'] for d in self.app.xml_disponibles()}
-        self.etudes = [dict(e, fichier=noms.get(e['id'], e['fichier'])) for e in self.etudes]
+        self.etudes = [dict(e, fichier=noms.get(e['id'], e['fichier'])) for e in self.etudes if e['id'] not in catalogue_xml.retraits()]
         self.liste.delete(*self.liste.get_children())
         for k, e in enumerate(self.etudes):
             self.liste.insert("", "end", iid=str(k), values=(

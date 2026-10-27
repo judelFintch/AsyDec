@@ -9,7 +9,6 @@ from tkinter import filedialog, messagebox, simpledialog, ttk
 import generer
 import moteur
 import variantes
-import variantes
 from ui import theme
 from ui.theme import nombre
 
@@ -80,6 +79,8 @@ class PageDossier(ttk.Frame):
         barre = pied(self)
         self.suivant = theme.bouton(barre, "Continuer  →  Articles", lambda: app.montrer("articles"), principal=True)
         self.suivant.pack(side="right")
+        self.fermer = theme.bouton(barre, "Fermer le XML chargé", app.fermer_dossier)
+        self.fermer.pack(side="left")
 
         ttk.Label(self, text="Fichiers récents", style="Section.TLabel").pack(anchor="w", pady=(16, 6))
         cadre, self.recents = theme.tableau(self, [("fichier", "Fichier", 420, "w"), ("dossier", "Dossier", 380, "w")], 5)
@@ -95,11 +96,15 @@ class PageDossier(ttk.Frame):
         self.modeles = [Path(d['chemin']) for d in documents]
         self.choix.configure(values=[REFERENCE_DOSSIER] + [d['nom'] for d in documents])
         self.suivant.configure(state="normal" if self.app.base else "disabled")
+        self.fermer.configure(state="normal" if self.app.base else "disabled")
         self._remplir()
 
     def _remplir(self):
         i = self.app.info
         if not i:
+            for valeur in self.valeurs.values():
+                valeur.set('—')
+            self.var_reference.set(REFERENCE_DOSSIER)
             return
         textes = {"importateur": i["importateur"], "code": i["code"], "reference": i["reference"],
                   "manifeste": i["manifeste"], "camion": i["camion"], "taux": nombre(i["taux"], 2),
