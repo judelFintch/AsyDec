@@ -1,5 +1,6 @@
 """Bibliothèque des références : documents conservés en base SQLite, statuts, marchandises."""
 import datetime
+import queue
 import subprocess
 import tkinter as tk
 from pathlib import Path
@@ -7,16 +8,18 @@ from tkinter import filedialog, ttk
 from zoneinfo import ZoneInfo
 
 import generer
+import import_fond
 import import_references
 import ratios
 import service_references as service
 from ui import theme
 from ui.theme import nombre
 
-# REF-101 : consultation seule. Import, changement de statut, correction et onglet
-# Marchandises (avec export) sont conservés mais ni construits ni déclenchables tant
-# qu'une tâche dédiée ne les active pas.
+# Changement de statut, correction et onglet Marchandises (avec export) : conservés
+# mais ni construits ni déclenchables tant qu'une tâche dédiée ne les active pas.
 ACTIONS_ACTIVES = False
+# REF-102 : l'import a sa propre autorisation, indépendante des autres actions.
+IMPORT_ACTIF = True
 FUSEAU = ZoneInfo("Africa/Lubumbashi")
 TOUS = "Tous"
 ORIGINES = {"Importé": "importe", "Généré": "genere"}
@@ -106,14 +109,14 @@ class PageReferences(ttk.Frame):
         super().__init__(parent)
         self.app = app
         self.documents, self.detail, self.groupes = [], None, []
-        self.import_en_cours = self._annuler = False
+        self.tache, self._suivi, self._final = None, None, None
         theme.entete_page(self, "Bibliothèque des références", "Les XML importés sont conservés dans la base, avec "
                           "leurs taxes et leur provenance. Un document reste « non vérifié » tant que vous ne "
                           "l'acceptez pas avec une preuve.")
         barre = ttk.Frame(self)
         barre.pack(fill="x")
         self.boutons_import, self.bouton_annuler = [], None
-        if ACTIONS_ACTIVES:
+        if IMPORT_ACTIF:
             self.boutons_import = [
                 theme.bouton(barre, "Importer des XML…", self.importer_fichiers, principal=True),
                 theme.bouton(barre, "Importer un dossier…", self.importer_dossier)]
@@ -262,7 +265,7 @@ class PageReferences(ttk.Frame):
             self.choix_importateur_m.configure(values=[TOUS] + options["importateurs"])
         if not c["documents"] and not self.import_en_cours:
             self.message.afficher("alerte", "La base est vide",
-                                  ["Importez des XML pour commencer." if ACTIONS_ACTIVES else
+                                  ["Importez des XML pour commencer." if IMPORT_ACTIF else
                                    "L'import depuis cette page n'est pas encore activé."])
         if self.onglets.index("current") == 0:
             self.lister()
@@ -413,70 +416,109 @@ class PageReferences(ttk.Frame):
             f"{c['anomalies']} anomalie(s)")
 
     # -------------------------------------------------------------- import
+    @property
+    def import_en_cours(self):
+        return self.tache is not None and self.tache.en_cours()
+
     def importer_fichiers(self):
-        if not ACTIONS_ACTIVES:  # hors REF-101 : désactivé
+        if not IMPORT_ACTIF:
             return
         self._importer(filedialog.askopenfilenames(title="XML à importer dans la base", initialdir=generer.DEC,
                                                    filetypes=[("XML", "*.xml")]))
 
     def importer_dossier(self):
-        if not ACTIONS_ACTIVES:  # hors REF-101 : désactivé
+        if not IMPORT_ACTIF:
             return
         dossier = filedialog.askdirectory(title="Dossier de XML (sous-dossiers inclus)", initialdir=generer.DEC)
         if dossier:
             self._importer(import_references.lister_xml(dossier), nom=dossier)
 
     def annuler(self):
-        if not ACTIONS_ACTIVES:  # hors REF-101 : désactivé
+        if not IMPORT_ACTIF or not self.import_en_cours:
             return
-        self._annuler = True
+        self.tache.annuler()
         self.bouton_annuler.configure(state="disabled")
+        self.message.afficher("alerte", "Annulation demandée…", ["Le document en cours se termine, puis l'import s'arrête."])
 
     def _importer(self, chemins, nom=None):
-        if not ACTIONS_ACTIVES:  # hors REF-101 : désactivé
+        """Lance l'import dans une tâche de fond ; l'interface reste libre pendant ce temps."""
+        if not IMPORT_ACTIF:
             return
         chemins = list(chemins)
-        if not chemins or self.import_en_cours:
+        if not chemins or self.tache is not None:
             return
-        self.import_en_cours, self._annuler = True, False
+        fichier_base = self.conn().execute("PRAGMA database_list").fetchone()["file"]
+        self.tache, self._final = import_fond.TacheImport(chemins, fichier_base, nom), None
         for b in self.boutons_import:
             b.configure(state="disabled")
         self.bouton_annuler.pack(side="left", padx=6)
         self.bouton_annuler.configure(state="normal")
-        self._etat_boutons()
+        self.message.afficher("alerte", f"Import de {len(chemins)} fichier(s) lancé…")
+        self.tache.demarrer()
+        self._suivi = self.after(100, self._suivre)
 
-        def progression(bilan, chemin):
-            self.message.afficher("alerte", f"Import {bilan.traites}/{bilan.trouves}…",
-                                  [f"{bilan.importes} nouveau(x), {bilan.doublons} doublon(s), {bilan.refuses} refusé(s)",
-                                   Path(chemin).name])
-            self.update()  # garde la fenêtre réactive et permet « Annuler »
+    def _suivre(self):
+        """Lit les événements de la tâche (fil Tkinter uniquement). La tâche n'est oubliée qu'une
+        fois son fil réellement arrêté : un reset ou une fermeture peut toujours l'attendre."""
+        self._suivi = None
+        tache = self.tache
+        if tache is None:
+            return
+        while True:
+            try:
+                evenement = tache.evenements.get_nowait()
+            except queue.Empty:
+                break
+            if evenement[0] == "progression":
+                _, bilan, chemin = evenement
+                self.message.afficher("alerte", f"Import {bilan.traites}/{bilan.trouves}…",
+                                      [f"{bilan.importes} nouveau(x), {bilan.doublons} doublon(s), "
+                                       f"{bilan.refuses} refusé(s)", Path(chemin).name])
+            else:
+                self._final = evenement
+        if tache.en_cours():
+            self._suivi = self.after(100, self._suivre)
+        elif self._final is not None and self._final[0] == "fin":
+            self._terminer(bilan=self._final[1])
+        else:
+            self._terminer(erreur=self._final[1] if self._final else "La tâche d'import s'est arrêtée sans bilan.")
 
-        try:
-            bilan = import_references.importer_lot(chemins, self.conn(), nom_lot=nom, progression=progression,
-                                                   annulation=lambda: self._annuler)
-        except Exception as exc:  # noqa: BLE001
-            self.message.afficher("erreur", "Import interrompu", [str(exc)])
+    def _terminer(self, bilan=None, erreur=None):
+        self.tache = None
+        if self.bouton_annuler is not None:
+            self.bouton_annuler.pack_forget()
+        for b in self.boutons_import:
+            b.configure(state="normal")
+        if erreur:
+            self.message.afficher("erreur", "Import interrompu", [erreur])
         else:
             titre = {"termine": "Import terminé", "annule": "Import annulé"}.get(bilan.etat, "Import interrompu")
             lignes = [f"{bilan.importes} document(s) ajouté(s), {bilan.doublons} doublon(s), "
-                      f"{bilan.refuses} refusé(s) sur {bilan.trouves} fichier(s)."]
+                      f"{bilan.refuses} refusé(s) sur {bilan.trouves} fichier(s). Aucun n'est accepté automatiquement."]
             if bilan.etat == "annule":
                 lignes.append(f"{bilan.trouves - bilan.traites} fichier(s) non traité(s) ; ceux déjà importés sont conservés.")
             lignes += [f"✘ {f} : {r}" for f, r in bilan.refus[:5]]
             self.message.afficher("ok" if bilan.etat == "termine" and not bilan.refuses else "alerte", titre, lignes)
-        finally:
-            self.import_en_cours = False
-            self.bouton_annuler.pack_forget()
-            for b in self.boutons_import:
-                b.configure(state="normal")
-            self._etat_boutons()
-        self.afficher()
+        self._etat_boutons()
+        if self.winfo_exists():
+            self.afficher_compteurs()
+            self.lister()
+
+    def arreter_import(self, delai=5.0):
+        """Avant reset, fermeture ou déconnexion : arrête la tâche (attente bornée).
+        Renvoie False si elle tourne encore ; sinon annule le suivi périodique et renvoie True."""
+        if self.tache is not None and not self.tache.arreter(delai):
+            return False
+        if self._suivi is not None:
+            self.after_cancel(self._suivi)
+            self._suivi = None
+        self.tache = None
+        return True
 
     def preparer_reset(self):
-        """Callback de reset : refuse tant qu'un import tourne (il est alors annulé)."""
-        if self.import_en_cours:
-            self._annuler = True
-            raise ValueError("Un import de références est en cours : il a été annulé, réessayez dans un instant.")
+        """Callback de reset : arrête l'import (5 s au plus) ou refuse le reset."""
+        if not self.arreter_import(5.0):
+            raise ValueError("Un import de références est encore en cours : reset refusé, réessayez après son arrêt.")
 
     # =========================================================== marchandises
     def _construire_marchandises(self, parent):

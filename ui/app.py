@@ -214,12 +214,21 @@ class AsyDec(tk.Tk):
     def fermer_sans_preferences(self):
         if self._fermeture:
             return
+        if not AsyDec._arreter_import_references(self):
+            messagebox.showwarning("Import en cours", "Un import de références ne s'est pas arrêté dans les "
+                                   "5 secondes. Fermeture annulée : réessayez dans un instant.", parent=self)
+            return
         self._fermeture = True
         if self._minuteur_session is not None:
             self.after_cancel(self._minuteur_session)
             self._minuteur_session = None
         AsyDec.fermer_base_refs(self)  # appel explicite : fonctionne aussi sur un objet de test minimal
         self.destroy()
+
+    def _arreter_import_references(self):
+        """Avant de détruire la fenêtre : arrête la tâche d'import (5 s au plus). False si elle tourne encore."""
+        page = getattr(self, "pages", {}).get("references")
+        return page is None or page.arreter_import(5.0)
 
     def base_refs(self):
         """Connexion à la base des références, ouverte au premier besoin dans le fil Tkinter."""
