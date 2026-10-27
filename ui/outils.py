@@ -123,14 +123,51 @@ class PageRepartitions(ttk.Frame):
         self.detail.insert("", "end", tags=("total",), values=(
             "", nombre(sum(v["poids"]), 3), nombre(sum(v["fob"]), 2), sum(v["colis"]), "", ""))
 
+    def _ouvrir_dossier_proposition(self, proposition):
+        """Adopte une archive seulement après confirmation des données du dossier."""
+        try:
+            documents = self.app.xml_disponibles(generation=True)
+            disponibles = {str(Path(d['chemin']).resolve()): d for d in documents}
+            chemin = proposition['controle']
+            while True:
+                document = disponibles.get(str(Path(chemin).resolve()))
+                if document is None:
+                    raise ValueError("Ce XML n'est plus disponible comme base de génération dans la médiathèque.")
+                if variantes.signature(chemin) != proposition['profil']['signature']:
+                    raise ValueError("Ce XML n'a pas les mêmes articles que la proposition. Choisissez une base compatible.")
+                racine = moteur.charger(chemin).getroot()
+                info = moteur.infos_dossier(racine)
+                fret = moteur._txt(racine, 'Valuation/Gs_external_freight/Amount_foreign_currency') or '0'
+                assurance = moteur._txt(racine, 'Valuation/Gs_insurance/Amount_foreign_currency') or '0'
+                texte = (f"Base proposée : {document['nom']}\n"
+                         f"Importateur : {info['importateur'] or '—'}\n"
+                         f"Référence : {info['reference'] or '—'}\n"
+                         f"Taux de change : {info['taux']:g}\n"
+                         f"Fret : {fret} · Assurance : {assurance}\n\n"
+                         "La déclaration reprendra ces informations et les autres frais de ce XML. "
+                         "Les poids, FOB et colis seront ceux de votre proposition.\n\n"
+                         "Oui : utiliser cette base. Non : choisir un autre XML de la médiathèque. "
+                         "Annuler : conserver la simulation sans ouvrir de dossier.")
+                choix = messagebox.askyesnocancel('Confirmer le dossier de la proposition', texte, parent=self)
+                if choix is None:
+                    return False
+                if choix:
+                    return self.app.ouvrir_base(chemin)
+                chemins = self.app.choisir_xml_disponibles(generation=True)
+                if not chemins:
+                    return False
+                chemin = chemins[0]
+        except Exception as exc:
+            self.message.afficher('erreur', 'Dossier non ouvert', [str(exc)])
+            return False
+
     def utiliser(self):
+        if self.app.session_verrouillee:
+            return
         v = self.selection()
         if not v:
             return
-        if not self.app.base:
-            messagebox.showinfo("Répartitions", "Choisissez le XML du dossier à l'étape 1, depuis « XML déjà disponibles… » "
-                                "si vous l'avez déjà chargé. La déclaration reprend son importateur, son taux et ses frais.")
-            self.app.montrer("dossier")
+        if not self.app.base and not self._ouvrir_dossier_proposition(v):
             return
         if not self.app.choisir_reference(v["controle"], v["profil"]):
             return

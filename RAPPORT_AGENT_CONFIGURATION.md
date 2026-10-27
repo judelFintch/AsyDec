@@ -311,3 +311,7 @@ Fichiers de Quartz et d'Euclide non modifiés ni intégrés dans ce lot.
 Atlas : page « Médiathèque XML » dédiée, ajout de fichiers ou d'un dossier avec sous-dossiers, liste des positions présentes, usage autorisé et retrait logique. Archives persistantes et dédoublonnage existants réutilisés ; accès ajouté à l'étude. Les XML partiels restent consultables et leurs positions d'origine sont conservées dans les observations, sans admission dans les sélections de génération, y compris les anciens fichiers non archivés. L'import technique ne confère pas le statut accepté.
 
 Validation : 12 tests catalogue dont positions 1/4, archive réutilisable et exclusion des XML partiels ; suite complète 116 tests réussis. Fichiers en cours de Quartz/Euclide laissés hors de ce lot.
+
+### UI-108 — adoption depuis la médiathèque, déléguée à Relais
+
+Périmètre proposé puis GO Atlas avant modification. Relais a modifié uniquement PageRepartitions et ajouté test_adoption_repartition.py. Sans dossier actif, la base compatible de la simulation est proposée avec confirmation importateur/référence/taux/fret/assurance. Alternative autre archive existante et annulation disponibles. Disponibilité génération et signature contrôlées avant ouverture. Atlas a relu le diff et relancé les 25 tests ciblés : réussis. Pas de recette graphique sur ce lot. Aucun changement Quartz/Euclide intégré.
