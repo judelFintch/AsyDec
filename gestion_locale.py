@@ -29,6 +29,8 @@ DEFAUTS = {
 PAGES_DEMARRAGE = ('dossier', 'repartitions', 'ratios', 'etude', 'historique', 'parametres')
 # Ne jamais parcourir le dossier parent ni supprimer les historiques d'exports.
 DONNEES_RESET = ('DONNEES/asydec.db', 'DONNEES/asydec.db-wal', 'DONNEES/asydec.db-shm', 'DONNEES/asydec.db-journal',
+                 'DONNEES/modeles_generes.db', 'DONNEES/modeles_generes.db-journal',
+                 'DONNEES/modeles_generes.db-wal', 'DONNEES/modeles_generes.db-shm',
                  'DONNEES/sources', 'MODELES_XML', 'ETUDES_XML', 'registre.json', 'SAISIE.xlsx')
 
 

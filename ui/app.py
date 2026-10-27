@@ -19,11 +19,12 @@ from ui.etapes import PageArticles, PageDossier, PageVerifier
 from ui.outils import PageEtude, PageHistorique, PageRatios, PageRepartitions
 from ui.references import PageReferences
 from ui.mediatheque import PageMediatheque
+from ui.modeles_generes import PageModelesGeneres
 import base_references
 
 PREFERENCES = local.CONFIGURATION / "preferences.json"
 ETAPES = [("dossier", "1   Dossier"), ("articles", "2   Articles"), ("verifier", "3   Vérifier et générer")]
-OUTILS = [("mediatheque", "Médiathèque XML"), ("references", "Bibliothèque des références"),
+OUTILS = [("modeles_generes", "Modèles générés"), ("mediatheque", "Médiathèque XML"), ("references", "Bibliothèque des références"),
           ("repartitions", "Répartitions"), ("ratios", "Récupération des ratios"),
           ("etude", "Étude des XML"), ("historique", "Historique"), ("parametres", "Paramètres")]
 
@@ -77,7 +78,7 @@ class AsyDec(tk.Tk):
         self.pages = {}
         self._base_refs = None  # connexion SQLite des références, ouverte au premier besoin
         for cle, classe in [("dossier", PageDossier), ("articles", PageArticles), ("verifier", PageVerifier),
-                            ("mediatheque", PageMediatheque), ("references", PageReferences),
+                            ("modeles_generes", PageModelesGeneres), ("mediatheque", PageMediatheque), ("references", PageReferences),
                             ("repartitions", PageRepartitions), ("ratios", PageRatios), ("etude", PageEtude),
                             ("historique", PageHistorique), ("parametres", PageParametres)]:
             page = classe(contenu, self)

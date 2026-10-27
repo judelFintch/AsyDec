@@ -407,6 +407,8 @@ class PageVerifier(ttk.Frame):
         self.finder = theme.bouton(barre, "Afficher dans le Finder", self.afficher_fichier)
         theme.bouton(barre, "←  Modifier les articles", lambda: app.montrer("articles")).pack(side="right", padx=8)
 
+        theme.bouton(self, "Enregistrer la proposition", self.conserver_proposition).pack(anchor="w", pady=(0, 8))
+
         cadre, self.tableau = theme.tableau(self, [
             ("art", "Art.", 50, "center"), ("nom", "Marchandise", 260, "w"), ("poids", "Poids kg", 100, "e"),
             ("fob", "FOB USD", 110, "e"), ("ratio", "Ratio FOB/kg", 110, "e"),
@@ -515,6 +517,22 @@ class PageVerifier(ttk.Frame):
         self.tableau.insert("", "end", tags=("total",), values=(
             "", "Taxes globales", "", "", "", "", "", nombre(r["taxes_globales"])))
 
+    def conserver_proposition(self):
+        if not self.resultat or self.app.session_verrouillee:
+            return
+        try:
+            import modeles_generes
+            identifiant = modeles_generes.enregistrer(self.resultat, self.app.base, self.app.utilisateur)
+        except Exception as exc:
+            messagebox.showerror("Proposition non conservée", str(exc), parent=self)
+            return
+        self.app.pages['modeles_generes'].filtre.set('Tous')
+        self.app.montrer('modeles_generes')
+        messagebox.showinfo('Proposition conservée',
+            f"Modèle n° {identifiant} disponible dans Modèles générés. "
+            "Une nouvelle proposition est en attente de validation locale. "
+            "Si elle existait déjà, son statut est conservé.", parent=self)
+
     def comparer_xml(self):
         if not self.resultat or self.app.session_verrouillee:
             return
@@ -531,7 +549,7 @@ class PageVerifier(ttk.Frame):
             messagebox.showerror("Comparaison impossible", str(exc), parent=self)
 
     def enregistrer(self):
-        if not self.resultat:
+        if not self.resultat or self.app.session_verrouillee:
             return
         question = f"Créer le fichier\n\n{self.resultat['nom']}\n\ndans le dossier de l'importateur ?"
         if self.resultat["alertes"]:
@@ -547,6 +565,13 @@ class PageVerifier(ttk.Frame):
         self.message.afficher("ok", "✓  Déclaration enregistrée", [os.path.relpath(res["chemin"], generer.DEC)])
         self.generer.configure(state="disabled", text="Généré  ✓")
         self.finder.pack(side="right", padx=8)
+        try:
+            import modeles_generes
+            modeles_generes.enregistrer(res, self.app.base, self.app.utilisateur, export=res['chemin'])
+        except Exception as exc:
+            messagebox.showwarning("XML créé, suivi non enregistré",
+                "Le XML a bien été créé. Son ajout à la liste des modèles a échoué : " + str(exc), parent=self)
+
 
     def afficher_fichier(self):
         if self.fichier and os.path.exists(self.fichier):
