@@ -15,6 +15,7 @@ class VariantesTest(unittest.TestCase):
                 self.assertEqual(round(sum(v['poids']), 3), 19000)
                 self.assertEqual(round(sum(v['fob']), 2), 7800)
                 self.assertEqual(sum(v['colis']), 790)
+                self.assertTrue(all(isinstance(p,int) for p in v['poids']))
                 self.assertGreaterEqual(min(v['colis']), 10)
                 self.assertEqual(len(set(v['colis'])), 8)
                 for p, f, r in zip(v['poids'], v['fob'], self.ratios):
@@ -24,7 +25,7 @@ class VariantesTest(unittest.TestCase):
     def test_entrees_impossibles(self):
         for p, f, c in [(0, 7800, 790), (19000, 1, 790), (19000, 40000, 790),
                          (19000, 7800, 7), (19000, 7800, 107), (19000, 7800, 8.5), (float('nan'), 7800, 790),
-                         (19000.0001, 7800, 790)]:
+                         (19000.5, 7800, 790), (19000.0001, 7800, 790)]:
             with self.assertRaises(ValueError):
                 variantes.generer(p, f, c, self.ratios)
 
@@ -127,3 +128,47 @@ class BibliothequeTest(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class RechercheBibliothequeTest(unittest.TestCase):
+    def test_absence_de_modele_expliquee(self):
+        with self.assertRaisesRegex(ValueError,'Aucun modèle enregistré'):
+            variantes.rechercher_modeles(19000,7800,790,chemins=[])
+
+    def test_fichier_invalide_signale_sans_crash_xml(self):
+        from pathlib import Path
+        import tempfile
+        with tempfile.TemporaryDirectory() as dossier:
+            p=Path(dossier)/'invalide.xml'
+            p.write_text('<XML invalide')
+            with self.assertRaisesRegex(ValueError,'Aucune proposition compatible'):
+                variantes.rechercher_modeles(19000,7800,790,chemins=[p])
+
+
+class RatiosAjustablesTest(unittest.TestCase):
+    def test_totaux_hors_ancienne_fourchette_sont_repartis(self):
+        profil=ControleTest().profil()
+        profil['variables_libres']=True
+        for fob in (780,40000):
+            propositions=variantes.generer(19000,fob,790,profil['ratios'],profil=profil,nombre=3,graine=18)
+            self.assertEqual(len(propositions),3)
+            for v in propositions:
+                variantes.controler(v,profil)
+                self.assertEqual(sum(v['poids']),19000)
+                self.assertEqual(round(sum(v['fob']),2),fob)
+                self.assertEqual(sum(v['colis']),790)
+                self.assertTrue(all(isinstance(p,int) and p>0 for p in v['poids']))
+                self.assertGreater(min(v['fob']),0)
+
+    def test_saisie_et_calcul_appliquent_les_memes_regles(self):
+        profil=ControleTest().profil()
+        profil['variables_libres']=True
+        poids=[100]*8
+        fob=variantes.fob_controles(poids,profil,4000)
+        v={'poids':poids,'fob':fob,'colis':[10]*8}
+        variantes.controler(v,profil)
+        self.assertEqual(round(sum(fob),2),4000)
+        self.assertTrue(any(fob[k]/poids[k]>profil['bornes'][k][1] for k in (3,6,7)))
+        v['fob'][0]=10000
+        with self.assertRaises(ValueError):
+            variantes.controler(v,profil)

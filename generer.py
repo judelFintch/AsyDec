@@ -18,6 +18,7 @@ from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.worksheet.datavalidation import DataValidation
 
 import moteur
+import variantes
 
 ICI = os.path.dirname(os.path.abspath(__file__))
 DEC = os.path.dirname(ICI)
@@ -98,9 +99,9 @@ def creer_modele():
         "2. Statut = A GENERER pour les lignes à traiter (EXEMPLE et FAIT sont ignorées).",
         "3. Fichier de base : le XML SYDONIA du dossier (nom seul : il est cherché dans DEC FRIPERIE).",
         "4. Poids 1 à 8 : les poids du colisage, dans l'ordre des articles du fichier de base.",
-        "5. Mode FOB = RATIOS : FOB = poids x ratio (feuille RATIOS), articles 4/7/8 ajustés au FOB total.",
-        "   Mode FOB = SAISI : les FOB 1 à 8 sont repris tels quels (FOB total facultatif).",
-        "6. Colis : remplir Colis 1 à 8 pour les imposer, sinon répartition graduée sur le Colis total",
+        "5. Mode RATIOS : FOB calculés dans les bornes des XML ; ratios 4/7/8 ajustables, autres dans les fourchettes.",
+        "   Mode SAISI : les FOB 1 à 8 sont contrôlés avec les mêmes règles ; incohérence = refus.",
+        "6. Colis : saisir les 8 entiers positifs, ou aucun : estimation graduée (minimum 10, tous différents).",
         "   (vide = total du fichier de base).",
         "7. Lancer : double-clic sur LANCER.command. Les colonnes grises se remplissent.",
         "8. Le fichier est rangé dans DEC FRIPERIE/<IMPORTATEUR>/1 - HISTORIQUE, nommé",
@@ -181,7 +182,7 @@ def ecrire_registre(reg):
 # Calcul d'une déclaration (utilisé par Excel et par l'interface)
 # --------------------------------------------------------------------------
 def produire(base, poids, ratios, table_imp, registre, mode="RATIOS", fob_total=None,
-             fob_saisis=None, colis_total=None, colis_saisis=None, enregistrer=True):
+             fob_saisis=None, colis_total=None, colis_saisis=None, enregistrer=True, profil=None):
     """Calcule une déclaration. Si enregistrer=False, rien n'est écrit (aperçu).
     Renvoie un dictionnaire : chemin, nom, resume, alertes, fob, colis, info."""
     alertes = []
@@ -195,34 +196,40 @@ def produire(base, poids, ratios, table_imp, registre, mode="RATIOS", fob_total=
         raise ValueError("Poids manquant pour un article.")
     mode = (mode or "RATIOS").strip().upper()
 
+    profil = profil or variantes.construire_profil(base)
+    if variantes.signature(base) != profil['signature']:
+        raise ValueError('Les articles de la base sont incompatibles avec le contrôle choisi.')
     if mode == "SAISI":
         fob = list(fob_saisis or [])[:n]
-        if len(fob) < n or any(f is None for f in fob):
-            raise ValueError("Mode SAISI : un FOB par article est manquant.")
-        if fob_total is not None and abs(sum(fob) - fob_total) > 0.005:
-            alertes.append(f"Somme des FOB {sum(fob):.2f} ≠ FOB total {fob_total:.2f}.")
-        for i in range(n):
-            if i not in moteur.ARTICLES_VARIABLES and abs(poids[i] * ratios[i] - fob[i]) > 0.01:
-                alertes.append(f"Art. {i+1} : {poids[i]:g} × {ratios[i]} = {poids[i]*ratios[i]:.2f} ≠ FOB {fob[i]:.2f}.")
+        if len(fob)!=8 or any(f is None for f in fob):
+            raise ValueError('Un FOB saisi est requis pour chacun des huit articles.')
+    elif mode == "RATIOS":
+        fob = variantes.fob_controles(poids,profil,fob_total)
     else:
-        if fob_total is None:
-            fob_total = info["fob"]
-        fob, ecart = moteur.fob_par_ratios(poids, ratios, fob_total)
-        if abs(ecart) >= 0.01:
-            alertes.append(f"Écart de {ecart:+.2f} USD réparti sur les articles 4, 7 et 8.")
-
-    for i in moteur.ARTICLES_VARIABLES:
-        if i < n and poids[i]:
-            r = fob[i] / poids[i]
-            if abs(r / ratios[i] - 1) > SEUIL_RATIO:
-                alertes.append(f"Ratio art. {i+1} = {r:.3f} (réf. {ratios[i]}), écart {100*(r/ratios[i]-1):+.0f} %.")
-
-    if colis_saisis and len(colis_saisis) >= n and all(c is not None for c in colis_saisis[:n]):
-        colis = [int(c) for c in colis_saisis[:n]]
-        if colis_total is not None and sum(colis) != int(colis_total):
-            alertes.append(f"Somme des colis {sum(colis)} ≠ colis total {int(colis_total)}.")
+        raise ValueError('Mode inconnu : choisir RATIOS ou SAISI.')
+    if fob_total is not None and abs(sum(fob)-fob_total)>.005:
+        raise ValueError('La somme des FOB ne correspond pas au total demandé.')
+    saisis = list(colis_saisis or [])
+    if any(c is not None for c in saisis):
+        if len(saisis)!=8 or any(c is None for c in saisis):
+            raise ValueError('Renseignez les huit colis ou laissez les huit champs vides.')
+        colis=saisis
     else:
-        colis = moteur.colis_gradues(poids, fob, int(colis_total) if colis_total else info["colis"])
+        total_colis = info['colis'] if colis_total is None else colis_total
+        if int(total_colis)!=total_colis:
+            raise ValueError('Le total des colis doit être entier.')
+        colis=moteur.colis_gradues(poids,fob,int(total_colis))
+        alertes.append('Colis estimés au poids : minimum 10 par article, tous différents. À vérifier avec le colisage réel.')
+    variantes.controler({'poids':poids,'fob':fob,'colis':colis},profil)
+    if colis_total is not None and sum(colis)!=colis_total:
+        raise ValueError('La somme des colis ne correspond pas au total demandé.')
+    if profil.get('variables_libres'):
+        for k in moteur.ARTICLES_VARIABLES:
+            obtenu=fob[k]/poids[k]
+            ecart=obtenu/profil['ratios'][k]-1
+            if abs(ecart)>.10:
+                alertes.append(f'Art. {k+1} : ratio ajusté {obtenu:.6g}, référence {profil["ratios"][k]:.6g}, écart {ecart:+.1%}. À examiner (seuil indicatif 10 %).')
+
 
     if abs(sum(fob) - info["fob"]) > 0.005:
         alertes.append(f"FOB total {sum(fob):.2f} ≠ base {info['fob']:.2f}.")
