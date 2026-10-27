@@ -263,3 +263,15 @@ Suite complète exécutée par Atlas sur l'état de travail : **91 tests réussi
 - Tests temporaires : refus sans preuve/motif, auteur, persistance après réouverture, import toujours non vérifié, autres actions toujours désactivées. Rapport puis attendre la revue ; pas de commit.
 
 Quartz peut proposer une adaptation motivée avant d'agir si une de ces exigences entre en conflit avec son implémentation. Une seule tâche active reste REF-103.
+
+### Atlas — UI-104, régénération depuis l'écran de vérification
+
+Demande directe utilisateur (capture de l'étape 3) : ajouter « Régénérer un autre modèle » sur « Vérifier et générer ». Atlas prend uniquement `ui/etapes.py` et le test dédié `test_regeneration_verification.py`. Ne pas modifier ces fichiers pendant ce lot. Quartz conserve `ui/references.py` pour REF-103 ; Euclide conserve les moteurs pour la retouche MAT-102.
+
+Contrat : mêmes totaux, même dossier et références ; poids entiers ; nouvelle répartition excluant celles déjà vues dans ce contexte ; aperçu recalculé sans écriture XML. Si aucun résultat n'est trouvé, conserver la proposition actuelle et l'expliquer.
+
+### UI-104 — livré par Atlas
+
+Bouton « Régénérer un autre modèle » ajouté directement à l'étape 3 « Vérifier et générer ». La recherche conserve le dossier, la référence et les trois totaux, impose les poids entiers et exclut les répartitions déjà affichées dans ce contexte. L'aperçu et le tableau Articles sont mis à jour uniquement après validation complète sans écriture XML. En cas d'absence de solution ou d'erreur de recalcul, l'ancien modèle reste inchangé.
+
+Vérification : 5 tests unitaires dédiés réussis. Scénario graphique temporaire exécuté par Atlas : bouton visible/activable, nouvelle répartition différente, mêmes totaux, poids entiers et aucun XML créé. XML de référence lu sans modification. Aucun fichier de Quartz ou d'Euclide touché.

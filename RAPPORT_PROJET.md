@@ -80,3 +80,7 @@ Quartz conserve l'unique tâche de code REF-101. Son autorisation de finitions e
 ## Organisation de la suite
 
 État courant synthétique : `TABLEAU_DE_BORD.md`. Quartz est autorisé à réaliser REF-102 (import persistant, progression, annulation et sécurité du cycle de vie). Euclide est autorisé à réaliser MAT-102 (les deux défauts mathématiques confirmés). Fichiers de calcul et fichiers d'interface sont séparés ; Atlas assure la revue et les commits. Aucun autre lot n'est lancé.
+
+## UI-104 — régénération à l'étape 3
+
+La demande utilisateur de régénérer directement depuis « Vérifier et générer » est réalisée. Le bouton calcule un autre aperçu avec les mêmes totaux et références ; aucune écriture XML n'a lieu avant le bouton de génération. Cinq tests ciblés et un scénario graphique temporaire sont réussis. Les exports antérieurs restent intacts et la proposition actuelle est conservée si la recherche échoue.
