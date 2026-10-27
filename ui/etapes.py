@@ -53,7 +53,8 @@ class PageDossier(ttk.Frame):
                           "les articles, le taux et les frais. Il n'est jamais modifié.")
         haut = ttk.Frame(self)
         haut.pack(fill="x")
-        theme.bouton(haut, "Ouvrir un XML de base…", self.parcourir, principal=True).pack(side="left")
+        theme.bouton(haut, "Ouvrir un nouveau XML…", self.parcourir, principal=True).pack(side="left")
+        theme.bouton(haut, "XML déjà disponibles…", self.choisir_disponible).pack(side="left", padx=8)
         ttk.Label(haut, text="  ou double-cliquez un fichier récent ci-dessous", style="Doux.TLabel").pack(side="left")
 
         ttk.Label(self, text="Dossier ouvert", style="Section.TLabel").pack(anchor="w", pady=(20, 6))
@@ -90,8 +91,9 @@ class PageDossier(ttk.Frame):
         for chemin in self.app.prefs.get("recents", []):
             if os.path.exists(chemin):
                 self.recents.insert("", "end", iid=chemin, values=(Path(chemin).name, Path(chemin).parent.name))
-        self.modeles = variantes.modeles()
-        self.choix.configure(values=[REFERENCE_DOSSIER] + [p.name for p in self.modeles])
+        documents = self.app.xml_disponibles(generation=True)
+        self.modeles = [Path(d['chemin']) for d in documents]
+        self.choix.configure(values=[REFERENCE_DOSSIER] + [d['nom'] for d in documents])
         self.suivant.configure(state="normal" if self.app.base else "disabled")
         self._remplir()
 
@@ -105,6 +107,11 @@ class PageDossier(ttk.Frame):
                   "colis": str(i["colis"]), "articles": str(len(i["fob_articles"]))}
         for cle, var in self.valeurs.items():
             var.set(textes[cle] or "—")
+
+    def choisir_disponible(self):
+        chemins = self.app.choisir_xml_disponibles()
+        if chemins:
+            self._ouvrir(chemins[0])
 
     def parcourir(self):
         chemin = filedialog.askopenfilename(

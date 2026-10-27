@@ -9,6 +9,8 @@ from tkinter import messagebox, ttk
 import generer
 import moteur
 import variantes
+import catalogue_xml
+from ui.selection_xml import choisir as choisir_xml_partage
 from ui import theme
 import gestion_locale as local
 from ui.connexion import demander_connexion
@@ -152,7 +154,8 @@ class AsyDec(tk.Tk):
         try:
             chemin = generer.trouver_base(chemin)
             info = moteur.infos_dossier(moteur.charger(chemin).getroot())
-            profil = variantes.construire_profil(chemin)
+            self.partager_xml([chemin])
+            profil = variantes.construire_profil(chemin, self.chemins_xml_disponibles(generation=True))
         except Exception as exc:  # noqa: BLE001 - message montré à l'utilisateur
             messagebox.showerror("XML de base", str(exc))
             return False
@@ -168,9 +171,41 @@ class AsyDec(tk.Tk):
         self.pages["articles"].nouvelle_base()
         return True
 
+    def partager_xml(self, chemins):
+        """Conserve les fichiers pour les autres pages, sans leur attribuer une acceptation."""
+        if self.session_verrouillee:
+            return
+        try:
+            _, erreurs = catalogue_xml.partager(self.base_refs(), chemins)
+        except Exception as exc:
+            erreurs = [str(exc)]
+        if erreurs:
+            messagebox.showwarning('Partage XML incomplet',
+                'Certains fichiers ne sont pas disponibles dans la bibliothèque :\n'+'\n'.join(erreurs[:8]), parent=self)
+        return erreurs
+
+    def xml_disponibles(self, generation=False):
+        supplementaires = ([self.base] if self.base else []) + list(variantes.modeles())
+        documents = catalogue_xml.lister(self.base_refs(), supplementaires, generation=generation)
+        return [d for d in documents if d['articles'] in (None, 8)] if generation else documents
+
+    def chemins_xml_disponibles(self, generation=False):
+        return [d['chemin'] for d in self.xml_disponibles(generation)]
+
+    def choisir_xml_disponibles(self, multiple=False, generation=False):
+        try:
+            documents = self.xml_disponibles(generation)
+        except Exception as exc:
+            messagebox.showerror('XML disponibles', str(exc), parent=self)
+            return []
+        if not documents:
+            messagebox.showinfo('XML disponibles', 'Aucun XML disponible. Chargez un dossier ou importez des XML dans la bibliothèque.', parent=self)
+            return []
+        return choisir_xml_partage(self, documents, multiple=multiple)
+
     def choisir_reference(self, chemin, profil=None):
         try:
-            profil = profil or variantes.construire_profil(chemin)
+            profil = profil or variantes.construire_profil(chemin, self.chemins_xml_disponibles(generation=True))
             if variantes.signature(self.base) != profil["signature"]:
                 raise ValueError("Ce modèle n'a pas les mêmes articles (codes et désignations) que le dossier.")
         except Exception as exc:  # noqa: BLE001

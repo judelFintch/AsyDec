@@ -36,7 +36,9 @@ class PageRepartitions(ttk.Frame):
         theme.bouton(saisie, "Rechercher", self.rechercher, principal=True).pack(side="left")
         self.autres = theme.bouton(saisie, "Autres propositions", lambda: self.rechercher(autres=True))
         self.autres.pack(side="left", padx=6)
-        theme.bouton(saisie, "Ajouter des modèles…", self.ajouter_modeles).pack(side="right")
+        theme.bouton(saisie, "Nouveaux modèles…", self.ajouter_modeles).pack(side="right")
+        theme.bouton(saisie, "XML disponibles…", self.choisir_modeles).pack(side="right", padx=6)
+        self.selection_modeles = None
         self.var_modeles = tk.StringVar()
         ttk.Label(self, textvariable=self.var_modeles, style="Doux.TLabel").pack(anchor="e", pady=(4, 0))
 
@@ -59,7 +61,7 @@ class PageRepartitions(ttk.Frame):
         cadre.pack(fill="both", expand=True)
 
     def afficher(self):
-        n = len(variantes.modeles())
+        n = len(self.app.xml_disponibles(generation=True))
         self.var_modeles.set(f"{n} modèle(s) enregistré(s)")
         if self.app.info and not self.champs["fob"].get():
             i = self.app.info
@@ -77,8 +79,9 @@ class PageRepartitions(ttk.Frame):
             self.update_idletasks()
             cle = (poids, fob, colis)
             vues = self.deja_vues.setdefault(cle, set())
-            propositions, ecartes = variantes.rechercher_modeles(poids, fob, colis, nombre=3 if autres else 12,
-                                                                 exclure=vues)
+            chemins = self.selection_modeles or self.app.chemins_xml_disponibles(generation=True)
+            propositions, ecartes = variantes.rechercher_modeles(poids, fob, colis, chemins=chemins,
+                                                                 nombre=3 if autres else 12, exclure=vues)
             for v in propositions:
                 v["resultat"] = generer.produire(
                     v["controle"], v["poids"], v["profil"]["ratios"], self.app.table_imp, {}, mode="SAISI",
@@ -124,8 +127,8 @@ class PageRepartitions(ttk.Frame):
         if not v:
             return
         if not self.app.base:
-            messagebox.showinfo("Répartitions", "Ouvrez d'abord le XML du dossier (étape 1) : la déclaration "
-                                "reprend son importateur, son taux et ses frais.")
+            messagebox.showinfo("Répartitions", "Choisissez le XML du dossier à l'étape 1, depuis « XML déjà disponibles… » "
+                                "si vous l'avez déjà chargé. La déclaration reprend son importateur, son taux et ses frais.")
             self.app.montrer("dossier")
             return
         if not self.app.choisir_reference(v["controle"], v["profil"]):
@@ -135,8 +138,16 @@ class PageRepartitions(ttk.Frame):
         articles.remplir(v["poids"], v["fob"], v["colis"], mode="SAISI")
         self.app.montrer("verifier")
 
+    def choisir_modeles(self):
+        chemins = self.app.choisir_xml_disponibles(multiple=True, generation=True)
+        if chemins:
+            self.selection_modeles = chemins
+            self.var_modeles.set(f'{len(chemins)} modèle(s) sélectionné(s), déjà disponibles')
+
     def ajouter_modeles(self):
         chemins = filedialog.askopenfilenames(title="XML de référence à conserver", filetypes=[("XML", "*.xml")])
+        self.app.partager_xml(chemins)
+        self.selection_modeles = None
         erreurs, total = [], 0
         for chemin in chemins:
             try:
@@ -184,6 +195,8 @@ class PageEtude(ttk.Frame):
 
     def afficher(self):
         self.etudes, erreurs = etude_xml.charger()
+        noms = {d['empreinte']: d['nom'] for d in self.app.xml_disponibles()}
+        self.etudes = [dict(e, fichier=noms.get(e['id'], e['fichier'])) for e in self.etudes]
         self.liste.delete(*self.liste.get_children())
         for k, e in enumerate(self.etudes):
             self.liste.insert("", "end", iid=str(k), values=(
@@ -194,6 +207,7 @@ class PageEtude(ttk.Frame):
             self.message.afficher("alerte", "Aucun XML étudié", ["Ajoutez des XML ou un dossier entier pour commencer."])
 
     def _importer(self, chemins):
+        self.app.partager_xml(chemins)
         erreurs = []
         for chemin in chemins:
             try:
@@ -204,6 +218,11 @@ class PageEtude(ttk.Frame):
         if chemins:
             self.message.afficher("alerte" if erreurs else "ok",
                                   f"{len(chemins) - len(erreurs)} XML ajouté(s) à l'étude", erreurs[:8])
+
+    def choisir_disponibles(self):
+        chemins = self.app.choisir_xml_disponibles(multiple=True)
+        if chemins:
+            self._importer(chemins)
 
     def ajouter_fichiers(self):
         self._importer(filedialog.askopenfilenames(title="XML à étudier", filetypes=[("XML", "*.xml")]))
@@ -327,7 +346,8 @@ class PageRatios(ttk.Frame):
                           "pour voir le ratio de chaque fichier.")
         barre = ttk.Frame(self)
         barre.pack(fill="x")
-        theme.bouton(barre, "Ajouter des XML…", self.ajouter_fichiers, principal=True).pack(side="left")
+        theme.bouton(barre, "Nouveaux XML…", self.ajouter_fichiers, principal=True).pack(side="left")
+        theme.bouton(barre, "XML déjà disponibles…", self.choisir_disponibles).pack(side="left", padx=6)
         theme.bouton(barre, "Ajouter un dossier…", self.ajouter_dossier).pack(side="left", padx=6)
         theme.bouton(barre, "Vider", self.vider).pack(side="left")
         theme.bouton(barre, "Exporter Excel…", self.exporter).pack(side="right")
@@ -354,9 +374,15 @@ class PageRatios(ttk.Frame):
         self.message.afficher("alerte", "Aucun XML chargé", ["Ajoutez des fichiers ou un dossier entier (sous-dossiers inclus)."])
 
     def _ajouter(self, chemins):
+        self.app.partager_xml(chemins)
         connus = set(self.chemins)
         self.chemins += [str(c) for c in chemins if str(c) not in connus]
         self.calculer()
+
+    def choisir_disponibles(self):
+        chemins = self.app.choisir_xml_disponibles(multiple=True)
+        if chemins:
+            self._ajouter(chemins)
 
     def ajouter_fichiers(self):
         self._ajouter(filedialog.askopenfilenames(title="XML à analyser", initialdir=generer.DEC,
@@ -381,6 +407,9 @@ class PageRatios(ttk.Frame):
         self.message.afficher("alerte", f"Lecture de {len(self.chemins)} fichier(s)…")
         self.update_idletasks()
         observations, self.erreurs = ratios.extraire(self.chemins)
+        noms = {str(Path(d['chemin']).resolve()): d['nom'] for d in self.app.xml_disponibles()}
+        for observation in observations:
+            observation['fichier'] = noms.get(str(Path(observation['chemin']).resolve()), observation['fichier'])
         self.groupes = ratios.regrouper(observations, self.var_importateur.get())
         r4 = lambda x: f"{x:.4f}".replace(".", ",")
         for k, g in enumerate(self.groupes):
