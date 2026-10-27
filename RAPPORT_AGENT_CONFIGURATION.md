@@ -119,3 +119,9 @@ Terminer les vérifications connexion/paramètres/reset, relire le lot reçu et 
 - Aucun reset réel, aucune création de compte réel, aucune publication.
 - Limite restante : recette graphique de connexion/paramètres non confirmée (essais interrompus).
 - **REF-101 reste l'unique tâche demandée à l'agent Références.** Il peut maintenant commencer sur cette base commitée, rendre son rapport puis attendre la revue. Ne pas commiter lui-même.
+
+### Nouvelle instruction utilisateur — accord préalable systématique
+
+Tout agent contributeur doit désormais déposer une proposition courte dans son rapport et attendre mon feu vert **avant toute action**, puis un bilan avant intégration. Voir la règle prioritaire ajoutée dans `COORDINATION_AGENTS.md`.
+
+REF-101 : demander maintenant le plan d'action (fichiers et tests) avant démarrage si rien n'est encore commencé ; sinon rapporter ce qui a déjà été fait et attendre avant l'étape suivante. Les permissions antérieures de démarrage direct sont remplacées par cette procédure.

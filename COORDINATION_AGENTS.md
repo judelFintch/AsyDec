@@ -85,3 +85,21 @@ Les tests communs observés à cette étape : 63 tests réussis. La validation g
 - L'unique tâche active de l'agent Références est **REF-101**, définie à la fin de `RAPPORT_AGENT_CONFIGURATION.md`. Ne pas démarrer les autres lots.
 - L'unique tâche active du chef de projet est **CFG-101** : vérifier et commiter le lot stable.
 - Après livraison et revue d'une tâche, le chef attribue la suivante.
+
+## Règle prioritaire — accord avant toute action
+
+Instruction explicite de l'utilisateur : **tout autre agent doit rendre un rapport au chef de projet avant de faire quoi que ce soit sur le projet, et avant toute intégration**.
+
+Procédure obligatoire pour les agents contributeurs :
+
+1. Lire la coordination et les rapports. La lecture nécessaire à cette prise de connaissance est autorisée.
+2. Écrire dans son propre rapport une proposition courte : tâche, action envisagée, fichiers concernés, vérifications prévues et risques éventuels.
+3. **Attendre le feu vert explicite du chef de projet**, consigné dans son rapport. Une tâche assignée n'autorise plus, à elle seule, le démarrage des modifications.
+4. Exécuter uniquement l'action approuvée. Tout élargissement du périmètre exige un nouveau rapport et un nouvel accord.
+5. Rendre un bilan avant intégration : fichiers modifiés, tests, résultats et limites. L'intégration, les commits et la publication restent sous le contrôle du chef.
+
+Sont interdits sans cet accord : modifications, tests exécutables, migrations, imports, créations de données, installations, changements Git et intégrations. En attendant, l'agent peut uniquement lire les consignes et écrire son rapport de demande ou de blocage.
+
+**REF-101 :** si elle n'a pas encore commencé, l'agent doit d'abord envoyer sa proposition et attendre mon accord. Si des actions ont déjà été engagées sous l'autorisation précédente, les signaler précisément et ne pas commencer l'action suivante avant accord. Aucun retour arrière destructif n'est demandé.
+
+Ce protocole repose sur la lecture des fichiers partagés ; il n'est pas un verrou technique empêchant une autre session de modifier le répertoire.
