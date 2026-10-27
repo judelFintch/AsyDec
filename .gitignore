@@ -1,0 +1,19 @@
+# Local Python environment and caches
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Local declaration data, reference models, and generated reports
+*.xml
+*.xlsx
+*.xlsm
+registre.json
+MODELES_XML/
+ETUDES_XML/
+SIMULATIONS/
+
+# Local settings and operating system files
+.env
+.env.*
+.DS_Store
