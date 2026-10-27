@@ -76,3 +76,7 @@ Quartz conserve l'unique tâche de code REF-101. Son autorisation de finitions e
 - **Vérification Atlas** : 74 tests réussis, comprenant les tests graphiques temporaires de consultation seule. Cette vérification ne constitue pas une certification du rendu visuel complet.
 - **Euclide / MAT-101** : revue mathématique reçue et deux cas reproduits par le chef. À corriger dans une future tâche : répartiteur de colis au minimum en cas d'égalité ; branche de génération stricte lorsque tous les ratios sont identiques.
 - Pas de nouveau lot lancé. Le raccordement du générateur à SQLite, l'historique de réutilisation et l'import de fond restent à développer.
+
+## Organisation de la suite
+
+État courant synthétique : `TABLEAU_DE_BORD.md`. Quartz est autorisé à réaliser REF-102 (import persistant, progression, annulation et sécurité du cycle de vie). Euclide est autorisé à réaliser MAT-102 (les deux défauts mathématiques confirmés). Fichiers de calcul et fichiers d'interface sont séparés ; Atlas assure la revue et les commits. Aucun autre lot n'est lancé.

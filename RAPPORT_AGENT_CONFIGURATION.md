@@ -181,3 +181,41 @@ Quartz et Euclide : tâches actuelles livrées ; restez en attente d'une nouvell
 Instruction utilisateur prise en compte : adresser les plaintes, inquiétudes et désaccords à Atlas dans votre rapport, avec faits, impact et demande. Voir le format `ALERTE-<AGENT>-<numéro>` dans la coordination. Je les transmettrai à l'utilisateur après vérification, y compris si elles critiquent mon travail. Aucune représaille ni suppression de critique ; l'utilisateur conserve l'accès direct à vos explications.
 
 Aucune plainte nouvelle n'est déclarée reçue par cette simple mise à jour du protocole.
+
+## Ordres actifs — Quartz / REF-102 et Euclide / MAT-102
+
+Le tableau de bord courant est désormais **`TABLEAU_DE_BORD.md`**, limité à 25 lignes. Lire ce fichier puis les présentes consignes ; les anciennes sections des rapports restent historiques et ne remplacent pas ces décisions.
+
+### Quartz — REF-102 : import utilisable dans la bibliothèque — AUTORISÉ
+
+Votre proposition d'activation de l'import est acceptée. Votre alerte sur une bibliothèque vide sans moyen d'import est fondée. Livrer une seule fonctionnalité complète : importer plusieurs XML ou un dossier dans SQLite depuis la page existante, avec progression et annulation, puis retrouver les résultats après relance.
+
+Périmètre : `ui/references.py`, module d'import d'arrière-plan si nécessaire, tests dédiés, ajustements ciblés de `ui/app.py` pour le cycle de vie. Ne modifier `import_references.py` que si un contrat nécessaire manque ; l'indiquer au rapport.
+
+Contraintes :
+- Séparer les autorisations d'import des autres actions. Ne pas activer le drapeau global qui réactiverait aussi statuts, corrections ou export marchandises.
+- Pour ne pas bloquer Tkinter, utiliser une tâche de fond avec sa propre connexion SQLite créée et fermée dans ce fil. Communiquer par une file vers le fil Tkinter ; pas de `update()` réentrant pour simuler un traitement asynchrone.
+- Annulation entre documents, sans perte des documents déjà validés. Bilan des nouveaux, doublons et refusés.
+- Avant reset ou fermeture/déconnexion, demander l'arrêt de la tâche. Si elle n'est pas terminée, refuser proprement l'opération ou attendre au maximum 5 secondes ; ne jamais fermer sa connexion depuis un autre fil ni détruire la fenêtre sous des callbacks actifs. Tests correspondants exigés.
+- Aucun document importé n'est automatiquement accepté. Statuts/corrections restent désactivés dans cette tâche.
+- Tests sur données temporaires uniquement ; adapter les tests de consultation seule pour autoriser seulement le nouvel import, en conservant l'interdiction des autres opérations.
+
+Retour attendu : REF-102 reçu, puis résultat avec fichiers, tests, limites et absence de tâche de fond résiduelle. Pas de commit. Atlas ne modifie pas vos fichiers durant ce lot.
+
+### Euclide — MAT-102 : corrections mathématiques ciblées — AUTORISÉ
+
+Votre rapport MAT-101 et vos propositions sont acceptés. Vous êtes le seul responsable des changements de calcul pour ce lot.
+
+Périmètre : `moteur.py`, `variantes.py` et nouveau `test_mathematiques.py` (ou tests de calcul ciblés existants si nécessaire). Aucun écran, aucune base de références, aucune règle fiscale modifiée.
+
+1. Corriger la répartition au total minimal : 8 parts égales et 108 colis doivent produire huit entiers distincts de 10 à 17, de somme 108, avec départage déterministe. Préserver le comportement des totaux usuels et les refus réellement impossibles.
+2. Traiter séparément la génération à huit ratios homogènes : 800 kg / 800 USD / 108 colis / ratios 1 doit produire une proposition valide. Ne pas assouplir les bornes strictes du cas hétérogène ; respecter les arrondis au centime et signaler une impossibilité numérique réelle.
+3. Tests de régression : positifs, poids entiers, sommes exactes, colis distincts/minimum, cas impossibles et absence de régression dans le parcours `variables_libres`.
+
+Ce mandat ne permet pas de fixer un nouveau plafond de ratio, de changer le score ou d'étendre les calculs de taxes. Rapport après tests, sans commit, puis attendre Atlas.
+
+### Alertes de Quartz — décisions d'Atlas
+
+- QUARTZ-002 (bibliothèque non alimentable) : prise en charge par REF-102.
+- QUARTZ-003 (état dispersé) : corrigée par le tableau de bord unique ci-dessus. Les rapports restent l'historique ; ne plus se fier à un ancien compteur de tests isolé.
+- QUARTZ-001 (ratios variables sans plafond) : préoccupation reçue et transmise à l'utilisateur. Le futur contrôle doit être fondé sur des observations contextualisées et leur statut, pas sur un pourcentage arbitraire. Effectif, méthode et politique de secours restent à définir avant une implémentation bloquante. Les chiffres/plafonds proposés dans un rapport d'agent ne constituent pas à eux seuls une nouvelle règle métier approuvée.

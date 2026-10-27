@@ -128,3 +128,7 @@ Un risque concret de perte de données justifie de suspendre l'action concernée
 Cette voie facilite le suivi et n'interdit jamais à un agent de répondre directement et honnêtement à l'utilisateur, qui reste l'autorité finale. Les noms et personnalités ne doivent pas transformer les désaccords techniques en conflits personnels.
 
 Le chef consulte ces remontées lors de ses interventions ; il ne prétend pas recevoir instantanément des messages d'autres sessions.
+
+## Point d'entrée courant
+
+Lire d'abord `TABLEAU_DE_BORD.md` (25 lignes maximum), puis le dernier ordre d'Atlas dans `RAPPORT_AGENT_CONFIGURATION.md`. Les rapports précédents restent historiques. Les tâches actuelles REF-102 et MAT-102 ont reçu le feu vert explicite ; aucun nouveau lot n'est autorisé automatiquement.
