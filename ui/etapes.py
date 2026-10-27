@@ -403,7 +403,8 @@ class PageVerifier(ttk.Frame):
         self.generer.pack(side="right")
         self.regenerer_bouton = theme.bouton(barre, "Régénérer un autre modèle", self.regenerer)
         self.regenerer_bouton.pack(side="left")
-        theme.bouton(barre, "Comparer avec un XML…", self.comparer_xml).pack(side="left", padx=8)
+        self.comparer_bouton = theme.bouton(barre, "Comparer avec un XML…", self.comparer_xml, state="disabled")
+        self.comparer_bouton.pack(side="left", padx=8)
         self.finder = theme.bouton(barre, "Afficher dans le Finder", self.afficher_fichier)
         theme.bouton(barre, "←  Modifier les articles", lambda: app.montrer("articles")).pack(side="right", padx=8)
 
@@ -417,6 +418,8 @@ class PageVerifier(ttk.Frame):
         cadre.pack(fill="both", expand=True)
 
     def afficher(self):
+        self.fichier = None
+        self.comparer_bouton.configure(state="disabled")
         self.finder.pack_forget()
         self.tableau.delete(*self.tableau.get_children())
         try:
@@ -433,6 +436,8 @@ class PageVerifier(ttk.Frame):
         self._presenter(res)
 
     def _presenter(self, res):
+        self.fichier = None
+        self.comparer_bouton.configure(state="disabled")
         self.resultat = res
         self.tableau.delete(*self.tableau.get_children())
         self._montrer(res)
@@ -534,16 +539,19 @@ class PageVerifier(ttk.Frame):
             "Si elle existait déjà, son statut est conservé.", parent=self)
 
     def comparer_xml(self):
-        if not self.resultat or self.app.session_verrouillee:
+        if self.app.session_verrouillee:
             return
-        chemin = filedialog.askopenfilename(parent=self, title="Comparer avec un XML fourni",
+        if not self.fichier or not Path(self.fichier).is_file():
+            self.comparer_bouton.configure(state="disabled")
+            return
+        chemin = filedialog.askopenfilename(parent=self, title="Comparer le XML généré avec un fichier fourni",
                                             filetypes=[("XML", "*.xml")])
         if not chemin:
             return
         try:
-            from comparaison_prediction import comparer
+            from comparaison_prediction import comparer_xmls
             from ui.comparaison import afficher
-            rapport = comparer(self.resultat, self.app.base, chemin)
+            rapport = comparer_xmls(self.fichier, chemin)
             afficher(self, rapport)
         except Exception as exc:
             messagebox.showerror("Comparaison impossible", str(exc), parent=self)
@@ -562,6 +570,7 @@ class PageVerifier(ttk.Frame):
             messagebox.showerror("Génération impossible", str(exc))
             return
         self.fichier = res["chemin"]
+        self.comparer_bouton.configure(state="normal" if Path(self.fichier).is_file() else "disabled")
         self.message.afficher("ok", "✓  Déclaration enregistrée", [os.path.relpath(res["chemin"], generer.DEC)])
         self.generer.configure(state="disabled", text="Généré  ✓")
         self.finder.pack(side="right", padx=8)

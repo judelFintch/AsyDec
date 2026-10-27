@@ -20,6 +20,11 @@ CREATE TABLE IF NOT EXISTS evenements (
  id INTEGER PRIMARY KEY, modele_id INTEGER NOT NULL REFERENCES modeles(id),
  date_utc TEXT NOT NULL, auteur TEXT NOT NULL, action TEXT NOT NULL,
  statut TEXT CHECK(statut IN ('en_attente','valide','rejete')), detail TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS exports_xml (
+ evenement_id INTEGER PRIMARY KEY REFERENCES evenements(id),
+ sha256 TEXT NOT NULL, contenu BLOB NOT NULL);
+CREATE TRIGGER IF NOT EXISTS exports_immuables BEFORE UPDATE ON exports_xml BEGIN SELECT RAISE(ABORT,'Export immuable'); END;
+CREATE TRIGGER IF NOT EXISTS exports_conserves BEFORE DELETE ON exports_xml BEGIN SELECT RAISE(ABORT,'Export conservé'); END;
 CREATE TRIGGER IF NOT EXISTS modeles_immuables BEFORE UPDATE ON modeles BEGIN SELECT RAISE(ABORT,'Snapshot immuable'); END;
 CREATE TRIGGER IF NOT EXISTS modeles_conserves BEFORE DELETE ON modeles BEGIN SELECT RAISE(ABORT,'Snapshot conservé'); END;
 CREATE TRIGGER IF NOT EXISTS evenements_immuables BEFORE UPDATE ON evenements BEGIN SELECT RAISE(ABORT,'Historique immuable'); END;
@@ -53,8 +58,9 @@ def _auteur(auteur):
 
 
 def _evenement(conn, identifiant, auteur, action, statut=None, detail=''):
-    conn.execute('INSERT INTO evenements(modele_id,date_utc,auteur,action,statut,detail) VALUES(?,?,?,?,?,?)',
+    curseur = conn.execute('INSERT INTO evenements(modele_id,date_utc,auteur,action,statut,detail) VALUES(?,?,?,?,?,?)',
                  (identifiant, _maintenant(), auteur, action, statut, detail))
+    return curseur.lastrowid
 
 
 def enregistrer(resultat, chemin_base, auteur, export=None, base=None):
@@ -90,9 +96,13 @@ def enregistrer(resultat, chemin_base, auteur, export=None, base=None):
         if export:
             chemin = str(Path(export).resolve())
             # Lecture de l'export existant : l'événement ne prétend pas créer le XML.
-            detail = json.dumps({'chemin':chemin,'sha256':hashlib.sha256(Path(export).read_bytes()).hexdigest()},sort_keys=True)
-            if not conn.execute("SELECT 1 FROM evenements WHERE modele_id=? AND action='export' AND detail=?", (identifiant,detail)).fetchone():
-                _evenement(conn,identifiant,auteur,'export',detail=detail)
+            contenu_export = Path(export).read_bytes()
+            sha = hashlib.sha256(contenu_export).hexdigest()
+            detail = json.dumps({'chemin':chemin,'sha256':sha},sort_keys=True)
+            precedent = conn.execute("SELECT id FROM evenements WHERE modele_id=? AND action='export' AND detail=?", (identifiant,detail)).fetchone()
+            evenement = precedent['id'] if precedent else _evenement(conn,identifiant,auteur,'export',detail=detail)
+            conn.execute('INSERT OR IGNORE INTO exports_xml(evenement_id,sha256,contenu) VALUES(?,?,?)',
+                         (evenement,sha,contenu_export))
     return identifiant
 
 
@@ -102,6 +112,7 @@ def lister(statut=None, base=None):
     with _connexion(base) as conn:
         lignes = conn.execute('''SELECT m.id,m.cree_utc,m.auteur,m.importateur,m.nom,m.resultat_json,
             (SELECT e.statut FROM evenements e WHERE e.modele_id=m.id AND e.statut IS NOT NULL ORDER BY e.id DESC LIMIT 1) statut,
+            EXISTS(SELECT 1 FROM evenements e WHERE e.modele_id=m.id AND e.action='export') exporte,
             (SELECT e.date_utc FROM evenements e WHERE e.modele_id=m.id ORDER BY e.id DESC LIMIT 1) modifie_utc
             FROM modeles m ORDER BY m.id DESC''').fetchall()
     sortie = []
@@ -137,3 +148,24 @@ def changer_statut(identifiant, statut, auteur, commentaire='', base=None):
         courant = conn.execute('SELECT statut FROM evenements WHERE modele_id=? AND statut IS NOT NULL ORDER BY id DESC LIMIT 1',(identifiant,)).fetchone()
         if courant['statut'] != statut:
             _evenement(conn,identifiant,auteur,'validation_locale',statut,commentaire.strip())
+
+
+def lire_export(identifiant, base=None):
+    """Dernier export réel ; anciens événements : fichier original et SHA exigés."""
+    with _connexion(base) as conn:
+        evenement = conn.execute("SELECT e.id,e.detail,x.sha256,x.contenu FROM evenements e LEFT JOIN exports_xml x ON x.evenement_id=e.id WHERE e.modele_id=? AND e.action='export' ORDER BY e.id DESC LIMIT 1", (identifiant,)).fetchone()
+    if evenement is None:
+        raise ValueError('Cette proposition n’a pas encore été exportée. Générez le XML avant de comparer.')
+    if evenement['contenu'] is not None:
+        contenu = bytes(evenement['contenu'])
+        sha = evenement['sha256']
+    else:
+        details = json.loads(evenement['detail'])
+        sha = details.get('sha256')
+        try:
+            contenu = Path(details['chemin']).read_bytes()
+        except (KeyError,OSError):
+            raise ValueError('Cet ancien export ne possède pas de copie archivée et son fichier est introuvable. La comparaison nécessite le XML exporté original.') from None
+    if not sha or hashlib.sha256(contenu).hexdigest() != sha:
+        raise ValueError('Le XML exporté a été modifié ou son empreinte est absente. Comparaison refusée.')
+    return contenu

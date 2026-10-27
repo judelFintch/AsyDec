@@ -207,12 +207,12 @@ La liste montre les positions présentes et l'utilisation possible. Les XML de m
 
 ### Comparer une proposition à un fichier XML
 
-Dans **Vérifier et générer**, cliquez sur **Comparer avec un XML…**, puis sélectionnez votre fichier. La fenêtre affiche les valeurs prévues et celles du fichier, ainsi que les écarts absolus et en pourcentage pour les poids, FOB, colis, ratios, CIF et taxes. Le fichier fourni reste intact. Les positions et codes identifient les articles ; les absences ou différences de contexte sont signalées. Un écart ne prouve pas une erreur de calcul : vérifiez notamment le taux de change, les frais et les taux de taxes utilisés.
+Dans **Vérifier et générer**, commencez par **Générer le XML**. Cliquez ensuite sur **Comparer avec un XML…**, puis sélectionnez votre fichier. La fenêtre affiche les valeurs inscrites dans le XML généré et celles du fichier fourni, ainsi que les écarts absolus et en pourcentage pour les poids, FOB, colis, ratios, CIF et taxes. Le fichier fourni reste intact. Les positions et codes identifient les articles ; les absences ou différences de contexte sont signalées. Un écart ne prouve pas une erreur de calcul : vérifiez notamment le taux de change, les frais et les taux de taxes utilisés.
 
 ### Liste des modèles en attente
 
 Ouvrez **Outils → Modèles générés** pour voir les propositions conservées, leurs totaux, leur date et leur statut de validation locale. Le filtre initial affiche **En attente** ; choisissez **Tous** pour retrouver aussi les modèles validés ou rejetés.
 
-Dans **Vérifier et générer**, cliquez sur **Enregistrer la proposition** pour la conserver avant export. Les nouveaux exports XML sont ajoutés automatiquement. Les clics répétés sur la même proposition ne créent pas de doublon et ne remettent pas son statut à zéro. La consultation présente les valeurs par article, les ratios et l'historique daté des actions ; la comparaison avec un fichier XML reste possible depuis cette liste, même si le fichier source a été déplacé.
+Dans **Vérifier et générer**, cliquez sur **Enregistrer la proposition** pour la conserver avant export. Les nouveaux exports XML sont ajoutés automatiquement. Les clics répétés sur la même proposition ne créent pas de doublon et ne remettent pas son statut à zéro. La consultation présente les valeurs par article, les ratios et l'historique daté des actions ; la comparaison avec un fichier XML devient possible uniquement après export XML. La copie exacte du nouvel export est conservée pour comparer même si le fichier est déplacé. Les propositions non exportées restent consultables, sans comparaison.
 
 Les statuts sont internes à l'outil. Les anciens exports restent dans **Historique** ; ils ne sont pas ajoutés rétroactivement à cette liste. Les simulations non enregistrées ne sont pas conservées automatiquement.

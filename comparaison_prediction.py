@@ -19,6 +19,26 @@ def comparer(resultat, chemin_base, chemin_fourni):
     """Écart = fichier fourni moins aperçu ; aucune acceptation n'est déduite."""
     base = extraire(Path(chemin_base).read_bytes())
     fourni = extraire(Path(chemin_fourni).read_bytes())
+    return _comparer(resultat, base, fourni, chemin_fourni)
+
+
+def comparer_xmls(chemin_genere, chemin_fourni):
+    """Compare les valeurs effectivement inscrites dans le XML généré, sans recalcul."""
+    genere = extraire(Path(chemin_genere).read_bytes())
+    fourni = extraire(Path(chemin_fourni).read_bytes())
+    v = genere['valorisation']
+    resultat = {'resume': {k: v[c] for k,c in (
+        ('poids','poids_total'),('fob','fob_total'),('cif','cif_total'),('taxes_totales','taxes_totales'),
+        ('taux','taux_change'),('fret','fret_externe_montant'),('assurance','assurance_montant'),('colis_total','colis_total'))},
+        'colis': [a['colis'] for a in genere['articles']]}
+    resultat['resume']['articles'] = [{k:a[c] for k,c in (
+        ('poids','poids_brut'),('fob','fob'),('cif','cif'),('taxes','taxes_article'))} for a in genere['articles']]
+    rapport = _comparer(resultat,genere,fourni,chemin_fourni,source_xml=True)
+    rapport['source'] = str(Path(chemin_genere))
+    return rapport
+
+
+def _comparer(resultat, base, fourni, chemin_fourni, source_xml=False):
     resume = resultat['resume']
     avertissements = []
     for origine, donnees in (('Base', base), ('Fichier fourni', fourni)):
@@ -43,7 +63,7 @@ def comparer(resultat, chemin_base, chemin_fourni):
     if [(t['code'], t['taux']) for t in base['taxes_globales']] != [(t['code'], t['taux']) for t in fourni['taxes_globales']]:
         contextes.append('Codes ou taux de taxes globales différents.')
     # Le calcul ignore les lignes sans FOB ; conserver leur position XML plutôt que renuméroter.
-    sources = [a for a in base['articles'] if a['fob'] is not None and Decimal(a['fob']) != 0]
+    sources = base['articles'] if source_xml else [a for a in base['articles'] if a['fob'] is not None and Decimal(a['fob']) != 0]
     if len(sources) != len(resume['articles']) or len(sources) != len(resultat['colis']):
         raise ValueError("Les articles de l'aperçu ne correspondent plus au XML de base. Recalculez l'aperçu.")
     predictions = {}
@@ -80,7 +100,7 @@ def comparer(resultat, chemin_base, chemin_fourni):
         ajouter(position, actuel.get('code') or source.get('code') or '—',
                 actuel.get('designation') or source.get('designation') or '', prevu, valeurs, compatible, motif)
     prevu = {k: _decimal(resume[c]) for k, c in (('poids', 'poids'), ('fob', 'fob'), ('cif', 'cif'), ('taxes', 'taxes_totales'))}
-    prevu['colis'] = sum(_decimal(c) for c in resultat['colis'])
+    prevu['colis'] = _decimal(resume['colis_total']) if 'colis_total' in resume else sum(_decimal(c) for c in resultat['colis'])
     prevu['ratio'] = _ratio(prevu['fob'], prevu['poids'])
     actuel = {k: _decimal(vf[c]) for k, c in (('poids', 'poids_total'), ('fob', 'fob_total'), ('colis', 'colis_total'), ('cif', 'cif_total'), ('taxes', 'taxes_totales'))}
     actuel['ratio'] = _ratio(actuel['fob'], actuel['poids'])

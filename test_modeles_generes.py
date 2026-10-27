@@ -145,13 +145,48 @@ class ModelesGeneresTest(unittest.TestCase):
         self.assertTrue(self.source.exists())
         self.assertEqual(export.read_bytes(),self.xml)
 
+    def test_proposition_sans_export_non_comparable(self):
+        identifiant=self.enregistrer()
+        with self.assertRaisesRegex(ValueError,'pas encore été exportée'):
+            M.lire_export(identifiant,base=self.base)
+        self.assertFalse(M.lister(base=self.base)[0]['exporte'])
+
+    def test_export_exact_archive_meme_si_fichier_deplace(self):
+        export=self.racine/'export.xml'
+        contenu=self.xml+b'\n<!-- export exact -->'
+        export.write_bytes(contenu)
+        identifiant=self.enregistrer(export)
+        export.unlink()
+        self.assertEqual(M.lire_export(identifiant,base=self.base),contenu)
+        self.assertTrue(M.lister(base=self.base)[0]['exporte'])
+        with sqlite3.connect(self.base) as conn:
+            with self.assertRaises(sqlite3.IntegrityError):
+                conn.execute("UPDATE exports_xml SET sha256='faux'")
+
+    def test_ancien_evenement_export_fallback_empreinte_obligatoire(self):
+        import hashlib,json
+        identifiant=self.enregistrer()
+        export=self.racine/'ancien.xml'
+        export.write_bytes(self.xml)
+        with sqlite3.connect(self.base) as conn:
+            conn.execute("INSERT INTO evenements(modele_id,date_utc,auteur,action,statut,detail) VALUES(?,?,?,?,?,?)",
+                (identifiant,M._maintenant(),'alice','export',None,json.dumps({'chemin':str(export),
+                    'sha256':hashlib.sha256(self.xml).hexdigest()})))
+        self.assertEqual(M.lire_export(identifiant,base=self.base),self.xml)
+        export.write_bytes(self.xml+b'<!-- modifie -->')
+        with self.assertRaisesRegex(ValueError,'modifié'):
+            M.lire_export(identifiant,base=self.base)
+        export.unlink()
+        with self.assertRaisesRegex(ValueError,'introuvable'):
+            M.lire_export(identifiant,base=self.base)
+
 
 class ActionsModelesGeneresTest(unittest.TestCase):
     def page(self):
         return SimpleNamespace(resultat={'apercu':True},fichier=None,
             app=SimpleNamespace(base='base.xml',utilisateur='alice',session_verrouillee=False,
                 pages={'modeles_generes':SimpleNamespace(filtre=Mock())},montrer=Mock(),calculer=Mock(return_value={'chemin':'export.xml'})),
-            message=Mock(),generer=Mock(),finder=Mock())
+            message=Mock(),generer=Mock(),finder=Mock(),comparer_bouton=Mock())
 
     def test_sauvegarde_explicite_et_navigation(self):
         page=self.page()

@@ -7,15 +7,15 @@ from ui.theme import nombre
 
 def afficher(parent, rapport):
     fen = tk.Toplevel(parent)
-    fen.title('Comparer l’aperçu avec un XML')
+    fen.title('Comparer le XML généré avec un fichier fourni')
     fen.geometry('1240x720')
     fen.transient(parent.winfo_toplevel())
     cadre = ttk.Frame(fen, padding=16)
     cadre.pack(fill='both', expand=True)
-    theme.entete_page(cadre, 'Aperçu / fichier fourni',
-        'Écart = fichier fourni − prévu. Un écart ne prouve pas une erreur de calcul ou une acceptation douanière.')
-    ttk.Label(cadre, text=f"Fichier fourni : {rapport['fichier']}\n"
-        f"Devise prévue : {rapport['devise_prevue'] or 'absente'} · devise fournie : {rapport['devise_fournie'] or 'absente'}",
+    theme.entete_page(cadre, 'XML généré / fichier fourni',
+        'Écart = fichier fourni − XML généré. Un écart ne prouve pas une erreur de calcul ou une acceptation douanière.')
+    ttk.Label(cadre, text=f"XML généré : {rapport.get('source', '—')}\nFichier fourni : {rapport['fichier']}\n"
+        f"Devise du XML généré : {rapport['devise_prevue'] or 'absente'} · devise fournie : {rapport['devise_fournie'] or 'absente'}",
         wraplength=1150).pack(anchor='w', pady=6)
     message = theme.Message(cadre)
     message.pack(fill='x', pady=6)
@@ -25,7 +25,7 @@ def afficher(parent, rapport):
         contexte[:8])
     zone, table = theme.tableau(cadre, [
         ('article', 'Position · Code', 160, 'w'), ('metrique', 'Mesure', 130, 'w'),
-        ('prevu', 'Prévu', 150, 'e'), ('fourni', 'Fichier fourni', 150, 'e'),
+        ('prevu', 'XML généré', 150, 'e'), ('fourni', 'Fichier fourni', 150, 'e'),
         ('ecart', 'Écart', 130, 'e'), ('pourcentage', 'Écart %', 110, 'e'), ('etat', 'Observation', 290, 'w')], 17)
     zone.pack(fill='both', expand=True)
     for ligne in rapport['lignes']:

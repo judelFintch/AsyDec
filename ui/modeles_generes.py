@@ -28,9 +28,10 @@ class PageModelesGeneres(ttk.Frame):
         self.filtre.set('En attente')
         self.filtre.pack(side='left',padx=4)
         self.filtre.bind('<<ComboboxSelected>>',lambda e:self.afficher())
-        for texte, action in [('Actualiser',self.afficher),('Consulter',self.consulter),
-                              ('Comparer avec un XML…',self.comparer)]:
+        for texte, action in [('Actualiser',self.afficher),('Consulter',self.consulter)]:
             theme.bouton(barre,texte,action).pack(side='left',padx=4)
+        self.comparer_bouton=theme.bouton(barre,'Comparer avec un XML…',self.comparer,state='disabled')
+        self.comparer_bouton.pack(side='left',padx=4)
         actions=ttk.Frame(self)
         actions.pack(fill='x',pady=(0,8))
         for statut in service.STATUTS:
@@ -43,6 +44,7 @@ class PageModelesGeneres(ttk.Frame):
             ('fob','FOB USD',110,'e'),('poids','Poids kg',100,'e'),('colis','Colis',75,'e')],16)
         cadre.pack(fill='both',expand=True)
         self.table.bind('<Double-1>',lambda e:self.consulter())
+        self.table.bind('<<TreeviewSelect>>',lambda e:self.actualiser_comparaison())
 
     def afficher(self):
         try:
@@ -52,6 +54,7 @@ class PageModelesGeneres(ttk.Frame):
             self.message.afficher('erreur','Liste indisponible',[str(exc)])
             return
         self.modeles={str(m['id']):m for m in lignes}
+        self.comparer_bouton.configure(state='disabled')
         self.table.delete(*self.table.get_children())
         for identifiant,m in self.modeles.items():
             r=m['resultat']
@@ -60,6 +63,11 @@ class PageModelesGeneres(ttk.Frame):
                 nombre(r['resume']['poids']),sum(r['colis'])))
         self.message.afficher('ok',f'{len(lignes)} modèle(s) dans cette liste',
             ['Depuis Vérifier et générer, utilisez « Enregistrer la proposition » ; un export XML est aussi ajouté automatiquement.'])
+
+    def actualiser_comparaison(self):
+        identifiant=self.selection()
+        exporte=self.modeles.get(str(identifiant),{}).get('exporte',False)
+        self.comparer_bouton.configure(state='normal' if exporte and not self.app.session_verrouillee else 'disabled')
 
     def selection(self):
         choix=self.table.selection()
@@ -127,17 +135,23 @@ class PageModelesGeneres(ttk.Frame):
         identifiant=self.selection()
         if identifiant is None:
             return
-        chemin=filedialog.askopenfilename(parent=self,title='Comparer le modèle conservé avec un XML',filetypes=[('XML','*.xml')])
+        try:
+            # Garde indépendante du bouton : aucune simulation pré-export n'est comparable.
+            contenu=service.lire_export(identifiant)
+        except Exception as exc:
+            messagebox.showerror('Comparaison indisponible',str(exc),parent=self)
+            return
+        chemin=filedialog.askopenfilename(parent=self,title='Comparer le XML généré avec un fichier fourni',filetypes=[('XML','*.xml')])
         if not chemin:
             return
         try:
-            from comparaison_prediction import comparer
+            from comparaison_prediction import comparer_xmls
             from ui.comparaison import afficher
-            d=service.detail(identifiant)
             with tempfile.TemporaryDirectory(prefix='asydec-comparaison-') as temp:
-                source=Path(temp)/'base.xml'
-                source.write_bytes(d['base_xml'])
-                rapport=comparer(d['resultat'],source,chemin)
+                source=Path(temp)/'export.xml'
+                source.write_bytes(contenu)
+                rapport=comparer_xmls(source,chemin)
+            rapport['source']=f'Modèle n° {identifiant} : XML exporté archivé'
             afficher(self,rapport)
         except Exception as exc:
             messagebox.showerror('Comparaison impossible',str(exc),parent=self)

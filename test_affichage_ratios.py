@@ -10,7 +10,7 @@ class AffichageRatiosTest(unittest.TestCase):
         self.tableau = Mock()
         self.tableau.get_children.return_value = ('ancien',)
         self.page = SimpleNamespace(tableau=self.tableau, cartes={k:Mock() for k in ('poids','fob','colis','taxes')},
-            var_fichier=Mock(), deja_vues={}, regenerer_bouton=Mock(), generer=Mock(), message=Mock(),
+            var_fichier=Mock(), comparer_bouton=Mock(), deja_vues={}, regenerer_bouton=Mock(), generer=Mock(), message=Mock(),
             _contexte_regeneration=Mock(return_value='contexte'), _repartition=E.PageVerifier._repartition)
         self.page._montrer = lambda res: E.PageVerifier._montrer(self.page,res)
 
@@ -39,6 +39,12 @@ class AffichageRatiosTest(unittest.TestCase):
         E.PageVerifier._presenter(self.page,self.resultat(poids=125,fob=50))
         self.tableau.delete.assert_called_once_with('ancien')
         self.assertEqual(self.lignes()[0][4], '0,4000')
+
+    def test_nouvel_apercu_retire_export_et_desactive_comparaison(self):
+        self.page.fichier='ancien-export.xml'
+        E.PageVerifier._presenter(self.page,self.resultat())
+        self.assertIsNone(self.page.fichier)
+        self.page.comparer_bouton.configure.assert_called_with(state='disabled')
 
     def test_poids_nul_affiche_tiret_sans_division_par_zero(self):
         E.PageVerifier._presenter(self.page,self.resultat(poids=0))

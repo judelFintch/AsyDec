@@ -5,7 +5,7 @@ from pathlib import Path
 from types import SimpleNamespace
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 import xml.etree.ElementTree as ET
 import comparaison_prediction as C
 from test_references import declaration, item
@@ -113,25 +113,63 @@ class ComparaisonPredictionTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.rapport()
 
+    def test_comparaison_xml_lit_valeurs_exportees_sans_resume_prediction(self):
+        self.modifier('Item/Tarification/Item_price','165')
+        rapport=C.comparer_xmls(self.fourni,self.base)
+        l=self.ligne(rapport,1,'fob')
+        self.assertEqual(l['prevu'],Decimal(165))
+        self.assertEqual(l['fourni'],Decimal(150))
+        self.assertEqual(l['ecart'],Decimal(-15))
+        self.assertEqual(self.ligne(rapport,3,'poids')['prevu'],50)
+
+
 
 class ActionComparaisonTest(unittest.TestCase):
-    def test_annulation_et_absence_apercu_ou_verrouillage(self):
-        for resultat,verrouille in ((None,False),({'resume':{}},True),({'resume':{}},False)):
-            page=SimpleNamespace(resultat=resultat, app=SimpleNamespace(session_verrouillee=verrouille))
-            with patch.object(E.filedialog,'askopenfilename',return_value='') as choisir, \
-                 patch('ui.comparaison.afficher') as afficher:
+    def test_preexport_absence_fichier_et_verrouillage_sans_selecteur(self):
+        for fichier,verrouille in ((None,False),('absent.xml',False),('export.xml',True)):
+            page=SimpleNamespace(fichier=fichier, comparer_bouton=Mock(), app=SimpleNamespace(session_verrouillee=verrouille))
+            with patch.object(E.filedialog,'askopenfilename') as choisir:
                 E.PageVerifier.comparer_xml(page)
-                self.assertEqual(choisir.call_count,int(bool(resultat) and not verrouille))
-                afficher.assert_not_called()
+            choisir.assert_not_called()
 
-    def test_ouvre_fichier_local_et_rapport_sans_import(self):
-        page=SimpleNamespace(resultat={'resume':{}},app=SimpleNamespace(base='base.xml',session_verrouillee=False))
-        with patch.object(E.filedialog,'askopenfilename',return_value='fourni.xml'), \
-             patch('comparaison_prediction.comparer',return_value={'lignes':[]}) as comparer, \
+    def test_annulation_postexport(self):
+        page=SimpleNamespace(fichier='export.xml', app=SimpleNamespace(session_verrouillee=False))
+        with patch.object(E.Path,'is_file',return_value=True),patch.object(E.filedialog,'askopenfilename',return_value=''),patch('ui.comparaison.afficher') as afficher:
+            E.PageVerifier.comparer_xml(page)
+        afficher.assert_not_called()
+
+    def test_postexport_compare_fichier_reel_pas_resume(self):
+        page=SimpleNamespace(resultat={'resume':'ne pas utiliser'},fichier='export.xml',app=SimpleNamespace(session_verrouillee=False))
+        with patch.object(E.Path,'is_file',return_value=True),patch.object(E.filedialog,'askopenfilename',return_value='fourni.xml'), \
+             patch('comparaison_prediction.comparer_xmls',return_value={'lignes':[]}) as comparer, \
              patch('ui.comparaison.afficher') as afficher:
             E.PageVerifier.comparer_xml(page)
-        comparer.assert_called_once_with(page.resultat,'base.xml','fourni.xml')
+        comparer.assert_called_once_with('export.xml','fourni.xml')
         afficher.assert_called_once_with(page,{'lignes':[]})
+
+    def test_liste_proposition_non_exportee_blocage_avant_selecteur(self):
+        import ui.modeles_generes as U
+        page=SimpleNamespace(app=SimpleNamespace(session_verrouillee=False),selection=lambda:1)
+        with patch.object(U.service,'lire_export',side_effect=ValueError('non exportée')), \
+             patch.object(U.filedialog,'askopenfilename') as choisir,patch.object(U.messagebox,'showerror') as erreur:
+            U.PageModelesGeneres.comparer(page)
+        choisir.assert_not_called()
+        erreur.assert_called_once()
+
+    def test_liste_compare_snapshot_exact_et_nettoie_fichier_temporaire(self):
+        import ui.modeles_generes as U
+        page=SimpleNamespace(app=SimpleNamespace(session_verrouillee=False),selection=lambda:1)
+        chemins=[]
+        def comparer(source,fourni):
+            chemins.append(Path(source))
+            self.assertEqual(Path(source).read_bytes(),b'<ASYCUDA><!-- export exact --></ASYCUDA>')
+            return {'lignes':[]}
+        with patch.object(U.service,'lire_export',return_value=b'<ASYCUDA><!-- export exact --></ASYCUDA>'), \
+             patch.object(U.filedialog,'askopenfilename',return_value='fourni.xml'), \
+             patch('comparaison_prediction.comparer_xmls',side_effect=comparer),patch('ui.comparaison.afficher') as afficher:
+            U.PageModelesGeneres.comparer(page)
+        afficher.assert_called_once()
+        self.assertFalse(chemins[0].exists())
 
 
 if __name__=='__main__':
