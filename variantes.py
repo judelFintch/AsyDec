@@ -69,6 +69,87 @@ def generer(poids_total, fob_total, colis_total, ratios, nombre=12, graine=None,
         raise ValueError('Saisissez le poids en kilogrammes entiers et le FOB au centime au maximum.')
     if profil and profil.get('variables_libres'):
         return generer_equilibres(W,F,colis_total,profil,nombre,graine,exclure)
+    if not profil and len({D(str(r)) for r in ratios}) == 1:
+        if W < 8:
+            raise ValueError('Il faut au moins 8 kg pour conserver huit articles de poids entier positif.')
+        if F < 8:
+            raise ValueError('Il faut au moins 0,08 USD de FOB total pour huit articles à FOB strictement positif au centime.')
+        ratio = D(str(ratios[0]))
+        cible_cents = D(F)
+        total_theorique = D(W) * ratio * 100
+        # Half-up rounding puts each positive line error in (-0.5, 0.5] cents.
+        ecart_cents = cible_cents - total_theorique
+        if ecart_cents <= D(-4) or ecart_cents > D(4):
+            raise ValueError('FOB total mathématiquement incompatible avec huit ratios identiques et les arrondis au centime.')
+
+        base, reste = divmod(W, 8)
+        poids = [base + (i < reste) for i in range(8)]
+        def centimes(kg):
+            return [q(D(p) * ratio * 100) for p in kg]
+
+        base_cents = centimes(poids)
+        propositions, vus_poids = [], {tuple(poids)}
+        exclues = set(exclure or ())
+        erreurs_colis = []
+
+        def ajouter(kg, montants):
+            if any(c <= 0 for c in montants):
+                return
+            proposition = {'poids': kg, 'fob': [c / 100 for c in montants]}
+            try:
+                proposition['colis'] = moteur.colis_gradues(kg, proposition['fob'], int(colis_total))
+            except ValueError as exc:
+                erreurs_colis.append(exc)
+                return
+            cle = cle_variante(proposition)
+            if cle in exclues or cle in {cle_variante(v) for v in propositions}:
+                return
+            propositions.append(proposition)
+
+        if sum(base_cents) == F:
+            ajouter(poids, base_cents)
+        if len(propositions) < nombre and W <= 100000:
+            for i in range(8):
+                for j in range(i + 1, 8):
+                    autres = sum(poids[k] for k in range(8) if k not in (i, j))
+                    total_paire = W - autres
+                    milieu = total_paire // 2
+                    for ecart in range(total_paire):
+                        candidats = (milieu - ecart, (total_paire + 1) // 2 + ecart)
+                        for premier in candidats:
+                            second = total_paire - premier
+                            if premier <= 0 or second <= 0:
+                                continue
+                            essais = list(poids)
+                            essais[i], essais[j] = premier, second
+                            cle_poids = tuple(essais)
+                            if cle_poids in vus_poids:
+                                continue
+                            vus_poids.add(cle_poids)
+                            fob_premier = q(D(premier) * ratio * 100)
+                            fob_second = q(D(second) * ratio * 100)
+                            nouveau_total = (sum(base_cents) - base_cents[i] - base_cents[j] +
+                                             fob_premier + fob_second)
+                            if nouveau_total == F:
+                                montants = list(base_cents)
+                                montants[i], montants[j] = fob_premier, fob_second
+                                ajouter(essais, montants)
+                                if len(propositions) >= nombre:
+                                    break
+                        if len(propositions) >= nombre:
+                            break
+                    if len(propositions) >= nombre:
+                        break
+                if len(propositions) >= nombre:
+                    break
+
+        if not propositions:
+            if erreurs_colis:
+                raise ValueError(f'Ratios identiques : répartition des colis impossible avec ce total. {erreurs_colis[-1]}') from erreurs_colis[-1]
+            if W == 8:
+                raise ValueError('Aucune répartition entière ne peut atteindre ce FOB : chaque article doit peser au moins 1 kg.')
+            raise ValueError('Aucune répartition exacte au centime avec huit FOB strictement positifs trouvée pour ces ratios identiques.')
+        return propositions
     cible = float(fob_total) / float(poids_total)
     limites = [x for paire in profil['bornes'] for x in paire] if profil else ratios
     if not min(limites) < cible < max(limites):

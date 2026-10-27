@@ -126,6 +126,13 @@ def colis_gradues(poids, fob, total, minimum=10):
     n = len(poids)
     W, F = sum(poids), sum(fob) or 1
     s = [poids[i] / W + 1e-6 * fob[i] / F for i in range(n)]
+    minimum_total = sum(range(minimum, minimum + n))
+    if total == minimum_total:
+        ordre = sorted(range(n), key=lambda i: (s[i], poids[i], i))
+        a = [0] * n
+        for k, i in enumerate(ordre):
+            a[i] = minimum + k
+        return a
     petits = set()
     while True:
         gros = [i for i in range(n) if i not in petits]
