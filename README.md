@@ -20,8 +20,8 @@ utilise le thème standard.
 
 | Fichier | Rôle |
 |---|---|
-| `ASYDEC.command` | **Interface principale** (double-clic), ou `.venv/bin/python asydec.py` |
-| `INTERFACE.command` | Ancienne interface, conservée pendant la transition |
+| `ASYDEC.command` | **Interface principale** (double-clic), ou `.venv/bin/python -m asydec` |
+| `INTERFACE.command` | Même interface que `ASYDEC.command`, gardé pour les anciens raccourcis |
 | `LANCER.command` | Génération par lot depuis `SAISIE.xlsx` (lignes « A GENERER ») |
 
 ## L'interface
@@ -92,7 +92,7 @@ Les XML peuvent être conservés dans une base SQLite (`DONNEES/asydec.db`, excl
 avec leur provenance, leur valorisation complète et toutes leurs lignes de taxes.
 
 ```bash
-.venv/bin/python import_references.py "../SHABANI SUMAILI" "../1 - A UTILISER"
+.venv/bin/python -m asydec.references.import_references "../SHABANI SUMAILI" "../1 - A UTILISER"
 ```
 
 - **Doublons.** Un fichier est reconnu par l'empreinte de son contenu : réimporté, renommé
@@ -121,7 +121,7 @@ avec leur provenance, leur valorisation complète et toutes leurs lignes de taxe
   corrige par une correction motivée. Ni l'import ni l'export ne marquent rien « accepté ».
 
 La consultation de cette base dans l'interface et son raccordement au générateur sont
-décrits dans `SUITE_MODULE_REFERENCES.md` (lots 3, 5 à 8).
+décrits dans `docs/SUITE_MODULE_REFERENCES.md` (lots 3, 5 à 8).
 
 ## Règles communes
 
@@ -150,18 +150,47 @@ ne garantit pas l'acceptation par SYDONIA : vérifiez toujours la déclaration a
 
 ## Organisation du code
 
-| Fichier | Contenu |
+```
+OUTILS/
+├── ASYDEC.command, INTERFACE.command, LANCER.command   lanceurs (double-clic)
+├── asydec/                  code de l'application
+│   ├── __main__.py          point d'entrée : python -m asydec
+│   ├── chemins.py           emplacement de toutes les données locales
+│   ├── formats.py           nombres et dates à la française
+│   ├── calcul/              règles de calcul, sans fichiers ni interface
+│   ├── declarations/        production, étude, comparaison et export des déclarations
+│   ├── references/          base SQLite des XML de référence et catalogue partagé
+│   ├── systeme/             compte local, préférences, remise à zéro, rechargement
+│   └── ui/                  interface Tkinter (ui/ancienne/ : ancienne interface)
+├── tests/                   tests unitaires, un fichier par fonctionnalité
+├── docs/                    rapports et notes de suivi du projet
+└── DONNEES/, CONFIG_LOCAL/, MODELES_XML/, …   données locales, exclues de Git
+```
+
+Le code dépend dans un seul sens : `ui` → `declarations` / `references` → `calcul`.
+Les données restent à la racine d'`OUTILS` : leurs chemins sont tous définis dans
+`asydec/chemins.py`, jamais à partir de l'emplacement d'un module.
+
+| Module | Contenu |
 |---|---|
-| `moteur.py` | Calcul : valeurs par article, taxes, totaux, colis gradués |
-| `generer.py` | Production d'une déclaration, nommage, registre, traitement de `SAISIE.xlsx` |
-| `variantes.py` | Bibliothèque de modèles, fourchettes de contrôle, propositions de répartition |
-| `etude_xml.py` | Lecture descriptive des XML, comparaison à une référence, export |
-| `ratios.py` | Récupération et regroupement des ratios par article, export |
-| `base_references.py` | Base SQLite : schéma, migrations versionnées, sauvegarde, restauration |
-| `service_references.py` | Statuts de validation, historique, consultation des documents |
-| `import_references.py` | Extraction complète des XML, archivage, dédoublonnage, diagnostics, import par lots |
-| `ui/` | Interface AsyDec : `app.py` (fenêtre), `etapes.py` (3 étapes), `outils.py` (outils), `theme.py` |
-| `interface.py`, `presentation.py` | Ancienne interface |
+| `calcul/moteur.py` | Calcul : valeurs par article, taxes, totaux, colis gradués |
+| `calcul/variantes.py` | Bibliothèque de modèles, fourchettes de contrôle, propositions de répartition |
+| `calcul/ratios.py` | Récupération et regroupement des ratios par article, export |
+| `calcul/anomalies.py` | Analyse des anomalies des modèles générés |
+| `declarations/generer.py` | Production d'une déclaration, nommage, registre, traitement de `SAISIE.xlsx` |
+| `declarations/etude_xml.py` | Lecture descriptive des XML, comparaison à une référence, export |
+| `declarations/comparaison_prediction.py` | Comparaison d'une proposition à un XML SYDONIA |
+| `declarations/modeles_generes.py` | Modèles générés : enregistrement, validation, comparaisons, export XML |
+| `declarations/export_pdf.py` | PDF des modèles et des comparaisons |
+| `declarations/tableau_excel.py` | Lecture d'un tableau d'articles dans un fichier Excel |
+| `references/base_references.py` | Base SQLite : schéma, migrations versionnées, sauvegarde, restauration |
+| `references/service_references.py` | Statuts de validation, historique, consultation des documents |
+| `references/import_references.py` | Extraction complète des XML, archivage, dédoublonnage, diagnostics, import par lots |
+| `references/import_fond.py` | Import en tâche de fond |
+| `references/catalogue_xml.py` | Médiathèque XML commune aux pages |
+| `systeme/gestion_locale.py` | Compte administrateur, préférences, remise à zéro |
+| `systeme/rechargement.py` | Détection d'une nouvelle version du code (bouton « Recharger ») |
+| `ui/` | `app.py` (fenêtre), `etapes.py` (3 étapes), `outils.py` (outils), `theme.py`, une page par fichier |
 
 ## Données et vérifications
 
@@ -170,7 +199,7 @@ Les données locales sont exclues de Git. `MODELES_XML` contient les modèles de
 `<IMPORTATEUR>/1 - HISTORIQUE/`, à côté du dossier `OUTILS`, nommées
 `IMPORTATEUR FOBUSD POIDSKG NN.xml`. Aucun fichier existant n'est écrasé.
 
-Tests : `.venv/bin/python -B -m unittest discover`.
+Tests : `.venv/bin/python -B -m unittest discover -s tests -t .`
 Dans l'ancienne interface, le bouton Refresh recharge le code local et réinitialise les
 saisies non enregistrées.
 
@@ -278,6 +307,18 @@ Sous le tableau des articles, **Total taxes estimé** donne le total des taxes d
 
 Dans **Modèles générés**, sélectionnez un modèle qui vous semble bon puis **☆ Cocher bon modèle**. Une ★ apparaît dans la première colonne ; le même bouton (**★ Retirer la coche**) l'enlève. Le filtre **Bons modèles ★** les regroupe. La coche ne valide rien et ne change aucune règle : elle sert seulement à guider **Générer une autre répartition** (étape Articles). Pour un dossier qui a les mêmes articles qu'un ou plusieurs modèles cochés, l'outil tire plusieurs répartitions valides et retient celle dont les proportions de poids, FOB et colis ressemblent le plus à un bon modèle. Le message indique lequel et le pourcentage de ressemblance. Sans modèle coché pour ces articles, le tirage reste libre.
 
+### Repérer les modèles déjà utilisés
+
+Dans **Répartitions**, la colonne « Déjà utilisé » indique, pour chaque proposition, si son
+modèle de référence a déjà servi : nombre de modèles générés à partir de lui et date du dernier.
+Ces lignes sont en couleur. Un modèle est reconnu par son contenu, même renommé ou déplacé.
+Les modèles générés avant ce suivi sont rattachés au XML de leur dossier ; les modèles supprimés
+ne comptent pas.
+
+**Signaler le modèle comme utilisé** marque le modèle de la proposition sélectionnée, par exemple
+s'il a servi en dehors d'AsyDec ; le même bouton retire le signalement. Chaque signalement est
+historisé avec son auteur et sa date, sans jamais être effacé.
+
 ### Revoir une comparaison à tout moment
 
 Chaque comparaison est enregistrée en entier dans l'historique du modèle : la répartition (poids, FOB, colis par article), les taxes par article, les taxes globales, le total des taxes, les taux et le détail ligne par ligne. Elle reste consultable même si le fichier comparé est déplacé ou supprimé ; ce fichier lui-même n'est pas copié.
@@ -300,3 +341,19 @@ Chaque importateur a son dossier dans `DEC FRIPERIE`, à côté de `OUTILS` :
 | `5 - PDF` | PDF des modèles et des comparaisons | **Imprimer / Enregistrer en PDF…** |
 
 Les fenêtres d'enregistrement et d'ouverture s'ouvrent directement dans le bon sous-dossier, avec un nom proposé (plaque, importateur, FOB, poids). Vous pouvez toujours choisir un autre emplacement. Les sous-dossiers sont créés au besoin ; rien n'est déplacé, renommé ni supprimé. Le numéro 3 reste libre pour les dossiers existants comme `3 - A ESSAYER`. Dans **Modèles générés**, **Ouvrir le dossier** affiche le dossier de l'importateur du modèle sélectionné dans le Finder.
+
+### Analyse des anomalies
+
+Dans **Modèles générés**, la colonne **Risque** signale les modèles qui s'écartent des dossiers connus : **● Élevé** (rouge), **● À vérifier** (orange) ou « — ». Le filtre **À risque ⚠** les regroupe, le panneau du bas résume le premier point, et **Anomalies…** affiche toutes les explications.
+
+Contrôles effectués, article par article (même code, même désignation, même devise) :
+
+- ratio FOB/kg jamais observé dans la bibliothèque des références → **Élevé**. Pour les articles 4, 7 et 8, ajustables, le message le rappelle ;
+- ratio en marge (hors des 10 % les plus bas ou les plus hauts, à partir de 5 dossiers) → **À vérifier** ;
+- part du poids jamais vue → **À vérifier** ;
+- modèle très proche d'un modèle que vous avez **rejeté localement** → **Élevé**, avec le motif du rejet ;
+- poids et FOB identiques à un autre modèle → **À vérifier** ;
+- dernière comparaison : total des taxes à plus de 5 % (**Élevé**) ou de 1 % (**À vérifier**) du fichier comparé ;
+- article sans aucune référence → information.
+
+**Important :** c'est une aide à la vigilance, pas une prédiction. Aucune référence n'est encore marquée « acceptée » ou « rejetée » : l'analyse compare donc aux dossiers connus, vérifiés ou non. Elle devient plus juste quand vous marquez les références acceptées (Bibliothèque des références) et quand vous rejetez localement les mauvais modèles en indiquant le motif.
