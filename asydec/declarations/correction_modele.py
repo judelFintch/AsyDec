@@ -51,6 +51,9 @@ def preparer(identifiant, donneur, mode='importateur', base=None):
     if importateur is None or not moteur._txt(importateur, 'Consignee_name') or not moteur._txt(importateur, 'Consignee_code'):
         raise ValueError('Le bon XML doit renseigner le nom et le code de l’importateur.')
     ancien = ET.fromstring(d['base_xml'])
+    choisi = d['resultat'].get('importateur_choisi')
+    if choisi:  # l'importateur du modèle est celui choisi à la génération, pas celui de sa base
+        moteur.ecrire_importateur(ancien, choisi['code'], choisi['bloc'])
     if mode == 'importateur':
         nouveau = copy.deepcopy(ancien)
         traders = nouveau.find('Traders')
@@ -75,7 +78,7 @@ def preparer(identifiant, donneur, mode='importateur', base=None):
     if not info['taux'] > 0:
         raise ValueError('Le taux de change du dossier doit être positif.')
     nom = f'Correction modele {identifiant}.xml'
-    resultat = {'nom':nom, 'chemin':nom, 'resume':resume,
+    resultat = {'nom':nom, 'chemin':nom, 'resume':resume, 'module':r.get('module', 'friperie'),
                 'fob':[f for f, _ in lignes], 'colis':list(r['colis']), 'info':info,
                 'mode':'SAISI', 'alertes':['Dossier corrigé : nouvelle version à valider.']}
     resultat['reference'] = copy.deepcopy(r.get('reference') or {'nom':d['nom'], 'sha256':modeles._sha(d['base_xml'])})

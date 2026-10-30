@@ -10,6 +10,8 @@ from asydec.calcul import moteur
 from asydec.calcul import variantes
 from asydec.declarations import generer
 from asydec.ui import theme
+from asydec.ui.articles_dynamiques import PanneauArticles
+from asydec.ui.importateurs import importateur_choisi, selecteur
 from asydec.ui.theme import nombre
 
 REFERENCE_DOSSIER = "Le XML du dossier (par défaut)"
@@ -62,6 +64,12 @@ class PageDossier(ttk.Frame):
         theme.bouton(haut, "XML déjà disponibles…", self.choisir_disponible).pack(side="left", padx=8)
         ttk.Label(haut, text="  ou double-cliquez un fichier récent ci-dessous", style="Doux.TLabel").pack(side="left")
 
+        ligne_importateur = ttk.Frame(self)
+        ligne_importateur.pack(fill="x", pady=(12, 0))
+        self.choix_importateur = selecteur(ligne_importateur, app)
+        ttk.Label(ligne_importateur, text="Avant ou après l'ouverture. Base tenue à jour depuis vos XML.",
+                  style="Doux.TLabel").pack(side="left")
+
         ttk.Label(self, text="Dossier ouvert", style="Section.TLabel").pack(anchor="w", pady=(20, 6))
         grille = ttk.Frame(self)
         grille.pack(fill="x")
@@ -111,9 +119,10 @@ class PageDossier(ttk.Frame):
         self.choix.configure(values=[REFERENCE_DOSSIER] + [d['nom'] for d in documents])
         self.suivant.configure(state="normal" if self.app.base else "disabled")
         self.fermer.configure(state="normal" if self.app.base else "disabled")
-        self._remplir()
+        self.choix_importateur.configure(values=self.app.importateurs_proposes())
+        self.remplir_infos()
 
-    def _remplir(self):
+    def remplir_infos(self):
         i = self.app.info
         if not i:
             for valeur in self.valeurs.values():
@@ -124,6 +133,9 @@ class PageDossier(ttk.Frame):
                   "manifeste": i["manifeste"], "camion": i["camion"], "taux": nombre(i["taux"], 2),
                   "fob": f"{nombre(i['fob'], 2)} USD", "poids": f"{nombre(i['poids'])} kg",
                   "colis": str(i["colis"]), "articles": str(len(i["fob_articles"]))}
+        choisi = importateur_choisi(self.app)
+        if choisi and choisi["code"] != i["code"]:
+            textes.update(importateur=f"{choisi['nom']}  (XML : {i['importateur'] or '—'})", code=choisi["code"])
         for cle, var in self.valeurs.items():
             var.set(textes[cle] or "—")
 
@@ -194,6 +206,9 @@ class PageArticles(ttk.Frame):
             e.pack(side="left")
             e.bind("<KeyRelease>", self.planifier)
 
+        self.panneau = PanneauArticles(self, app, self.articles_changes)
+        self.panneau.pack(fill="x", pady=(4, 6))
+
         zone = ttk.Frame(self)
         zone.pack(fill='both', expand=True, pady=(6, 0))
         canvas = tk.Canvas(zone, height=260, highlightthickness=0, bg=theme.FOND)
@@ -263,7 +278,7 @@ class PageArticles(ttk.Frame):
         ttk.Label(grille, text="Total", style="Total.TLabel").grid(row=n+1, column=1, padx=5, pady=(8, 0), sticky="w")
         for c, label in enumerate(self.totaux):
             label.grid(row=n+1, column=2 + c, padx=5, pady=(8, 0), sticky="e")
-
+        self.panneau.decorer(grille, self.noms)
 
     # -------------------------------------------------------------- valeurs
     def valeurs(self):
@@ -292,13 +307,34 @@ class PageArticles(ttk.Frame):
     def nouvelle_base(self):
         info = self.app.info
         self.construire_lignes(len(info["poids_articles"]))
+        self._nommer_articles()
+        self.var_fob_total.set(f"{info['fob']:g}")
+        self.var_colis_total.set(str(info["colis"]))
+        self.remplir(None, mode="RATIOS")
+        self.panneau.preparer()
+
+    def _nommer_articles(self):
+        info = self.app.info
         for k in range(len(self.e_poids)):
             designation = info["designations"][k] if k < len(info["designations"]) else ""
             code = info.get("positions_tarifaires", [])[k] if info.get("positions_tarifaires") else "—"
             self.noms[k].configure(text=f"{code} · {designation or f'Article {k+1}'}", wraplength=250)
-        self.var_fob_total.set(f"{info['fob']:g}")
-        self.var_colis_total.set(str(info["colis"]))
-        self.remplir(None, mode="RATIOS")
+
+    def articles_changes(self, anciennes, nouvelles):
+        """Gestion dynamique : poids, FOB et colis saisis suivent leur article ; une ligne ajoutée est vide."""
+        saisis = {cle: (lire(p), lire(f), lire(c))
+                  for cle, p, f, c in zip(anciennes, self.e_poids, self.e_fob, self.e_colis)}
+        if len(nouvelles) != len(self.e_poids):
+            self.construire_lignes(len(nouvelles))
+        self._nommer_articles()
+        reprise = [saisis.get(cle, (None, None, None)) for cle in nouvelles]
+        for k, (poids, fob, colis) in enumerate(reprise):
+            remplir(self.e_poids[k], poids)
+            remplir(self.e_fob[k], fob)
+            remplir(self.e_colis[k], int(colis) if colis is not None else None)
+        if all(c is not None for _, _, c in reprise):
+            self.var_colis_total.set(str(int(sum(c for _, _, c in reprise))))
+        self.changer_mode()
 
     # --------------------------------------------------------------- actions
     def changer_mode(self):
@@ -324,7 +360,8 @@ class PageArticles(ttk.Frame):
         try:
             res = generer.produire(self.app.base, poids, self.app.profil["ratios"], getattr(self.app, "table_imp", []),
                 {}, mode="SAISI", fob_saisis=fob, colis_total=v["colis_total"], colis_saisis=v["colis"],
-                enregistrer=False, profil=self.app.profil, plaque=plaque_saisie(self.app))
+                enregistrer=False, profil=self.app.profil, plaque=plaque_saisie(self.app),
+                importateur=importateur_choisi(self.app))
         except Exception as exc:  # noqa: BLE001 - affiché comme estimation impossible
             self.var_taxes.set(f"Total taxes estimé : —  ({exc})")
             self.cartes["taxes"].definir("—", str(exc))
@@ -348,7 +385,8 @@ class PageArticles(ttk.Frame):
         """Modèles cochés ★ ayant les mêmes articles que le dossier ; liste vide en cas de problème de lecture."""
         try:
             from asydec.declarations import modeles_generes
-            return modeles_generes.bons_modeles(variantes.signature(self.app.base))
+            return modeles_generes.bons_modeles(variantes.signature(self.app.base),
+                module=getattr(self.app, 'module_travail', 'friperie'))
         except Exception:  # noqa: BLE001 - l'aide est facultative, le tirage libre reste possible
             return []
 
@@ -400,7 +438,7 @@ class PageArticles(ttk.Frame):
             generer.produire(self.app.base, proposition["poids"], profil["ratios"], self.app.table_imp,
                 generer.lire_registre(), mode="SAISI", fob_total=total_fob, fob_saisis=proposition["fob"],
                 colis_total=int(total_colis), colis_saisis=proposition["colis"], enregistrer=False,
-                profil=profil, plaque=plaque_saisie(self.app))
+                profil=profil, plaque=plaque_saisie(self.app), importateur=importateur_choisi(self.app))
         except Exception as exc:
             messagebox.showinfo("Répartition actuelle conservée", str(exc), parent=self)
             return
@@ -658,7 +696,7 @@ class PageVerifier(ttk.Frame):
             res = generer.produire(self.app.base, v["poids"], profil["ratios"], self.app.table_imp,
                 generer.lire_registre(), mode="SAISI", fob_total=total_fob, fob_saisis=v["fob"],
                 colis_total=total_colis, colis_saisis=v["colis"], enregistrer=False, profil=profil,
-                plaque=plaque_saisie(self.app))
+                plaque=plaque_saisie(self.app), importateur=importateur_choisi(self.app))
         except Exception as exc:
             messagebox.showinfo("Proposition actuelle conservée", str(exc), parent=self)
             return
@@ -702,7 +740,7 @@ class PageVerifier(ttk.Frame):
         try:
             from asydec.declarations import modeles_generes
             identifiant = modeles_generes.enregistrer(self.resultat, self.app.base, self.app.utilisateur,
-                                                       reference=self.app.reference)
+                                                       reference=self.app.reference, module=getattr(self.app, 'module_travail', 'friperie'))
         except Exception as exc:
             messagebox.showerror("Proposition non conservée", str(exc), parent=self)
             return
@@ -769,7 +807,7 @@ class PageVerifier(ttk.Frame):
         try:
             from asydec.declarations import modeles_generes
             modeles_generes.enregistrer(res, self.app.base, self.app.utilisateur, export=res['chemin'],
-                                         reference=self.app.reference)
+                                         reference=self.app.reference, module=getattr(self.app, 'module_travail', 'friperie'))
         except Exception as exc:
             messagebox.showwarning("XML créé, suivi non enregistré",
                 "Le XML a bien été créé. Son ajout à la liste des modèles a échoué : " + str(exc), parent=self)

@@ -1,4 +1,4 @@
-"""Point d'entrée commun des archives XML réutilisables dans les autres modules."""
+"""Médiathèque XML du module ouvert : chaque type de dossier a la sienne, sans partage."""
 import tkinter as tk
 from tkinter import ttk, messagebox
 
@@ -14,7 +14,7 @@ class PageMediatheque(ttk.Frame):
         self.app = app
         self.documents = []
         theme.entete_page(self, 'Médiathèque XML',
-            'Ajoutez vos fichiers une seule fois. Retrouvez-les ensuite dans Dossier, Répartitions, Ratios et Étude. '
+            'Les XML de ce type de dossier uniquement : ils servent dans Dossier, Répartitions, Ratios et Étude de ce module. '
             'Les ajouts utilisent l’import de fond de la Bibliothèque, avec progression et annulation. '
             'Le repérage initial des fichiers dans un dossier peut prendre du temps. '
             'Un import ne constitue pas une acceptation douanière. Les XML partiels servent uniquement aux études.')
@@ -25,21 +25,8 @@ class PageMediatheque(ttk.Frame):
                                 ('Marquer déjà utilisé', lambda: self.signaler(True)),
                                 ('Retirer le signalement', lambda: self.signaler(False)), ('Retirer la sélection…', self.retirer)]:
             theme.bouton(barre, libelle, action).pack(side='left', padx=4)
-        classement = ttk.Frame(self)
-        classement.pack(fill='x', pady=(0, 8))
-        ttk.Label(classement, text='Afficher').pack(side='left')
-        self.var_filtre = tk.StringVar(value='Tous les types')
-        filtre = ttk.Combobox(classement, textvariable=self.var_filtre, state='readonly', width=18,
-                              values=['Tous les types', 'Friperie', 'Divers'])
-        filtre.pack(side='left', padx=6)
-        filtre.bind('<<ComboboxSelected>>', lambda e: self.afficher())
-        ttk.Label(classement, text='Type pour les ajouts et le classement').pack(side='left', padx=(16, 4))
-        self.var_type = tk.StringVar(value='Friperie')
-        ttk.Combobox(classement, textvariable=self.var_type, state='readonly', width=14,
-                     values=['Friperie', 'Divers']).pack(side='left', padx=6)
-        theme.bouton(classement, 'Classer la sélection', self.classer).pack(side='left')
         cadre, self.table = theme.tableau(self, [
-            ('nom', 'XML', 300, 'w'), ('module', 'Type de dossier', 120, 'w'), ('statut', 'Statut', 120, 'w'),
+            ('nom', 'XML', 360, 'w'), ('statut', 'Statut', 120, 'w'),
             ('positions', 'Positions présentes', 150, 'w'), ('usage', 'Utilisation', 170, 'w'),
             ('deja', 'Déjà utilisé', 260, 'w')], 14)
         cadre.pack(fill='both', expand=True)
@@ -50,10 +37,7 @@ class PageMediatheque(ttk.Frame):
     def afficher(self):
         from asydec.references import service_references
         try:
-            self.documents = self.app.xml_disponibles(tous_modules=True)
-            filtre = self.var_filtre.get()
-            if filtre != 'Tous les types':
-                self.documents = [d for d in self.documents if catalogue_xml.MODULES[d['module']] == filtre]
+            self.documents = self.app.xml_disponibles()
             usages = modeles_generes.usages_references()
         except Exception as exc:
             self.message.afficher('erreur', 'Médiathèque indisponible', [str(exc)])
@@ -61,38 +45,12 @@ class PageMediatheque(ttk.Frame):
         self.table.delete(*self.table.get_children())
         for k, d in enumerate(self.documents):
             usage = usages.get(d['empreinte'])
-            self.table.insert('', 'end', iid=str(k), tags=('alerte',) if usage else (), values=(d['nom'], catalogue_xml.MODULES[d['module']],
+            self.table.insert('', 'end', iid=str(k), tags=('alerte',) if usage else (), values=(d['nom'],
                 service_references.STATUTS.get(d['statut'], d['statut']),
                 ', '.join(map(str, d['positions'])), d['usage'], 'Oui · ' + texte_usage(usage) if usage else '—'))
-        self.message.afficher('ok', f'{len(self.documents)} XML disponible(s)',
-            ['Dans chaque module, cliquez sur « XML déjà disponibles » ou « Médiathèque XML » pour utiliser ces archives.'])
-
-    def classer(self):
-        if self.app.session_verrouillee:
-            return
-        documents = [self.documents[int(k)] for k in self.table.selection()]
-        if not documents:
-            self.message.afficher('alerte', 'Sélectionnez les XML à classer.')
-            return
-        module = self.var_type.get().lower()
-        try:
-            empreintes = {d['empreinte'] for d in documents if d['module'] != module}
-            actifs = [p for p in (self.app.base, self.app.reference) if p]
-            if any(modeles_generes.empreinte_fichier(p) in empreintes for p in actifs):
-                if not self.app.fermer_dossier():
-                    return
-            catalogue_xml.classer(self.app.base_refs(), empreintes, module)
-            repartitions = self.app.pages['repartitions']
-            repartitions.propositions, repartitions.deja_vues = [], {}
-            repartitions.selection_modeles = None
-            repartitions.liste.delete(*repartitions.liste.get_children())
-            repartitions.detail.delete(*repartitions.detail.get_children())
-            repartitions.var_total_declaration.set('Total taxes de la déclaration estimé : —')
-            repartitions.signaler.configure(state='disabled')
-            self.app.montrer('mediatheque')
-            self.message.afficher('ok', f'{len(empreintes)} XML classé(s) dans {catalogue_xml.MODULES[module]}.')
-        except Exception as exc:
-            self.message.afficher('erreur', 'Classement impossible', [str(exc)])
+        module = catalogue_xml.MODULES.get(getattr(self.app, 'module_travail', 'friperie'), '')
+        self.message.afficher('ok', f'{len(self.documents)} XML dans la médiathèque {module}',
+            ['Les autres types de dossier ont leur propre médiathèque : un XML ajouté ici n’y apparaît pas.'])
 
     def signaler(self, utilise):
         if self.app.session_verrouillee:
@@ -122,10 +80,9 @@ class PageMediatheque(ttk.Frame):
             page.message.afficher('alerte', 'Un import est déjà en cours',
                 ['Suivez sa progression ici ou demandez son annulation avant un nouvel ajout.'])
             return
-        page.message.afficher('alerte', 'Ajout à la médiathèque commune',
+        page.message.afficher('alerte', 'Ajout à la médiathèque du module',
             ['L’import s’exécute en tâche de fond ; sa progression et son annulation sont disponibles ici.'])
-        if hasattr(self, 'var_type'):
-            page.module_import_suivant = self.var_type.get().lower()
+        page.module_import_suivant = getattr(self.app, 'module_travail', 'friperie')
         try:
             if dossier:
                 page.importer_dossier()
@@ -143,7 +100,7 @@ class PageMediatheque(ttk.Frame):
     def retirer(self):
         documents = [self.documents[int(k)] for k in self.table.selection()]
         if documents and messagebox.askyesno('Retirer de la médiathèque',
-                'Retirer ces XML de la liste partagée et fermer le dossier actif s’il les utilise ? '
+                'Retirer ces XML de la médiathèque de ce module et fermer le dossier actif s’il les utilise ? '
                 'Les originaux, exports et historiques sont conservés.', parent=self):
             self.app.retirer_xml(documents)
             self.afficher()

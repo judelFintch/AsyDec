@@ -187,7 +187,7 @@ Les données restent à la racine d'`OUTILS` : leurs chemins sont tous définis 
 | `references/service_references.py` | Statuts de validation, historique, consultation des documents |
 | `references/import_references.py` | Extraction complète des XML, archivage, dédoublonnage, diagnostics, import par lots |
 | `references/import_fond.py` | Import en tâche de fond |
-| `references/catalogue_xml.py` | Médiathèque XML commune aux pages |
+| `references/catalogue_xml.py` | Médiathèques XML, une par type de dossier |
 | `systeme/gestion_locale.py` | Compte administrateur, préférences, remise à zéro |
 | `systeme/rechargement.py` | Détection d'une nouvelle version du code (bouton « Recharger ») |
 | `ui/` | `app.py` (fenêtre), `etapes.py` (3 étapes), `outils.py` (outils), `theme.py`, une page par fichier |
@@ -202,6 +202,24 @@ Les données locales sont exclues de Git. `MODELES_XML` contient les modèles de
 Tests : `.venv/bin/python -B -m unittest discover -s tests -t .`
 Dans l'ancienne interface, le bouton Refresh recharge le code local et réinitialise les
 saisies non enregistrées.
+
+## Choisir l'importateur d'un dossier
+
+La base des importateurs se construit seule à partir des XML de la bibliothèque : un importateur par
+code, avec son nom et son adresse. Elle se met à jour dès qu'un nouveau XML est disponible, sans
+saisie. Les XML rejetés ou exclus ne l'alimentent pas ; un XML sans code importateur non plus.
+
+La liste **Importateur de la déclaration** est présente à l'étape **Dossier** et dans **Répartitions** :
+c'est le même choix aux deux endroits. Par défaut, l'importateur reste celui du XML du dossier.
+
+- Le choix peut se faire avant d'ouvrir le XML ou après. Il s'efface à la fermeture du dossier et à
+  l'ouverture d'un autre dossier, pour ne jamais passer d'un dossier au suivant sans qu'on le voie.
+- L'importateur choisi remplace le code, le nom et l'adresse dans le XML généré. Le payeur
+  (`Traders/Financial`) suit s'il était le même que l'importateur du XML ; un payeur tiers est conservé.
+- Les taxes, le taux, les frais et les articles restent ceux du XML du dossier, qui n'est jamais modifié.
+- Le fichier est nommé et rangé au nom de l'importateur choisi, et **Vérifier et générer** rappelle le
+  remplacement dans les points à vérifier.
+- Le modèle conservé garde ce choix, et **Reprendre pour modifier** le rétablit.
 
 ## Réutiliser un XML entre les pages
 
@@ -228,11 +246,20 @@ le futur service de décision fondé sur les observations acceptées et leur con
 - Le retrait est conservé après redémarrage et s'applique aux copies identiques. Les originaux, exports et archives/historiques de la bibliothèque ne sont pas effacés.
 - Pour rendre un fichier retiré à nouveau disponible, le charger volontairement via « Ouvrir un nouveau XML » ou « Nouveaux XML ». Son historique et son statut antérieur sont conservés.
 
-### Médiathèque XML partagée
+### Une médiathèque par type de dossier
 
-Dans **Outils → Médiathèque XML**, ajoutez des fichiers ou un dossier entier (sous-dossiers inclus). Chaque contenu est archivé une seule fois. Les autres modules peuvent sélectionner ces archives via **XML déjà disponibles** ou **Médiathèque XML**, sans demander de nouveau le fichier original.
+Chaque module (**Friperie**, **Divers**) a sa propre **Médiathèque XML**, dans son menu Outils.
+Il n'y a pas de partage : un XML ajouté dans Divers n'apparaît pas en Friperie, et inversement.
+Dossier, Répartitions, Ratios, Étude et Gestion dynamique des articles n'utilisent que les XML du
+module ouvert. Les modèles locaux (`MODELES_XML`) appartiennent à la Friperie.
 
-La liste montre les positions présentes et l'utilisation possible. Les XML de moins de huit articles servent uniquement aux études et statistiques ; leurs positions restent celles du fichier. Seuls les XML complets aux positions 1 à 8, avec poids et FOB positifs, peuvent être proposés comme bases de génération, sous réserve des contrôles supplémentaires. L'import ne signifie pas une acceptation douanière : le statut reste suivi séparément dans la bibliothèque des références. Retirer un XML de la médiathèque conserve les originaux, exports et historiques.
+Un même fichier peut être ajouté aux deux médiathèques ; il n'est archivé qu'une fois et garde son
+statut. Le retirer d'une médiathèque ne le retire pas de l'autre ; originaux, exports et historiques
+sont conservés. L'import ne signifie pas une acceptation douanière.
+
+**Divers** est entièrement dynamique : aucun lien avec les 8 articles. La gestion dynamique y
+accepte des XML de n'importe quel nombre d'articles ; chaque article garde son propre ratio, sans
+article ajustable, et ce sont les poids qui s'adaptent aux totaux.
 
 ### Comparer une proposition à un fichier XML
 
@@ -306,6 +333,26 @@ Sous le tableau des articles, **Total taxes estimé** donne le total des taxes d
 ### Cocher les bons modèles ★
 
 Dans **Modèles générés**, sélectionnez un modèle qui vous semble bon puis **☆ Cocher bon modèle**. Une ★ apparaît dans la première colonne ; le même bouton (**★ Retirer la coche**) l'enlève. Le filtre **Bons modèles ★** les regroupe. La coche ne valide rien et ne change aucune règle : elle sert seulement à guider **Générer une autre répartition** (étape Articles). Pour un dossier qui a les mêmes articles qu'un ou plusieurs modèles cochés, l'outil tire plusieurs répartitions valides et retient celle dont les proportions de poids, FOB et colis ressemblent le plus à un bon modèle. Le message indique lequel et le pourcentage de ressemblance. Sans modèle coché pour ces articles, le tirage reste libre.
+
+### Gestion dynamique des articles
+
+Dans l'étape **Articles**, la barre bleue « Gestion dynamique des articles » propose
+**Modifier les articles** : la colonne Marchandise du tableau devient un champ de recherche par
+position tarifaire (`6304`) ou par nom (`couvre lits`). Chaque choix s'applique aussitôt.
+
+- **Changer** l'article d'une ligne : choisissez-le dans la liste, ou tapez et validez par Entrée.
+- **Retirer** une ligne : ✕ en bout de ligne (par exemple pour un modèle à 5 articles).
+- **Ajouter** un article : champ « + Ajouter » de la barre.
+- **Revenir aux articles du dossier** rétablit les articles et le contrôle d'origine.
+
+Chaque article garde ses informations : position tarifaire, désignation, origine, procédures et
+lignes de taxes (taux), ratio FOB/kg de référence, bornes de contrôle et rôle (ajustable s'il a été
+vu en ligne 4, 7 ou 8). Quel que soit le nombre de lignes, les ratios sont conservés et les articles
+ajustables absorbent l'écart de FOB : il en faut au moins un. Poids, FOB et colis saisis suivent
+leur article ; une ligne ajoutée est vide. Le nombre d'articles du XML généré est mis à jour.
+
+Le catalogue est construit à partir des XML à 8 articles de la médiathèque. Le XML du dossier n'est
+jamais modifié : la base composée est enregistrée dans `DONNEES/compositions/`.
 
 ### Repérer les modèles déjà utilisés
 

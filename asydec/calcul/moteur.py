@@ -87,6 +87,18 @@ def ecrire_plaque(racine, plaque):
     return plaque
 
 
+def ecrire_importateur(racine, code, bloc):
+    """Inscrit l'importateur comme destinataire, et comme payeur s'il était aussi celui du XML."""
+    if racine.find("Traders/Consignee/Consignee_code") is None or racine.find("Traders/Consignee/Consignee_name") is None:
+        raise ValueError("Le XML de base n'a pas de champ importateur (Traders/Consignee) : importateur non inscrit.")
+    if racine.find("Traders/Financial") is not None and \
+            _txt(racine, "Traders/Financial/Financial_code") == _txt(racine, "Traders/Consignee/Consignee_code"):
+        _ecrire(racine, "Traders/Financial/Financial_code", code)
+        _ecrire(racine, "Traders/Financial/Financial_name", bloc)
+    _ecrire(racine, "Traders/Consignee/Consignee_code", code)
+    _ecrire(racine, "Traders/Consignee/Consignee_name", bloc)
+
+
 def infos_dossier(racine):
     nom = _txt(racine, "Traders/Consignee/Consignee_name").splitlines()
     its = articles(racine)

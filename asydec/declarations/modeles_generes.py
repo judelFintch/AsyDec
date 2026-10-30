@@ -133,13 +133,15 @@ def _basculer(identifiant, auteur, active, inactive, activer, detail, base):
 # =============================================================================
 # Instantanés : enregistrer, lister, consulter
 # =============================================================================
-def _empreinte(source, lignes, colis, plaque):
-    """Identité d'une proposition : base, répartition et plaque (absente des anciennes empreintes)."""
+def _empreinte(source, lignes, colis, plaque, importateur=None):
+    """Identité d'une proposition : base, répartition, plaque et importateur choisi (absents des anciennes empreintes)."""
     normaliser = lambda v: str(Decimal(str(v)).normalize())
     contenu = {'base': _sha(source),
                'lignes': [[normaliser(f), normaliser(p), normaliser(c)] for (f, p), c in zip(lignes, colis)]}
     if plaque:
         contenu['plaque'] = moteur.normaliser_plaque(plaque)
+    if importateur:
+        contenu['importateur'] = importateur['code']
     return _sha(json.dumps(contenu, sort_keys=True).encode())
 
 
@@ -149,6 +151,8 @@ def _snapshot(source, resultat, lignes):
     resume = moteur.recalculer(arbre, lignes, resultat['colis'])
     if resultat.get('plaque'):
         moteur.ecrire_plaque(arbre.getroot(), resultat['plaque'])
+    if resultat.get('importateur_choisi'):
+        moteur.ecrire_importateur(arbre.getroot(), resultat['importateur_choisi']['code'], resultat['importateur_choisi']['bloc'])
     for cle in ('poids', 'fob', 'cif', 'taxes_totales'):
         if Decimal(str(resume[cle])) != Decimal(str(resultat['resume'][cle])):
             raise ValueError("L'aperçu ne correspond plus à sa base. Vérifiez-le à nouveau avant de le conserver.")
@@ -167,12 +171,16 @@ def _rattacher_export(conn, identifiant, auteur, export):
                  (evenement, sha, contenu))
 
 
-def enregistrer(resultat, chemin_base, auteur, export=None, base=None, reference=None):
+def enregistrer(resultat, chemin_base, auteur, export=None, base=None, reference=None, module=None):
     """Sauvegarde explicite ; un export du même contenu conserve son statut local.
 
     reference : XML de référence des ratios, mémorisé pour signaler les modèles déjà utilisés.
     """
     auteur = _auteur(auteur)
+    module = module or resultat.get('module', 'friperie')
+    if module not in ('friperie', 'divers'):
+        raise ValueError('Type de dossier inconnu.')
+    resultat = {**resultat, 'module':module}
     source = Path(chemin_base).read_bytes()
     if reference:
         resultat = {**resultat, 'reference': {'nom': Path(reference).name, 'sha256': empreinte_fichier(reference)}}
@@ -180,7 +188,9 @@ def enregistrer(resultat, chemin_base, auteur, export=None, base=None, reference
     if len(lignes) != len(resultat['colis']):
         raise ValueError('Nombre de colis et articles incohérent.')
     xml = _snapshot(source, resultat, lignes)
-    empreinte = _empreinte(source, lignes, resultat['colis'], resultat.get('plaque'))
+    empreinte = _empreinte(source, lignes, resultat['colis'], resultat.get('plaque'), resultat.get('importateur_choisi'))
+    if module != 'friperie':
+        empreinte = _sha((empreinte + ':' + module).encode())
     charge = json.dumps(resultat, ensure_ascii=False, sort_keys=True, allow_nan=False)
     with _connexion(base) as conn:
         existant = conn.execute('SELECT id FROM modeles WHERE empreinte=?', (empreinte,)).fetchone()
@@ -228,8 +238,10 @@ def _plaque_affichee(saisie, resultat):
     return saisie or resultat.get('info', {}).get('camion') or ''
 
 
-def lister(statut=None, base=None, supprimes=False):
+def lister(statut=None, base=None, supprimes=False, module=None):
     """supprimes : False masque les modèles retirés, True ne montre qu'eux."""
+    if module is not None and module not in ('friperie', 'divers'):
+        raise ValueError('Type de dossier inconnu.')
     if statut is not None and statut not in STATUTS:
         raise ValueError('Statut local inconnu.')
     with _connexion(base) as conn:
@@ -240,6 +252,8 @@ def lister(statut=None, base=None, supprimes=False):
         if (statut is not None and d['statut'] != statut) or bool(d['supprime']) != supprimes:
             continue
         d['resultat'] = json.loads(d.pop('resultat_json'))
+        if module is not None and d['resultat'].get('module', 'friperie') != module:
+            continue
         d['plaque'] = _plaque_affichee(d.pop('plaque_saisie'), d['resultat'])
         d['chemin_xml'] = _chemin_export(d.pop('export_detail'))
         d['dernier_ecart'] = _dernier_ecart(d.pop('compare_detail'))
@@ -321,10 +335,10 @@ def marquer_bon(identifiant, auteur, bon=True, base=None):
     _basculer(identifiant, auteur, BON_MODELE, RETRAIT_BON_MODELE, bon, '', base)
 
 
-def bons_modeles(signature, base=None):
+def bons_modeles(signature, base=None, module=None):
     """Répartitions des modèles cochés, non supprimés, dont les articles sont ceux de cette signature."""
     sortie = []
-    for m in lister(base=base):
+    for m in lister(base=base, module=module):
         if not m['bon'] or _signature_modele(m['id'], base) != signature:
             continue
         r = m['resultat']
@@ -680,10 +694,10 @@ def _ecart_derniere_comparaison_pct(d):
     return None
 
 
-def donnees_analyse(base=None):
+def donnees_analyse(base=None, module=None):
     """Modèles non supprimés au format d'anomalies.analyser (articles identifiés comme dans les références)."""
     sortie = []
-    for m in lister(base=base):
+    for m in lister(base=base, module=module):
         d = detail(m['id'], base=base)
         try:
             articles = _articles_identifies(d)
@@ -692,4 +706,17 @@ def donnees_analyse(base=None):
         motif = next((e['detail'] for e in reversed(d['evenements']) if e['statut'] == 'rejete'), '')
         sortie.append({'id': d['id'], 'statut': d['statut'], 'motif': motif, 'articles': articles,
                        'ecart_comparaison_pct': _ecart_derniere_comparaison_pct(d)})
+    return sortie
+
+
+def modules_exports(base=None):
+    """Classement de chaque export historique, y compris après un autre téléchargement du modèle."""
+    with _connexion(base) as conn:
+        lignes = conn.execute('SELECT e.detail, m.resultat_json FROM evenements e '
+                              'JOIN modeles m ON m.id=e.modele_id WHERE e.action=? ORDER BY e.id', (EXPORT,)).fetchall()
+    sortie = {}
+    for ligne in lignes:
+        chemin = _chemin_export(ligne['detail'])
+        if chemin:
+            sortie[str(Path(chemin).resolve())] = json.loads(ligne['resultat_json']).get('module', 'friperie')
     return sortie

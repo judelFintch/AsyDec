@@ -29,8 +29,13 @@ def analyser_modeles(app):
     """{id: alertes} pour tous les modèles ; vide si les références ou les modèles sont illisibles."""
     try:
         from asydec.references import service_references
-        observations=service_references.observations(app.base_refs(),('accepte','non_verifie'))
-        modeles=service.donnees_analyse()
+        from asydec.references import catalogue_xml
+        conn = app.base_refs()
+        module = getattr(app, 'module_travail', 'friperie')
+        autorises = {d['id'] for d in catalogue_xml.lister(conn, module=module) if d['id'] is not None}
+        observations=[o for o in service_references.observations(conn,('accepte','non_verifie'))
+                      if o['document_id'] in autorises]
+        modeles=service.donnees_analyse(module=getattr(app, 'module_travail', 'friperie'))
     except Exception:  # noqa: BLE001 - l'analyse est une aide : la liste reste utilisable sans elle
         return {}
     groupes=anomalies.references_par_groupe(observations)
@@ -122,7 +127,7 @@ class PageModelesGeneres(ttk.Frame):
         try:
             filtre=next((k for k,v in service.STATUTS.items() if v==self.filtre.get()),None)
             supprimes=self.filtre.get()=='Supprimés'
-            lignes=service.lister(filtre,supprimes=supprimes)
+            lignes=service.lister(filtre,supprimes=supprimes,module=getattr(self.app, 'module_travail', 'friperie'))
             if self.filtre.get()=='Bons modèles ★':
                 lignes=[m for m in lignes if m['bon']]
             self.analyses=analyser_modeles(self.app)
@@ -424,6 +429,8 @@ class PageModelesGeneres(ttk.Frame):
         try:
             d=service.detail(identifiant)
             r=d['resultat']
+            if r.get('module', 'friperie') != getattr(self.app, 'module_travail', 'friperie'):
+                raise ValueError('Ouvrez le module du modèle avant de le reprendre.')
             repartition={'poids':[a['poids'] for a in r['resume']['articles']],
                          'fob':[a['fob'] for a in r['resume']['articles']], 'colis':r['colis']}
             from asydec.ui.reprise_modele import reprendre
@@ -432,6 +439,10 @@ class PageModelesGeneres(ttk.Frame):
                 dossier=getattr(self.app,'pages',{}).get('dossier')
                 if dossier is not None and d.get('plaque'):
                     dossier.var_plaque.set(d['plaque'])
+                # La base archivée garde son importateur d'origine : le choix du modèle est rétabli.
+                fixer=getattr(self.app,'fixer_importateur',None)
+                if callable(fixer):
+                    fixer(r.get('importateur_choisi'))
                 if parent is not None:
                     parent.destroy()
         except Exception as exc:

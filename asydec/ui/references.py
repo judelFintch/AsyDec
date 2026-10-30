@@ -509,13 +509,14 @@ class PageReferences(ttk.Frame):
             lignes += [f"✘ {f} : {r}" for f, r in bilan.refus[:5]]
             retablissement_echoue = False
             try:
-                nouveaux = list(getattr(bilan, 'documents', []))
+                # Nouveaux et doublons rejoignent la médiathèque du module : chacune a sa propre liste.
+                nouveaux = sorted(set(getattr(bilan, 'documents', [])) | set(getattr(bilan, 'documents_traites', [])))
                 empreintes = []
                 for identifiant in nouveaux:
                     ligne = self.conn().execute('SELECT sha256 FROM documents WHERE id=?', (identifiant,)).fetchone()
                     if ligne:
                         empreintes.append(ligne[0])
-                catalogue_xml.classer(self.conn(), empreintes, getattr(self, '_module_import', 'friperie'), remplacer=False)
+                catalogue_xml.ajouter(self.conn(), empreintes, getattr(self, '_module_import', 'friperie'))
                 masques = catalogue_xml.retraits()
                 ids = sorted(set(getattr(bilan, 'documents_traites', [])))
                 a_retablir = []

@@ -7,7 +7,7 @@ import xml.etree.ElementTree as ET
 from decimal import Decimal, ROUND_HALF_UP
 
 from asydec import chemins
-from asydec.calcul import moteur
+from asydec.calcul import articles, moteur
 
 BIBLIOTHEQUE = chemins.MODELES_XML
 # 10 + 11 + ... + 17 : plus petit total possible avec 8 articles gradués.
@@ -127,7 +127,7 @@ def generer(poids_total, fob_total, colis_total, ratios, nombre=12, graine=None,
             ajouter(poids, base_cents)
         if len(propositions) < nombre and W <= 100000:
             for i in range(n):
-                for j in range(i + 1, 8):
+                for j in range(i + 1, n):
                     autres = sum(poids[k] for k in range(n) if k not in (i, j))
                     total_paire = W - autres
                     milieu = total_paire // 2
@@ -228,7 +228,8 @@ def generer(poids_total, fob_total, colis_total, ratios, nombre=12, graine=None,
     return sorted(resultats, key=lambda v: v.get("distance", 0))[:nombre]
 
 
-def construire_profil(choisi, chemins=None, dynamique=None):
+def construire_profil(choisi, chemins=None, dynamique=None, catalogue=None):
+    """catalogue : catalogue des articles (gestion dynamique) ; rôle et bornes suivent alors chaque article."""
     info = verifier_modele(choisi)
     sig = signature(choisi)
     references, exclus = [], []
@@ -255,6 +256,13 @@ def construire_profil(choisi, chemins=None, dynamique=None):
     for k in range(len(ratios)):
         observes = [r['info']['fob_articles'][k]/r['info']['poids_articles'][k] for r in references]
         bornes.append((ratios[k],ratios[k]) if dynamique or k in ajustables else (min(observes),max(observes)))
+    if catalogue and not dynamique:
+        # Articles choisis : rôle et bornes suivent l'article, quelle que soit sa ligne.
+        entrees = [catalogue.get(cle) for cle in articles.articles_du_xml(choisi)]
+        if None not in entrees:
+            ajustables = tuple(k for k, e in enumerate(entrees) if e['ajustable'])
+            bornes = [(ratios[k], ratios[k]) if k in ajustables else
+                      (min(e['ratio_min'], ratios[k]), max(e['ratio_max'], ratios[k])) for k, e in enumerate(entrees)]
     return {'ratios':ratios, 'bornes':bornes, 'references':references, 'exclus':exclus, 'signature':sig, 'variables_libres':not dynamique, 'ajustables':ajustables, 'dynamique':dynamique}
 
 

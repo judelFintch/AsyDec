@@ -62,7 +62,7 @@ class ModelesGeneresTest(unittest.TestCase):
         self.assertTrue(liste[0]['cree_utc'].endswith('+00:00'))
         d=M.detail(identifiant,base=self.base)
         self.assertEqual(d['base_xml'],original)
-        self.assertEqual(d['resultat'],self.resultat)
+        self.assertEqual(d['resultat'],{**self.resultat,'module':'friperie'})
         self.assertEqual(len(d['evenements']),1)
         self.assertEqual(self.source.read_bytes(),original)
 
@@ -193,7 +193,7 @@ class ActionsModelesGeneresTest(unittest.TestCase):
         page=self.page()
         with patch.object(M,'enregistrer',return_value=7) as sauver,patch.object(E.messagebox,'showinfo'):
             E.PageVerifier.conserver_proposition(page)
-        sauver.assert_called_once_with(page.resultat,'base.xml','alice',reference='modele.xml')
+        sauver.assert_called_once_with(page.resultat,'base.xml','alice',reference='modele.xml',module='friperie')
         page.app.montrer.assert_called_once_with('modeles_generes')
 
     def test_actions_verrouillees(self):

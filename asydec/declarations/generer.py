@@ -197,7 +197,8 @@ def ecrire_registre(reg):
 # Calcul d'une déclaration (utilisé par Excel et par l'interface)
 # --------------------------------------------------------------------------
 def produire(base, poids, ratios, table_imp, registre, mode="RATIOS", fob_total=None,
-             fob_saisis=None, colis_total=None, colis_saisis=None, enregistrer=True, profil=None, plaque=None):
+             fob_saisis=None, colis_total=None, colis_saisis=None, enregistrer=True, profil=None, plaque=None,
+             importateur=None):
     """Calcule une déclaration. Si enregistrer=False, rien n'est écrit (aperçu).
     Renvoie un dictionnaire : chemin, nom, resume, alertes, fob, colis, info."""
     alertes = []
@@ -211,6 +212,15 @@ def produire(base, poids, ratios, table_imp, registre, mode="RATIOS", fob_total=
         info = moteur.infos_dossier(arbre.getroot())
         if plaque != ancienne:
             alertes.append(f"Plaque inscrite dans le XML : {plaque} (XML de base : {ancienne or 'aucune'}).")
+    if importateur and importateur["code"] != info["code"]:
+        # Importateur choisi dans la base : il remplace celui du XML de base, qui n'est pas modifié.
+        ancien = info["importateur"]
+        moteur.ecrire_importateur(arbre.getroot(), importateur["code"], importateur["bloc"])
+        info = moteur.infos_dossier(arbre.getroot())
+        importateur = {cle: importateur[cle] for cle in ("code", "nom", "bloc")}
+        alertes.append(f"Importateur inscrit dans le XML : {info['importateur']} (XML de base : {ancien or 'aucun'}).")
+    else:
+        importateur = None
     n = len(info["fob_articles"])
     poids = list(poids)
     if len(poids) != n or any(p is None for p in poids):
@@ -281,7 +291,8 @@ def produire(base, poids, ratios, table_imp, registre, mode="RATIOS", fob_total=
         if cle:
             registre[cle] ={"fichier": nom, "poids": poids, "date": datetime.datetime.now().isoformat(timespec="minutes")}
     return {"chemin": chemin, "nom": nom, "resume": resume, "alertes": alertes,
-            "fob": fob, "colis": colis, "info": info, "mode": mode, "plaque": plaque}
+            "fob": fob, "colis": colis, "info": info, "mode": mode, "plaque": plaque,
+            "importateur_choisi": importateur}
 
 
 # --------------------------------------------------------------------------

@@ -153,6 +153,26 @@ CREATE TABLE xml_modules (
     module TEXT NOT NULL CHECK (module IN ('friperie', 'divers'))
 );
 """),
+    (4, "Une médiathèque par module, sans partage entre types de dossier", """
+CREATE TABLE xml_mediatheques (
+    sha256 TEXT NOT NULL,
+    module TEXT NOT NULL CHECK (module IN ('friperie', 'divers')),
+    PRIMARY KEY (sha256, module)
+);
+INSERT INTO xml_mediatheques(sha256, module) SELECT sha256, module FROM xml_modules;
+INSERT OR IGNORE INTO xml_mediatheques(sha256, module)
+    SELECT sha256, 'friperie' FROM documents WHERE sha256 NOT IN (SELECT sha256 FROM xml_modules);
+DROP TABLE xml_modules;
+"""),
+    (5, "Base des importateurs tirée des XML", """
+CREATE TABLE importateurs (
+    code TEXT PRIMARY KEY,
+    nom TEXT NOT NULL,
+    bloc TEXT NOT NULL,
+    document_id INTEGER REFERENCES documents(id) ON DELETE SET NULL,
+    mis_a_jour TEXT NOT NULL
+);
+"""),
 ]
 
 

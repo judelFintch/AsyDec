@@ -14,6 +14,7 @@ from asydec.declarations import modeles_generes
 from asydec.formats import date_locale
 from asydec.references import catalogue_xml
 from asydec.ui import theme
+from asydec.ui.importateurs import importateur_choisi, selecteur
 from asydec.ui.theme import nombre
 
 
@@ -60,6 +61,11 @@ class PageRepartitions(ttk.Frame):
         self.selection_modeles = None
         self.var_modeles = tk.StringVar()
         ttk.Label(self, textvariable=self.var_modeles, style="Doux.TLabel").pack(anchor="e", pady=(4, 0))
+        ligne_importateur = ttk.Frame(self)
+        ligne_importateur.pack(fill="x")
+        self.choix_importateur = selecteur(ligne_importateur, app)
+        ttk.Label(ligne_importateur, text="Repris à l'étape Dossier et dans le XML généré.",
+                  style="Doux.TLabel").pack(side="left")
 
         self.message = theme.Message(self)
         self.message.pack(fill="x", pady=(8, 8))
@@ -88,6 +94,7 @@ class PageRepartitions(ttk.Frame):
     def afficher(self):
         n = len(self.app.xml_disponibles(generation=True))
         self.var_modeles.set(f"{n} modèle(s) enregistré(s)")
+        self.choix_importateur.configure(values=self.app.importateurs_proposes())
         if self.app.info and not self.champs["fob"].get():
             i = self.app.info
             self.champs["fob"].set(f"{i['fob']:g}")
@@ -213,8 +220,9 @@ class PageRepartitions(ttk.Frame):
                 info = moteur.infos_dossier(racine)
                 fret = moteur._txt(racine, 'Valuation/Gs_external_freight/Amount_foreign_currency') or '0'
                 assurance = moteur._txt(racine, 'Valuation/Gs_insurance/Amount_foreign_currency') or '0'
+                choisi = importateur_choisi(self.app)
                 texte = (f"Base proposée : {document['nom']}\n"
-                         f"Importateur : {info['importateur'] or '—'}\n"
+                         f"Importateur : {choisi['nom'] if choisi else info['importateur'] or '—'}\n"
                          f"Référence : {info['reference'] or '—'}\n"
                          f"Taux de change : {info['taux']:g}\n"
                          f"Fret : {fret} · Assurance : {assurance}\n\n"
@@ -421,10 +429,13 @@ class PageHistorique(ttk.Frame):
 
     def fichiers(self):
         resultats = []
+        modules = modeles_generes.modules_exports()
+        module = getattr(self.app, 'module_travail', 'friperie')
         for dossier in Path(generer.DEC).iterdir():
             historique = dossier / "1 - HISTORIQUE"
             if dossier.is_dir() and historique.is_dir():
-                resultats += [(p.stat().st_mtime, dossier.name, p) for p in historique.glob("*.xml")]
+                resultats += [(p.stat().st_mtime, dossier.name, p) for p in historique.glob("*.xml")
+                              if modules.get(str(p.resolve()), 'friperie') == module]
         return sorted(resultats, reverse=True)
 
     def afficher(self):

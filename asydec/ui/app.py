@@ -6,18 +6,21 @@ import tkinter as tk
 from tkinter import messagebox, ttk
 
 from asydec import chemins
+from asydec.calcul import articles as gestion_articles
 from asydec.calcul import moteur
 from asydec.calcul import variantes
 from asydec.declarations import generer
 from asydec.declarations import modeles_generes
 from asydec.references import base_references
 from asydec.references import catalogue_xml
+from asydec.references import importateurs
 from asydec.systeme import gestion_locale as local
 from asydec.systeme import rechargement
 from asydec.ui import theme
 from asydec.ui.modules import PageAccueil, PageDivers
 from asydec.ui.connexion import demander_connexion
 from asydec.ui.etapes import PageArticles, PageDossier, PageVerifier
+from asydec.ui.importateurs import IMPORTATEUR_XML
 from asydec.ui.mediatheque import PageMediatheque
 from asydec.ui.modeles_generes import PageModelesGeneres
 from asydec.ui.outils import PageEtude, PageHistorique, PageRatios, PageRepartitions
@@ -27,7 +30,8 @@ from asydec.ui.selection_xml import choisir as choisir_xml_partage
 
 PREFERENCES = local.CONFIGURATION / "preferences.json"
 ETAPES = [("dossier", "1   Dossier"), ("articles", "2   Articles"), ("verifier", "3   Vérifier et générer")]
-OUTILS = [("modeles_generes", "Modèles générés"), ("references", "Bibliothèque des références"),
+OUTILS = [("mediatheque", "Médiathèque XML"), ("modeles_generes", "Modèles générés"),
+          ("references", "Bibliothèque des références"),
           ("repartitions", "Répartitions"), ("ratios", "Récupération des ratios"),
           ("etude", "Étude des XML"), ("historique", "Historique")]
 
@@ -72,6 +76,9 @@ class AsyDec(tk.Tk):
 
         self.ratios, self.table_imp = generer.charger_reglages()
         self.base = self.info = self.reference = self.profil = None
+        # XML du dossier tel qu'ouvert ; self.base en est une copie composée si des articles ont été changés.
+        self.base_dossier = None
+        self._catalogue_articles = None
         self.module_actif = None
         self.module_travail = "friperie"
 
@@ -85,6 +92,8 @@ class AsyDec(tk.Tk):
         contenu.columnconfigure(0, weight=1)
         self.pages = {}
         self._base_refs = None  # connexion SQLite des références, ouverte au premier besoin
+        self.var_importateur = tk.StringVar(value=IMPORTATEUR_XML)
+        self._importateurs = {}
         for cle, classe in [("accueil", PageAccueil), ("divers", PageDivers), ("dossier", PageDossier), ("articles", PageArticles), ("verifier", PageVerifier),
                             ("modeles_generes", PageModelesGeneres), ("mediatheque", PageMediatheque), ("references", PageReferences),
                             ("repartitions", PageRepartitions), ("ratios", PageRatios), ("etude", PageEtude),
@@ -149,7 +158,7 @@ class AsyDec(tk.Tk):
         commun.pack(side='bottom', fill='x', pady=12)
         tk.Label(commun, text='OUTILS COMMUNS', font=(theme.POLICE, 10, 'bold'),
                  fg=theme.TEXTE_DOUX, bg=theme.FOND_LATERAL, anchor='w').pack(fill='x', padx=8)
-        for cle, texte in (('mediatheque', 'Médiathèque XML'), ('parametres', 'Paramètres')):
+        for cle, texte in (('parametres', 'Paramètres'),):
             lien = tk.Label(commun, text=texte, font=(theme.POLICE, 13), anchor='w', padx=10, pady=7,
                             bg=theme.FOND_LATERAL, fg=theme.TEXTE, cursor='hand2')
             lien.pack(fill='x')
@@ -194,7 +203,7 @@ class AsyDec(tk.Tk):
             self.module_actif = None
         elif cle == 'divers':
             self.module_actif = 'divers'
-        elif cle not in ('parametres', 'mediatheque'):
+        elif cle != 'parametres':
             self.module_actif = getattr(self, 'module_travail', 'friperie')
         self.var_module.set({'friperie': 'Friperie', 'divers': 'Divers'}.get(self.module_actif, 'Modules'))
         if self.module_actif in ('friperie', 'divers'):
@@ -222,13 +231,7 @@ class AsyDec(tk.Tk):
         try:
             chemin = generer.trouver_base(chemin)
             info = moteur.infos_dossier(moteur.charger(chemin).getroot())
-            empreinte = modeles_generes.empreinte_fichier(chemin)
-            classe = catalogue_xml.module_document(self.base_refs(), empreinte)
-            module = getattr(self, 'module_travail', 'friperie')
-            if classe is not None and classe != module:
-                raise ValueError(f"Ce XML appartient au module {catalogue_xml.MODULES[classe]}. "
-                                 "Ouvrez ce module ou changez son classement dans la Médiathèque XML.")
-            erreurs = self.partager_xml([chemin])
+            erreurs = self.partager_xml([chemin])  # rejoint la médiathèque du module ouvert
             if erreurs:
                 raise ValueError('Le XML ne peut pas être ajouté à la médiathèque.')
             profil = variantes.construire_profil(chemin, self.chemins_xml_disponibles(generation=True),
@@ -236,7 +239,10 @@ class AsyDec(tk.Tk):
         except Exception as exc:  # noqa: BLE001 - message montré à l'utilisateur
             messagebox.showerror("XML de base", str(exc))
             return False
+        if self.base:  # choix fait pour l'ancien dossier ; sans dossier ouvert, il vaut pour celui-ci
+            AsyDec.oublier_importateur(self)
         self.base, self.info, self.reference, self.profil = chemin, info, chemin, profil
+        self.base_dossier = chemin
         if "dossier" in getattr(self, "pages", {}):
             self.pages["dossier"].var_plaque.set("")  # nouvelle base : plaque du XML par défaut
         recents = [chemin] + [p for p in self.prefs.get("recents", []) if p != chemin]
@@ -244,10 +250,104 @@ class AsyDec(tk.Tk):
             self.prefs["recents"] = recents[:8]
             self.prefs["dernier_dossier"] = os.path.dirname(chemin)
         self._ecrire_prefs()
-        self.var_bandeau.set(
-            f"{info['importateur']}  ·  réf. {info['reference'] or '—'}  ·  camion {info['camion'] or '—'}"
-            f"  ·  {theme.nombre(info['fob'], 2)} USD  ·  {theme.nombre(info['poids'])} kg  ·  {info['colis']} colis")
+        AsyDec.afficher_bandeau(self)
         self.pages["articles"].nouvelle_base()
+        return True
+
+    def afficher_bandeau(self):
+        info = self.info
+        choisi = AsyDec.importateur_choisi(self)
+        self.var_bandeau.set(
+            f"{choisi['nom'] if choisi else info['importateur']}  ·  réf. {info['reference'] or '—'}  ·  camion {info['camion'] or '—'}"
+            f"  ·  {theme.nombre(info['fob'], 2)} USD  ·  {theme.nombre(info['poids'])} kg  ·  {info['colis']} colis")
+
+    # ---------------------------------------------------------- importateur
+    def importateurs_proposes(self):
+        """Choix de la liste : celui du XML puis la base des importateurs, à jour de la bibliothèque."""
+        actuel = self.importateur_choisi()
+        self._importateurs = {importateurs.libelle(i): i for i in importateurs.lister(self.base_refs())}
+        if actuel:
+            self._importateurs.setdefault(importateurs.libelle(actuel), actuel)
+        return [IMPORTATEUR_XML] + list(self._importateurs)
+
+    def importateur_choisi(self):
+        """Importateur retenu pour la déclaration ; None = celui du XML de base."""
+        choix = getattr(self, "var_importateur", None)
+        return getattr(self, "_importateurs", {}).get(choix.get()) if choix is not None else None
+
+    def changer_importateur(self):
+        if self.info:
+            self.afficher_bandeau()
+        self.pages["dossier"].remplir_infos()
+
+    def fixer_importateur(self, importateur):
+        """Reprise d'un modèle : rétablit l'importateur choisi à sa génération, ou celui du XML."""
+        if importateur:
+            self._importateurs[importateurs.libelle(importateur)] = importateur
+            self.var_importateur.set(importateurs.libelle(importateur))
+        else:
+            self.var_importateur.set(IMPORTATEUR_XML)
+        self.changer_importateur()
+
+    def oublier_importateur(self):
+        choix = getattr(self, "var_importateur", None)
+        if choix is not None:
+            choix.set(IMPORTATEUR_XML)
+
+    def catalogue_articles(self):
+        """Articles connus de la médiathèque, pour la gestion dynamique ; recalculé si elle change."""
+        sources = tuple(str(c) for c in self.chemins_xml_disponibles(generation=True))
+        if self.base_dossier and str(self.base_dossier) not in sources:
+            sources += (str(self.base_dossier),)
+        # Friperie : la logique des 8 articles ; Divers : tous les XML, quel que soit leur nombre d'articles.
+        nombre = None if getattr(self, 'module_travail', 'friperie') == 'divers' else gestion_articles.NOMBRE_ARTICLES
+        if not self._catalogue_articles or self._catalogue_articles[0] != (sources, nombre):
+            self._catalogue_articles = ((sources, nombre), gestion_articles.construire_catalogue(sources, nombre))
+        return self._catalogue_articles[1]
+
+    def appliquer_composition(self, selection, nombre):
+        """Composition Friperie à ratios fixes ; le dossier original reste disponible."""
+        if self.session_verrouillee or getattr(self, 'module_travail', 'friperie') != 'friperie':
+            raise ValueError('Ouvrez un dossier du module Friperie.')
+        base = getattr(self, 'base_dossier', None) or self.base
+        if not base:
+            raise ValueError('Chargez d’abord le XML du dossier.')
+        from asydec.calcul import composition
+        chemin = str(base) if selection is None else composition.composer(base, selection, nombre, chemins.DONNEES/'compositions')
+        info = moteur.infos_dossier(moteur.charger(chemin).getroot())
+        profil = variantes.construire_profil(chemin, self.chemins_xml_disponibles(generation=True),
+                                            dynamique=True if selection is not None else None)
+        profil['composition_fixe'] = selection is not None
+        self.base, self.info, self.reference, self.profil = chemin, info, chemin, profil
+        page = self.pages['articles']
+        page.nouvelle_base()
+        page.reprendre_base()
+        verifier = self.pages.get('verifier')
+        if verifier is not None:
+            verifier.resultat = verifier.fichier = None
+        self.montrer('articles')
+
+    def composer_articles(self, cles):
+        """Place l'article choisi sur chaque ligne ; le XML du dossier n'est jamais modifié."""
+        if self.session_verrouillee or not self.base_dossier:
+            return False
+        try:
+            catalogue = self.catalogue_articles()
+            divers = getattr(self, 'module_travail', 'friperie') == 'divers'
+            chemin = gestion_articles.composer(self.base_dossier, cles, catalogue, chemins.DONNEES / "compositions",
+                                               exiger_ajustable=not divers)
+            info = moteur.infos_dossier(moteur.charger(chemin).getroot())
+            # Retour aux articles du dossier : même profil qu'à l'ouverture.
+            compose = chemin != str(self.base_dossier)
+            # Friperie : une base composée garde ses articles ajustables, même à 5 ou 10 articles.
+            # Divers : entièrement dynamique, chaque article garde son ratio.
+            profil = variantes.construire_profil(chemin, self.chemins_xml_disponibles(generation=True),
+                                                 dynamique=True if divers else (False if compose else None),
+                                                 catalogue=catalogue if compose else None)
+        except Exception as exc:  # noqa: BLE001 - message montré à l'utilisateur
+            messagebox.showerror("Gestion dynamique des articles", str(exc), parent=self)
+            return False
+        self.base, self.info, self.reference, self.profil = chemin, info, chemin, profil
         return True
 
     def fermer_dossier(self, confirmer=True):
@@ -258,7 +358,8 @@ class AsyDec(tk.Tk):
             'Fermer ce dossier et vider les saisies non enregistrées ?\n\n'
             'Le XML reste disponible dans la bibliothèque. Les originaux et fichiers exportés sont conservés.', parent=self):
             return False
-        self.base = self.info = self.reference = self.profil = None
+        self.base = self.info = self.reference = self.profil = self.base_dossier = None
+        AsyDec.oublier_importateur(self)
         if "dossier" in getattr(self, "pages", {}):
             self.pages["dossier"].var_plaque.set("")
         articles = self.pages['articles']
@@ -295,10 +396,7 @@ class AsyDec(tk.Tk):
         try:
             chemins = list(chemins)
             conn = self.base_refs()
-            connus = {r[0] for r in conn.execute('SELECT sha256 FROM documents')}
-            _, erreurs = catalogue_xml.partager(conn, chemins)
-            nouveaux = [r[0] for r in conn.execute('SELECT sha256 FROM documents') if r[0] not in connus]
-            catalogue_xml.classer(conn, nouveaux, getattr(self, 'module_travail', 'friperie'), remplacer=False)
+            _, erreurs = catalogue_xml.partager(conn, chemins, getattr(self, 'module_travail', 'friperie'))
         except Exception as exc:
             erreurs = [str(exc)]
         if erreurs:
@@ -306,11 +404,12 @@ class AsyDec(tk.Tk):
                 'Certains fichiers ne sont pas disponibles dans la bibliothèque :\n'+'\n'.join(erreurs[:8]), parent=self)
         return erreurs
 
-    def xml_disponibles(self, generation=False, tous_modules=False):
-        supplementaires = ([self.base] if self.base else []) + list(variantes.modeles())
-        documents = catalogue_xml.lister(self.base_refs(), supplementaires, generation=generation,
-            module=None if tous_modules else getattr(self, 'module_travail', 'friperie'))
-        return documents
+    def xml_disponibles(self, generation=False):
+        """XML de la médiathèque du module ouvert ; les modèles locaux (MODELES_XML) sont ceux de la friperie."""
+        module = getattr(self, 'module_travail', 'friperie')
+        dossier = getattr(self, 'base_dossier', None) or self.base
+        supplementaires = ([dossier] if dossier else []) + (list(variantes.modeles()) if module == 'friperie' else [])
+        return catalogue_xml.lister(self.base_refs(), supplementaires, generation=generation, module=module)
 
     def chemins_xml_disponibles(self, generation=False):
         return [d['chemin'] for d in self.xml_disponibles(generation)]
@@ -329,10 +428,22 @@ class AsyDec(tk.Tk):
     def retirer_xml(self, documents):
         if self.session_verrouillee:
             raise ValueError('La session est verrouillée.')
-        catalogue_xml.retirer(documents,self.utilisateur)
-        self.prefs['recents'] = [p for p in self.prefs.get('recents', []) if not catalogue_xml.est_retire(p)]
+        # Retrait de la seule médiathèque du module ouvert ; les autres modules ne sont pas touchés.
+        module = getattr(self, 'module_travail', 'friperie')
+        catalogue_xml.retirer_du_module(self.base_refs(), [d['empreinte'] for d in documents if d.get('id')], module)
+        locaux = [d for d in documents if not d.get('id')]  # modèles locaux hors bibliothèque
+        if locaux:
+            catalogue_xml.retirer(locaux, self.utilisateur)
+        empreintes = {d['empreinte'] for d in documents}
+
+        def retire(chemin):
+            try:
+                return modeles_generes.empreinte_fichier(chemin) in empreintes or catalogue_xml.est_retire(chemin)
+            except OSError:
+                return False
+        self.prefs['recents'] = [p for p in self.prefs.get('recents', []) if not retire(p)]
         self._ecrire_prefs()
-        if any(p and catalogue_xml.est_retire(p) for p in (self.base,self.reference)):
+        if any(p and retire(p) for p in (getattr(self, 'base_dossier', None), self.reference)):
             self.fermer_dossier(confirmer=False)
         elif self.base:
             self.choisir_reference(self.reference)
@@ -343,7 +454,7 @@ class AsyDec(tk.Tk):
         repartitions.detail.delete(*repartitions.detail.get_children())
         repartitions.selection_modeles=None
         ratios=self.pages['ratios']
-        ratios.chemins=[p for p in ratios.chemins if not catalogue_xml.est_retire(p)]
+        ratios.chemins=[p for p in ratios.chemins if not retire(p)]
         if ratios.chemins:
             ratios.calculer()
         else:
@@ -352,9 +463,6 @@ class AsyDec(tk.Tk):
 
     def choisir_reference(self, chemin, profil=None):
         try:
-            classe = catalogue_xml.module_document(self.base_refs(), modeles_generes.empreinte_fichier(chemin))
-            if classe is not None and classe != getattr(self, 'module_travail', 'friperie'):
-                raise ValueError('Cette référence appartient à un autre type de dossier.')
             if catalogue_xml.est_retire(chemin):
                 raise ValueError('Ce XML a été retiré de la liste. Rechargez-le volontairement pour le réutiliser.')
             profil = profil or variantes.construire_profil(chemin, self.chemins_xml_disponibles(generation=True),
@@ -381,7 +489,9 @@ class AsyDec(tk.Tk):
             self.base, v["poids"], self.profil["ratios"], self.table_imp, registre,
             mode=v["mode"], fob_total=v["fob_total"], fob_saisis=v["fob"],
             colis_total=v["colis_total"], colis_saisis=v["colis"],
-            enregistrer=enregistrer, profil=self.profil, plaque=AsyDec.plaque_saisie(self))
+            enregistrer=enregistrer, profil=self.profil, plaque=AsyDec.plaque_saisie(self),
+            importateur=AsyDec.importateur_choisi(self))
+        res['module'] = getattr(self, 'module_travail', 'friperie')
         if enregistrer:
             generer.ecrire_registre(registre)
         return res

@@ -62,7 +62,7 @@ class FenetreCorrection(tk.Toplevel):
             return
         from asydec.ui.selection_xml import choisir
         try:
-            documents = self.page.app.xml_disponibles(generation=self.mode.get() == 'base', tous_modules=True)
+            documents = self.page.app.xml_disponibles(generation=self.mode.get() == 'base')
             chemins = choisir(self, documents, titre='Choisir le bon dossier XML')
             if chemins:
                 self.charger(chemins[0])

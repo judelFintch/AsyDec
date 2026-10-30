@@ -1,4 +1,8 @@
-"""Catalogue commun : réutilise les archives SQLite et expose les modèles existants."""
+"""Médiathèques XML : une par type de dossier (Friperie, Divers), sans partage entre elles.
+
+Les archives restent communes (un contenu n'est stocké qu'une fois), mais chaque module ne voit
+que les XML ajoutés à sa propre médiathèque. Un même XML peut être ajouté aux deux.
+"""
 import hashlib
 from pathlib import Path
 
@@ -7,14 +11,15 @@ from asydec.references import import_references
 from asydec.references import service_references
 
 
-def partager(conn, chemins):
-    """Un même contenu conserve son document et son statut, quelle que soit la page."""
+def partager(conn, chemins, module='friperie'):
+    """Ajoute les fichiers à la médiathèque du module ; un même contenu garde son document et son statut."""
     identifiants, erreurs = [], []
     for chemin in chemins:
         try:
             _, identifiant = import_references.importer_fichier(conn, chemin)
             identifiants.append(identifiant)
             empreinte=conn.execute('SELECT sha256 FROM documents WHERE id=?',(identifiant,)).fetchone()[0]
+            ajouter(conn, [empreinte], module)
             restaurer([empreinte])
         except Exception as exc:  # un fichier refusé ne bloque pas le partage des autres
             erreurs.append(f'{Path(chemin).name} : {exc}')
@@ -24,7 +29,9 @@ def partager(conn, chemins):
 def lister(conn, supplementaires=(), generation=False, module=None):
     if module is not None and module not in MODULES:
         raise ValueError('Type de dossier inconnu.')
-    classement = dict(conn.execute('SELECT sha256, module FROM xml_modules'))
+    membres = {}
+    for empreinte, nom in conn.execute('SELECT sha256, module FROM xml_mediatheques'):
+        membres.setdefault(empreinte, set()).add(nom)
     resultat, vus = [], set()
     retires=retraits()
     for d in service_references.lister_documents(conn):
@@ -54,8 +61,9 @@ def lister(conn, supplementaires=(), generation=False, module=None):
             continue
     disponibles = []
     for document in resultat:
-        document['module'] = classement.get(document['empreinte'], 'friperie')
-        if module is not None and document['module'] != module:
+        # Les fichiers fournis en plus (dossier ouvert, modèles locaux) sont choisis par l'appelant.
+        document['modules'] = membres.get(document['empreinte'], set())
+        if module is not None and document['id'] is not None and module not in document['modules']:
             continue
         try:
             etude = etude_xml.analyser(document['chemin'])
@@ -118,21 +126,31 @@ def est_retire(chemin,configuration=None):
 MODULES = {'friperie': 'Friperie', 'divers': 'Divers'}
 
 
-def classer(conn, empreintes, module, remplacer=True):
-    """Le classement suit le contenu du XML, même renommé ou importé à nouveau."""
+def _verifier(empreintes, module):
     if module not in MODULES:
         raise ValueError('Type de dossier inconnu.')
+    for empreinte in empreintes:
+        if len(empreinte) != 64 or any(c not in '0123456789abcdef' for c in empreinte):
+            raise ValueError('Empreinte XML invalide.')
+
+
+def ajouter(conn, empreintes, module):
+    """Ajoute des XML déjà archivés à la médiathèque d'un module, sans toucher aux autres."""
+    empreintes = list(empreintes)
+    _verifier(empreintes, module)
     with conn:
-        for empreinte in empreintes:
-            if len(empreinte) != 64 or any(c not in '0123456789abcdef' for c in empreinte):
-                raise ValueError('Empreinte XML invalide.')
-            conn.execute('INSERT INTO xml_modules(sha256, module) VALUES (?, ?) ' +
-                         ('ON CONFLICT(sha256) DO UPDATE SET module=excluded.module' if remplacer else
-                          'ON CONFLICT(sha256) DO NOTHING'), (empreinte, module))
+        conn.executemany('INSERT OR IGNORE INTO xml_mediatheques(sha256, module) VALUES (?, ?)',
+                         [(e, module) for e in empreintes])
 
 
-def module_document(conn, empreinte):
-    ligne = conn.execute('SELECT module FROM xml_modules WHERE sha256=?', (empreinte,)).fetchone()
-    if ligne:
-        return ligne[0]
-    return 'friperie' if conn.execute('SELECT 1 FROM documents WHERE sha256=?', (empreinte,)).fetchone() else None
+def retirer_du_module(conn, empreintes, module):
+    """Retire des XML de la médiathèque d'un module : archives, historiques et autres modules intacts."""
+    empreintes = list(empreintes)
+    _verifier(empreintes, module)
+    with conn:
+        conn.executemany('DELETE FROM xml_mediatheques WHERE sha256=? AND module=?', [(e, module) for e in empreintes])
+
+
+def dans_module(conn, empreinte, module):
+    return conn.execute('SELECT 1 FROM xml_mediatheques WHERE sha256=? AND module=?',
+                        (empreinte, module)).fetchone() is not None

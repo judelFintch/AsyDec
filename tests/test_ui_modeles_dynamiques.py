@@ -25,7 +25,8 @@ class TableauxDynamiquesTest(unittest.TestCase):
         info = moteur.infos_dossier(moteur.charger(source).getroot())
         profil = variantes.construire_profil(source, [])
         app = SimpleNamespace(base=source, info=info, profil=profil, table_imp=[],
-                              session_verrouillee=False, montrer=Mock())
+                              session_verrouillee=False, montrer=Mock(),
+                              var_importateur=tk.StringVar(self.racine), importateurs_proposes=lambda: [])
         with patch.object(generer, 'DEC', str(self.fixture.fixture.racine/'exports')):
             articles = PageArticles(self.racine, app)
             articles.nouvelle_base()
@@ -55,9 +56,10 @@ class TableauxDynamiquesTest(unittest.TestCase):
             articles.nouvelle_base()
             self.assertEqual(len(articles.e_poids), 3)
 
-    def test_mediatheque_commune_filtre_et_classement(self):
+    def test_mediatheque_propre_au_module_ouvert(self):
         from asydec.references import base_references as B, catalogue_xml as C
         from asydec.systeme import gestion_locale as L
+        from asydec.ui.app import AsyDec
         from asydec.ui.mediatheque import PageMediatheque
         source = self.fixture.source(3)
         autre = source.parent/'divers.xml'
@@ -65,25 +67,17 @@ class TableauxDynamiquesTest(unittest.TestCase):
         conn = B.ouvrir(source.parent/'catalogue-ui.db')
         self.addCleanup(conn.close)
         with patch.object(L, 'CONFIGURATION', source.parent/'configuration-test'), \
+             patch.object(variantes, 'modeles', return_value=[]), \
              patch('asydec.ui.mediatheque.modeles_generes.usages_references', return_value={}):
-            C.partager(conn, [source, autre])
-            sha = variantes.hashlib.sha256(autre.read_bytes()).hexdigest()
-            C.classer(conn, [sha], 'divers')
-            app = SimpleNamespace(session_verrouillee=False, base=None, reference=None,
-                base_refs=lambda:conn, xml_disponibles=lambda tous_modules=False:C.lister(conn),
-                pages={'repartitions':Mock()}, montrer=Mock())
-            app.pages['repartitions'].liste.get_children.return_value = ()
-            app.pages['repartitions'].detail.get_children.return_value = ()
+            C.partager(conn, [source], 'friperie')
+            C.partager(conn, [autre], 'divers')
+            app = SimpleNamespace(session_verrouillee=False, base=None, base_dossier=None, reference=None,
+                base_refs=lambda:conn, module_travail='divers', montrer=Mock())
+            app.xml_disponibles = lambda generation=False: AsyDec.xml_disponibles(app, generation)
             page = PageMediatheque(self.racine, app)
-            app.montrer.side_effect = lambda cle:page.afficher()
             page.afficher()
-            self.assertEqual(len(page.table.get_children()), 2)
-            page.var_filtre.set('Divers')
+            self.assertEqual([page.table.item(i, 'values')[0] for i in page.table.get_children()], ['divers.xml'])
+            self.assertNotIn('module', page.table['columns'])
+            app.module_travail = 'friperie'
             page.afficher()
-            self.assertEqual(len(page.table.get_children()), 1)
-            self.assertEqual(page.table.item('0', 'values')[1], 'Divers')
-            page.table.selection_set('0')
-            page.var_type.set('Friperie')
-            page.classer()
-            self.assertEqual(C.module_document(conn, sha), 'friperie')
-            self.assertEqual(len(page.table.get_children()), 0)
+            self.assertEqual([page.table.item(i, 'values')[0] for i in page.table.get_children()], [source.name])
