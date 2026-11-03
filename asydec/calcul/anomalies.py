@@ -18,6 +18,7 @@ SEUILS = {
     'quantile_bas': 0.10, 'quantile_haut': 0.90,
     'comparaison_moyen': 1.0, 'comparaison_eleve': 5.0,   # écart du total des taxes, en %
     'proche_rejete': 0.02,        # distance des parts (0 = mêmes proportions)
+    'note_mauvaise': 2,           # note (sur 5) à partir de laquelle un modèle est à éviter
 }
 
 
@@ -47,7 +48,7 @@ def _quantile(valeurs, q):
 def analyser(modele, groupes, autres=(), seuils=SEUILS):
     """Alertes d'un modèle.
 
-    modele : {'id', 'statut', 'articles': [{'position','code','groupe','poids','fob','colis'}],
+    modele : {'id', 'statut', 'articles': [{'position','code','groupe','poids','fob','colis'[,'ajustable']}],
               'ecart_comparaison_pct': None|nombre}
     groupes : references_par_groupe(observations) ; autres : autres modèles au même format.
     """
@@ -66,7 +67,8 @@ def analyser(modele, groupes, autres=(), seuils=SEUILS):
         bas, haut = min(ratios), max(ratios)
         if ratio is not None:
             if round(ratio, 4) < round(bas, 4) or round(ratio, 4) > round(haut, 4):
-                ajustable = ' Article ajustable : son ratio absorbe l’écart de FOB.' if a['position'] in AJUSTABLES else ''
+                est_ajustable = a.get('ajustable', a['position'] in AJUSTABLES)
+                ajustable = ' Article ajustable : son ratio absorbe l’écart de FOB.' if est_ajustable else ''
                 alertes.append(_alerte('eleve', f'Ratio FOB/kg {nombre(ratio, 4)} jamais observé : les {len(documents)} '
                     f'dossier(s) connu(s) vont de {nombre(bas, 4)} à {nombre(haut, 4)}.{ajustable}', nom))
             elif len(documents) >= seuils['references_marge']:
@@ -89,6 +91,11 @@ def analyser(modele, groupes, autres=(), seuils=SEUILS):
         if autre['statut'] == 'rejete' and distance_parts(repartition, sienne) <= seuils['proche_rejete']:
             motif = f" (motif : {autre['motif']})" if autre.get('motif') else ''
             alertes.append(_alerte('eleve', f"Très proche du modèle n° {autre['id']} rejeté localement{motif}."))
+        elif autre.get('note') is not None and autre['note'] <= seuils['note_mauvaise'] and \
+                distance_parts(repartition, sienne) <= seuils['proche_rejete']:
+            avis = f" ({autre['note_commentaire']})" if autre.get('note_commentaire') else ''
+            alertes.append(_alerte('moyen', f"Très proche du modèle n° {autre['id']}, que vous avez noté "
+                                            f"{autre['note']}/5{avis}."))
         elif repartition['poids'] == sienne['poids'] and repartition['fob'] == sienne['fob']:
             alertes.append(_alerte('moyen', f"Poids et FOB identiques au modèle n° {autre['id']} : "
                                             'une répartition recopiée se remarque.'))
@@ -108,3 +115,9 @@ def niveau(alertes):
     """Niveau le plus grave parmi les alertes, hors informations ; None si aucun signal."""
     graves = [a['niveau'] for a in alertes if a['niveau'] != 'info']
     return min(graves, key=NIVEAUX.index) if graves else None
+
+
+def gravite(alertes):
+    """Clé de tri du moins au plus risqué : niveau (aucun signal, à vérifier, élevé), puis nombre de points."""
+    rang = {None: 0, 'moyen': 1, 'eleve': 2}[niveau(alertes)]
+    return rang, sum(a['niveau'] != 'info' for a in alertes)

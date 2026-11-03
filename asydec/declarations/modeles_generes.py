@@ -31,6 +31,12 @@ CREATION, VALIDATION, EXPORT = 'creation', 'validation_locale', 'export'
 PLAQUE, COMPARAISON = 'plaque', 'comparaison'
 SUPPRESSION, RESTAURATION = 'suppression', 'restauration'
 BON_MODELE, RETRAIT_BON_MODELE = 'bon_modele', 'retrait_bon_modele'
+NOTE = 'note'
+
+# Note donnée par l'utilisateur sur ce qu'il voit du modèle ; 4 et plus = exemple à suivre,
+# 2 et moins = à éviter (voir bons_modeles et calcul.anomalies).
+NOTES = {5: 'Excellent', 4: 'Bon', 3: 'Acceptable', 2: 'Douteux', 1: 'Mauvais'}
+NOTE_BONNE, NOTE_MAUVAISE = 4, 2
 
 SCHEMA = '''
 CREATE TABLE IF NOT EXISTS modeles (
@@ -133,8 +139,8 @@ def _basculer(identifiant, auteur, active, inactive, activer, detail, base):
 # =============================================================================
 # Instantanés : enregistrer, lister, consulter
 # =============================================================================
-def _empreinte(source, lignes, colis, plaque, importateur=None):
-    """Identité d'une proposition : base, répartition, plaque et importateur choisi (absents des anciennes empreintes)."""
+def _empreinte(source, lignes, colis, plaque, importateur=None, taux=None):
+    """Identité d'une proposition : base, répartition, plaque, importateur et taux choisis (absents des anciennes empreintes)."""
     normaliser = lambda v: str(Decimal(str(v)).normalize())
     contenu = {'base': _sha(source),
                'lignes': [[normaliser(f), normaliser(p), normaliser(c)] for (f, p), c in zip(lignes, colis)]}
@@ -142,12 +148,16 @@ def _empreinte(source, lignes, colis, plaque, importateur=None):
         contenu['plaque'] = moteur.normaliser_plaque(plaque)
     if importateur:
         contenu['importateur'] = importateur['code']
+    if taux:
+        contenu['taux'] = str(Decimal(str(taux)).normalize())
     return _sha(json.dumps(contenu, sort_keys=True).encode())
 
 
 def _snapshot(source, resultat, lignes):
     """XML du modèle recalculé depuis la base, sans écrire dans le fichier d'origine."""
     arbre = ET.ElementTree(ET.fromstring(source))
+    if resultat.get('taux_choisi'):
+        moteur.ecrire_taux(arbre.getroot(), resultat['taux_choisi'])
     resume = moteur.recalculer(arbre, lignes, resultat['colis'])
     if resultat.get('plaque'):
         moteur.ecrire_plaque(arbre.getroot(), resultat['plaque'])
@@ -188,7 +198,8 @@ def enregistrer(resultat, chemin_base, auteur, export=None, base=None, reference
     if len(lignes) != len(resultat['colis']):
         raise ValueError('Nombre de colis et articles incohérent.')
     xml = _snapshot(source, resultat, lignes)
-    empreinte = _empreinte(source, lignes, resultat['colis'], resultat.get('plaque'), resultat.get('importateur_choisi'))
+    empreinte = _empreinte(source, lignes, resultat['colis'], resultat.get('plaque'), resultat.get('importateur_choisi'),
+                          resultat.get('taux_choisi'))
     if module != 'friperie':
         empreinte = _sha((empreinte + ':' + module).encode())
     charge = json.dumps(resultat, ensure_ascii=False, sort_keys=True, allow_nan=False)
@@ -230,7 +241,8 @@ LISTE_SQL = f'''SELECT m.id, m.cree_utc, m.auteur, m.importateur, m.nom, m.resul
     {_derniere(EXPORT)} export_detail,
     {_bascule_sql(SUPPRESSION, RESTAURATION)} supprime,
     {_derniere(COMPARAISON, 'date_utc')} compare_utc,
-    {_derniere(COMPARAISON)} compare_detail
+    {_derniere(COMPARAISON)} compare_detail,
+    {_derniere(NOTE)} note_detail
     FROM modeles m ORDER BY m.id DESC'''
 
 
@@ -257,6 +269,7 @@ def lister(statut=None, base=None, supprimes=False, module=None):
         d['plaque'] = _plaque_affichee(d.pop('plaque_saisie'), d['resultat'])
         d['chemin_xml'] = _chemin_export(d.pop('export_detail'))
         d['dernier_ecart'] = _dernier_ecart(d.pop('compare_detail'))
+        d.update(_note(d.pop('note_detail')))
         sortie.append(d)
     return sortie
 
@@ -276,6 +289,8 @@ def detail(identifiant, base=None):
     sortie['bon'] = _bascule_active(evenements, BON_MODELE, RETRAIT_BON_MODELE)
     saisie = _dernier(evenements, PLAQUE)
     sortie['plaque'] = _plaque_affichee(saisie and saisie['detail'], sortie['resultat'])
+    note = _dernier(evenements, NOTE)
+    sortie.update(_note(note and note['detail']))
     return sortie
 
 
@@ -291,6 +306,10 @@ def resume_evenement(e):
     if action in (SUPPRESSION, RESTAURATION):
         libelle = 'Supprimé de la liste' if action == SUPPRESSION else 'Restauré dans la liste'
         return f'{libelle} · {detail_}' if detail_ else libelle
+    if action == NOTE:
+        n = _note(detail_)
+        libelle = f"Noté {n['note']}/5 ({NOTES[n['note']]})"
+        return f"{libelle} · {n['note_commentaire']}" if n['note_commentaire'] else libelle
     if action == PLAQUE:
         return f'Plaque : {detail_}'
     if action == COMPARAISON:
@@ -335,16 +354,56 @@ def marquer_bon(identifiant, auteur, bon=True, base=None):
     _basculer(identifiant, auteur, BON_MODELE, RETRAIT_BON_MODELE, bon, '', base)
 
 
+def _note(detail_):
+    """{'note': 1..5 ou None, 'note_commentaire': texte} depuis le détail d'un événement de note."""
+    try:
+        infos = json.loads(detail_) if detail_ else {}
+        return {'note': int(infos['note']), 'note_commentaire': infos.get('commentaire', '')}
+    except (ValueError, KeyError, TypeError):
+        return {'note': None, 'note_commentaire': ''}
+
+
+def noter(identifiant, note, auteur, commentaire='', base=None):
+    """Note de 1 à 5 donnée sur ce que l'utilisateur voit du modèle, avec un commentaire facultatif.
+    Chaque note est ajoutée à l'historique ; la dernière fait foi."""
+    auteur = _auteur(auteur)
+    if isinstance(note, bool) or note not in NOTES:
+        raise ValueError('Choisissez une note de 1 (mauvais) à 5 (excellent).')
+    commentaire = ' '.join(str(commentaire or '').split())[:300]
+    with _connexion(base) as conn:
+        _exiger_modele(conn, identifiant)
+        evenements = [dict(e) for e in conn.execute(
+            'SELECT action FROM evenements WHERE modele_id=? ORDER BY id', (identifiant,))]
+        if _bascule_active(evenements, SUPPRESSION, RESTAURATION):
+            raise ValueError('Restaurez le modèle avant de le noter.')
+        _evenement(conn, identifiant, auteur, NOTE,
+                   detail=json.dumps({'note': note, 'commentaire': commentaire}, ensure_ascii=False))
+    return note
+
+
 def bons_modeles(signature, base=None, module=None):
-    """Répartitions des modèles cochés, non supprimés, dont les articles sont ceux de cette signature."""
+    """Répartitions des modèles cochés ★ ou bien notés (4 ou 5), non supprimés, dont les articles sont
+    ceux de cette signature."""
     sortie = []
     for m in lister(base=base, module=module):
-        if not m['bon'] or _signature_modele(m['id'], base) != signature:
+        exemple = m['bon'] or (m['note'] or 0) >= NOTE_BONNE
+        if not exemple or _signature_modele(m['id'], base) != signature:
             continue
         r = m['resultat']
         sortie.append({'id': m['id'], 'poids': [a['poids'] for a in r['resume']['articles']],
                        'fob': list(r['fob']), 'colis': list(r['colis'])})
     return sortie
+
+
+def nombre_generes(signature, poids, fob, colis, base=None, module=None):
+    """Modèles enregistrés (non supprimés) aux mêmes articles et aux mêmes totaux poids / FOB / colis."""
+    compte = 0
+    for m in lister(base=base, module=module):
+        r = m['resultat']
+        if (round(r['resume']['poids']) == round(poids) and round(r['resume']['fob'], 2) == round(fob, 2)
+                and sum(r['colis']) == colis and _signature_modele(m['id'], base) == signature):
+            compte += 1
+    return compte
 
 
 def _signature_modele(identifiant, base):
@@ -409,15 +468,18 @@ def _plaque(valeur):
 
 
 def definir_plaque(identifiant, plaque, auteur, base=None):
-    """Plaque saisie sur un modèle validé ; tracée dans l'historique, le snapshot reste intact."""
+    """Plaque saisie sur un modèle généré, quel que soit son statut ; tracée dans l'historique,
+    le snapshot reste intact. Un modèle supprimé doit d'abord être restauré."""
     auteur = _auteur(auteur)
     plaque = _plaque(plaque)
     with _connexion(base) as conn:
         statut = _statut_courant(conn, identifiant)
         if statut is None:
             raise ValueError('Modèle introuvable.')
-        if statut != 'valide':
-            raise ValueError('La plaque se saisit sur un modèle Validé localement.')
+        evenements = [dict(e) for e in conn.execute(
+            'SELECT action FROM evenements WHERE modele_id=? ORDER BY id', (identifiant,))]
+        if _bascule_active(evenements, SUPPRESSION, RESTAURATION):
+            raise ValueError('Restaurez le modèle avant de changer sa plaque.')
         precedente = conn.execute('SELECT detail FROM evenements WHERE modele_id=? AND action=? '
                                   'ORDER BY id DESC LIMIT 1', (identifiant, PLAQUE)).fetchone()
         if precedente is None or precedente['detail'] != plaque:
@@ -541,6 +603,11 @@ def exporter_xml(identifiant, destination, auteur, ecraser=False, base=None):
         raise ValueError('Seul un modèle Validé localement peut être téléchargé en XML.')
     contenu = _contenu_a_exporter(identifiant, modele, base)
     _ecrire_atomique(contenu, destination, ecraser)
+    _tracer_export(identifiant, auteur, destination, contenu, base)
+    return str(destination)
+
+
+def _tracer_export(identifiant, auteur, destination, contenu, base):
     sha = _sha(contenu)
     trace = json.dumps({'chemin': str(destination), 'sha256': sha}, sort_keys=True)
     try:
@@ -550,6 +617,33 @@ def exporter_xml(identifiant, destination, auteur, ecraser=False, base=None):
                          (evenement, sha, contenu))
     except Exception as exc:
         raise ErreurSuiviExport(f'Le XML a été enregistré dans {destination}, mais son suivi a échoué : {exc}') from exc
+
+
+def mettre_a_jour_export(identifiant, auteur, base=None):
+    """Réinscrit la plaque saisie dans le dernier XML exporté, à la même place, quel que soit le statut.
+
+    Seule la plaque change dans le fichier. Refusé si le fichier a disparu ou a été modifié depuis
+    l'export : rien n'est alors écrasé. Renvoie le chemin réécrit, ou None sans export ni plaque saisie."""
+    auteur = _auteur(auteur)
+    modele = detail(identifiant, base=base)
+    export, saisie = _dernier(modele['evenements'], EXPORT), _dernier(modele['evenements'], PLAQUE)
+    chemin = _chemin_export(export['detail']) if export else ''
+    if not chemin or not saisie:
+        return None
+    contenu = lire_export(identifiant, base=base)
+    destination = Path(chemin)
+    try:
+        actuel = destination.read_bytes()
+    except OSError:
+        raise ValueError(f'Le XML généré est introuvable : {chemin}. Utilisez « Télécharger le XML… » '
+                         'pour en créer un nouveau avec la plaque.') from None
+    if actuel != contenu:
+        raise ValueError(f'Le XML généré a été modifié depuis sa création : {chemin}. Il n’est pas réécrit ; '
+                         'utilisez « Télécharger le XML… » pour en créer un nouveau avec la plaque.')
+    nouveau = appliquer_plaque(contenu, saisie['detail'])
+    if nouveau != contenu:
+        _ecrire_atomique(nouveau, destination, ecraser=True)
+        _tracer_export(identifiant, auteur, destination, nouveau, base)
     return str(destination)
 
 
@@ -675,16 +769,34 @@ def detail_taxes_modele(d, base=None):
 # =============================================================================
 # Données pour l'analyse des anomalies
 # =============================================================================
-def _articles_identifies(d):
-    """Articles du modèle avec leur groupe (devise, code, désignation), comme dans les références."""
-    donnees = extraire(bytes(d['base_xml']))
+def articles_identifies(base_xml, poids, fob, colis, ajustables=None):
+    """Articles valorisés du XML de base avec leur groupe (devise, code, désignation), comme dans les
+    références, et les valeurs données. ajustables : rangs (0 = premier article) dont le ratio absorbe l'écart."""
+    donnees = extraire(bytes(base_xml))
     devise = donnees['document']['devise'] or 'NON RENSEIGNEE'
     sources = [a for a in donnees['articles'] if a['fob'] is not None and Decimal(a['fob']) != 0]
+    sortie = []
+    for k, (s, p, f, c) in enumerate(zip(sources, poids, fob, colis)):
+        article = {'position': s['position'], 'code': s['code'] or '', 'designation': s['designation'] or '',
+                   'groupe': (devise, s['code'] or '', s['designation_normalisee'] or ''),
+                   'poids': float(p), 'fob': float(f), 'colis': float(c)}
+        if ajustables is not None:
+            article['ajustable'] = k in ajustables
+        sortie.append(article)
+    return sortie
+
+
+def _articles_identifies(d):
     r = d['resultat']
-    return [{'position': s['position'], 'code': s['code'] or '', 'designation': s['designation'] or '',
-             'groupe': (devise, s['code'] or '', s['designation_normalisee'] or ''),
-             'poids': float(a['poids']), 'fob': float(a['fob']), 'colis': float(c)}
-            for s, a, c in zip(sources, r['resume']['articles'], r['colis'])]
+    return articles_identifies(d['base_xml'], [a['poids'] for a in r['resume']['articles']],
+                               [a['fob'] for a in r['resume']['articles']], r['colis'])
+
+
+def donnees_proposition(base_xml, proposition, ajustables=()):
+    """Proposition non enregistrée au format d'anomalies.analyser."""
+    return {'id': None, 'statut': 'en_attente', 'motif': '', 'ecart_comparaison_pct': None,
+            'articles': articles_identifies(base_xml, proposition['poids'], proposition['fob'],
+                                            proposition['colis'], set(ajustables))}
 
 
 def _ecart_derniere_comparaison_pct(d):
@@ -705,6 +817,7 @@ def donnees_analyse(base=None, module=None):
             continue
         motif = next((e['detail'] for e in reversed(d['evenements']) if e['statut'] == 'rejete'), '')
         sortie.append({'id': d['id'], 'statut': d['statut'], 'motif': motif, 'articles': articles,
+                       'note': d['note'], 'note_commentaire': d['note_commentaire'],
                        'ecart_comparaison_pct': _ecart_derniere_comparaison_pct(d)})
     return sortie
 

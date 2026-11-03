@@ -10,8 +10,15 @@ from asydec.calcul import moteur
 from asydec.calcul import variantes
 from asydec.declarations import generer
 from asydec.ui import theme
+from asydec.ui.modeles_generes import classer_propositions, texte_risque
 from asydec.ui.articles_dynamiques import PanneauArticles
 from asydec.ui.importateurs import importateur_choisi, selecteur
+from asydec.ui import intentions
+from asydec.ui.intentions import intention_choisie
+from asydec.ui import compteur
+from asydec.ui import plaque
+from asydec.ui import taux_change
+from asydec.ui.taux_change import taux_choisi
 from asydec.ui.theme import nombre
 
 REFERENCE_DOSSIER = "Le XML du dossier (par défaut)"
@@ -35,6 +42,46 @@ def plaque_saisie(app):
     """Plaque facultative de l'étape Dossier (vide si absente, y compris sur une application de test)."""
     lire = getattr(app, "plaque_saisie", None)
     return lire() if callable(lire) else ""
+
+
+def tirages(intention):
+    """Nombre de répartitions tirées : davantage quand une intention doit les départager."""
+    return 8 if intention == "proche" else 30
+
+
+def choisir_proposition(app, propositions, profil, total_fob, total_colis, bons=()):
+    """(proposition, alertes, guide) : parmi les moins risquées, la meilleure pour l'intention choisie ;
+    pour « le plus proche », la plus ressemblante aux bons modèles ★ s'il y en a."""
+    from asydec.calcul import anomalies
+    intention = intention_choisie(app)
+    if intention == "proche":
+        classees = classer_propositions(app, propositions, base=app.base, profil=profil)
+        meilleur = anomalies.niveau(classees[0][1])
+        moins_risquees = [v for v, a in classees if anomalies.niveau(a) == meilleur]
+        alertes = {id(v): a for v, a in classees}
+        if bons:
+            proposition, modele, proximite = variantes.plus_proche(moins_risquees, bons)
+            guide = f"Guidée par vos bons modèles ★ : la plus proche du n° {modele['id']} ({nombre(proximite, 1)} % de ressemblance)."
+        else:
+            proposition = moins_risquees[0]
+            guide = "Aucun bon modèle ★ coché pour ces articles : tirage libre."
+        return proposition, alertes[id(proposition)], guide
+
+    def taxes(v):
+        try:
+            return generer.produire(app.base, v["poids"], profil["ratios"], app.table_imp, {}, mode="SAISI",
+                fob_total=total_fob, fob_saisis=v["fob"], colis_total=int(total_colis), colis_saisis=v["colis"],
+                enregistrer=False, profil=profil, taux=taux_choisi(app))["resume"]["taxes_totales"]
+        except Exception:  # noqa: BLE001 - une répartition incalculable passe en dernier
+            return float("inf")
+
+    def cle(v):
+        return variantes.score_intention(v, profil, intention, taxes(v) if intention == "taxes_basses" else None)
+
+    proposition, alertes = classer_propositions(app, propositions, base=app.base, profil=profil, cle=cle)[0]
+    guide = (f"Intention « {variantes.INTENTIONS[intention]} » : la meilleure de {len(propositions)} "
+             "répartitions valides, parmi les moins risquées.")
+    return proposition, alertes, guide
 
 
 def pied(page):
@@ -85,9 +132,10 @@ class PageDossier(ttk.Frame):
         ligne_plaque = ttk.Frame(self)
         ligne_plaque.pack(fill="x", pady=(12, 0))
         ttk.Label(ligne_plaque, text="Plaque à inscrire (facultatif)", style="Doux.TLabel").pack(side="left")
-        self.var_plaque = tk.StringVar()
+        self.var_plaque = plaque.variable(app)
         ttk.Entry(ligne_plaque, textvariable=self.var_plaque, width=28).pack(side="left", padx=10)
-        ttk.Label(ligne_plaque, text="Vide : le XML garde la plaque du dossier. Exemple : T546ECQ/T618ECT",
+        ttk.Label(ligne_plaque, text="Vide : le XML garde la plaque du dossier. Exemple : T546ECQ/T618ECT. "
+                  "Modifiable aussi aux étapes Articles et Vérifier, et dans Répartitions.",
                   style="Doux.TLabel").pack(side="left")
 
         ttk.Label(self, text="Référence des ratios", style="Section.TLabel").pack(anchor="w", pady=(20, 4))
@@ -190,7 +238,10 @@ class PageArticles(ttk.Frame):
         theme.bouton(outils, "Ajuster au poids total…", self.ajuster_poids).pack(side="left")
         self.regenerer_bouton = theme.bouton(outils, "Générer une autre répartition", self.regenerer, principal=True)
         self.regenerer_bouton.pack(side="left", padx=6)
+        intentions.selecteur(outils, app)
         theme.bouton(outils, "Vider", self.vider).pack(side="right")
+        self.var_possibles = tk.StringVar()
+        ttk.Label(self, textvariable=self.var_possibles, style="Doux.TLabel", wraplength=1100).pack(anchor="w", pady=(6, 0))
 
         reglages = ttk.Frame(self)
         reglages.pack(fill="x", pady=(16, 8))
@@ -205,6 +256,11 @@ class PageArticles(ttk.Frame):
             e = ttk.Entry(reglages, textvariable=var, width=11, justify="right")
             e.pack(side="left")
             e.bind("<KeyRelease>", self.planifier)
+
+        inscrits = ttk.Frame(self)
+        inscrits.pack(fill="x", pady=(0, 8))
+        plaque.selecteur(inscrits, app)
+        taux_change.selecteur(inscrits, app).bind("<KeyRelease>", self.planifier, add="+")
 
         self.panneau = PanneauArticles(self, app, self.articles_changes)
         self.panneau.pack(fill="x", pady=(4, 6))
@@ -361,7 +417,8 @@ class PageArticles(ttk.Frame):
             res = generer.produire(self.app.base, poids, self.app.profil["ratios"], getattr(self.app, "table_imp", []),
                 {}, mode="SAISI", fob_saisis=fob, colis_total=v["colis_total"], colis_saisis=v["colis"],
                 enregistrer=False, profil=self.app.profil, plaque=plaque_saisie(self.app),
-                importateur=importateur_choisi(self.app))
+                importateur=importateur_choisi(self.app),
+                taux=taux_choisi(self.app))
         except Exception as exc:  # noqa: BLE001 - affiché comme estimation impossible
             self.var_taxes.set(f"Total taxes estimé : —  ({exc})")
             self.cartes["taxes"].definir("—", str(exc))
@@ -421,16 +478,14 @@ class PageArticles(ttk.Frame):
         self.update_idletasks()
         try:
             bons = self.bons_modeles()
-            # Avec des modèles cochés, plusieurs répartitions valides sont tirées et la plus ressemblante est retenue.
+            # Plusieurs répartitions valides sont tirées : les moins risquées d'abord, puis la meilleure
+            # pour l'intention choisie parmi elles.
             propositions = variantes.generer(int(total_poids), total_fob, int(total_colis), profil["ratios"],
-                                             nombre=8 if bons else 1, profil=profil, exclure=vues)
+                nombre=tirages(intention_choisie(self.app)), profil=profil, exclure=vues)
             propositions = [p for p in propositions if variantes.cle_variante(p) not in vues] or propositions
-            if bons:
-                proposition, modele, proximite = variantes.plus_proche(propositions, bons)
-                guide = f"Guidée par vos bons modèles ★ : la plus proche du n° {modele['id']} ({nombre(proximite, 1)} % de ressemblance)."
-            else:
-                proposition = propositions[0]
-                guide = "Aucun bon modèle ★ coché pour ces articles : tirage libre."
+            proposition, alertes, guide = choisir_proposition(self.app, propositions, profil, total_fob,
+                                                              int(total_colis), bons)
+            risque = texte_risque(alertes)
             if variantes.cle_variante(proposition) in vues:
                 raise ValueError("La recherche n'a pas trouvé de nouvelle répartition pour ces totaux.")
             variantes.controler(proposition, profil)
@@ -438,7 +493,8 @@ class PageArticles(ttk.Frame):
             generer.produire(self.app.base, proposition["poids"], profil["ratios"], self.app.table_imp,
                 generer.lire_registre(), mode="SAISI", fob_total=total_fob, fob_saisis=proposition["fob"],
                 colis_total=int(total_colis), colis_saisis=proposition["colis"], enregistrer=False,
-                profil=profil, plaque=plaque_saisie(self.app), importateur=importateur_choisi(self.app))
+                profil=profil, plaque=plaque_saisie(self.app), importateur=importateur_choisi(self.app),
+                taux=taux_choisi(self.app))
         except Exception as exc:
             messagebox.showinfo("Répartition actuelle conservée", str(exc), parent=self)
             return
@@ -447,9 +503,10 @@ class PageArticles(ttk.Frame):
             self.configure(cursor="")
         vues.add(variantes.cle_variante(proposition))
         self.compteurs[cle] = self.compteurs.get(cle, 0) + 1
+        self.actualiser_compteur()
         self.remplir(proposition["poids"], proposition["fob"], proposition["colis"], mode="SAISI")
         self.message.afficher("ok", f"Répartition n° {self.compteurs[cle]} proposée : mêmes totaux, poids entiers, rien d'exporté",
-            [guide, "Cliquez à nouveau sur « Générer une autre répartition » autant de fois que nécessaire, "
+            [guide, risque, "Cliquez à nouveau sur « Générer une autre répartition » autant de fois que nécessaire, "
              "puis « Vérifier → » quand elle vous convient."])
 
     def ajuster_poids(self):
@@ -490,12 +547,37 @@ class PageArticles(ttk.Frame):
             self.after_cancel(self._attente)
         self._attente = self.after(250, self.actualiser)
 
+    def totaux(self):
+        """Totaux de la répartition : ceux du tableau s'il est complet, sinon ceux du XML du dossier."""
+        info, v = self.app.info, self.valeurs()
+        poids = v["poids"]
+        return (sum(poids) if all(p is not None for p in poids) else info["poids"],
+                v["fob_total"] if v["fob_total"] is not None else info["fob"],
+                v["colis_total"] if v["colis_total"] is not None else info["colis"])
+
+    def cle_session(self, total_poids, total_fob, total_colis):
+        profil = self.app.profil
+        return (self.app.base, self.app.reference, int(total_poids), round(total_fob, 2), int(total_colis),
+                tuple(profil["bornes"]), bool(profil.get("variables_libres")))
+
+    def actualiser_compteur(self):
+        """Modèles possibles pour les totaux affichés et modèles déjà générés pour eux."""
+        if not getattr(self, "var_possibles", None):
+            return
+        try:
+            poids, fob, colis = self.totaux()
+            session = len(self.deja_vues.get(self.cle_session(poids, fob, colis), ()))
+            self.var_possibles.set(compteur.calculer(self.app, self.app.base, self.app.profil, poids, fob, colis, session))
+        except Exception:  # noqa: BLE001 - le compteur est une aide
+            self.var_possibles.set("")
+
     def actualiser(self):
         """Recalcule à chaque frappe : FOB par ratios, ratio obtenu et contrôle des fourchettes."""
         self._attente = None
         profil = self.app.profil
         if not profil:
             return
+        self.actualiser_compteur()
         v = self.valeurs()
         poids, fob, probleme = v["poids"], None, None
         try:
@@ -583,6 +665,12 @@ class PageVerifier(ttk.Frame):
         self.message = theme.Message(self)
         self.message.pack(fill="x", pady=(0, 12))
 
+        ligne_plaque = ttk.Frame(self)
+        ligne_plaque.pack(fill="x", pady=(0, 10))
+        self._plaque_affichee = None
+        plaque.selecteur(ligne_plaque, app, apres=self.changer_plaque)
+        theme.bouton(ligne_plaque, "Appliquer", self.changer_plaque).pack(side="left", padx=8)
+
         cartes = ttk.Frame(self)
         cartes.pack(fill="x")
         self.cartes = {}
@@ -595,6 +683,8 @@ class PageVerifier(ttk.Frame):
         self.var_fichier = tk.StringVar()
         self.var_taux = tk.StringVar()
         ttk.Label(self, textvariable=self.var_taux, style="Doux.TLabel").pack(anchor="w", pady=(8, 0))
+        self.var_possibles = tk.StringVar()
+        ttk.Label(self, textvariable=self.var_possibles, style="Doux.TLabel", wraplength=1100).pack(anchor="w", pady=(4, 0))
         ttk.Label(self, textvariable=self.var_fichier, style="Doux.TLabel").pack(anchor="w", pady=(12, 6))
 
         barre = pied(self)
@@ -608,6 +698,10 @@ class PageVerifier(ttk.Frame):
         theme.bouton(barre, "←  Modifier les articles", lambda: app.montrer("articles")).pack(side="right", padx=8)
 
         theme.bouton(self, "Enregistrer la proposition", self.conserver_proposition).pack(anchor="w", pady=(0, 8))
+        # Note du modèle qui vient d'être généré, montrée après « Générer le XML ».
+        from asydec.ui.notation import BarreNotation
+        self.modele_id = None
+        self.notation = BarreNotation(self, self.noter)
 
         cadre, self.tableau = theme.tableau(self, [
             ("art", "Art.", 50, "center"), ("nom", "Marchandise", 260, "w"), ("poids", "Poids kg", 100, "e"),
@@ -616,10 +710,18 @@ class PageVerifier(ttk.Frame):
             ("taxes", "Taxes CDF", 130, "e")], 10)
         cadre.pack(fill="both", expand=True)
 
+    def changer_plaque(self):
+        """Nouvelle plaque saisie : l'aperçu est recalculé pour qu'elle soit inscrite et contrôlée."""
+        if self.resultat is not None and plaque.lire(self.app) != self._plaque_affichee:
+            self.afficher()
+
     def afficher(self):
+        self._plaque_affichee = plaque.lire(self.app)
         self.fichier = None
         self.comparer_bouton.configure(state="disabled")
         self.finder.pack_forget()
+        if getattr(self, "notation", None) is not None:
+            self.notation.pack_forget()
         self.tableau.delete(*self.tableau.get_children())
         try:
             res = self.app.calculer(enregistrer=False)
@@ -641,8 +743,12 @@ class PageVerifier(ttk.Frame):
         self.resultat = res
         self.tableau.delete(*self.tableau.get_children())
         self._montrer(res)
-        self.deja_vues.setdefault(self._contexte_regeneration(res), set()).add(
-            variantes.cle_variante(self._repartition(res)))
+        vues = self.deja_vues.setdefault(self._contexte_regeneration(res), set())
+        vues.add(variantes.cle_variante(self._repartition(res)))
+        if getattr(self, "var_possibles", None):
+            r = res["resume"]
+            self.var_possibles.set(compteur.calculer(self.app, self.app.base, self.app.profil,
+                                                     r["poids"], r["fob"], sum(res["colis"]), len(vues)))
         self.regenerer_bouton.configure(state="normal")
         self.generer.configure(state="normal", text="Générer le XML")
         if res["alertes"]:
@@ -684,8 +790,10 @@ class PageVerifier(ttk.Frame):
             total_poids, total_fob = ancien["resume"]["poids"], ancien["resume"]["fob"]
             total_colis = sum(ancien["colis"])
             propositions = variantes.generer(total_poids, total_fob, total_colis, profil["ratios"],
-                nombre=1, profil=profil, exclure=vues)
-            v = propositions[0]
+                nombre=tirages(intention_choisie(self.app)), profil=profil, exclure=vues)
+            bons_modeles = getattr(getattr(self.app, "pages", {}).get("articles"), "bons_modeles", None)
+            v, alertes, guide = choisir_proposition(self.app, propositions, profil, total_fob, total_colis,
+                                                    bons_modeles() if bons_modeles else [])
             if variantes.cle_variante(v) in vues:
                 raise ValueError("La recherche n'a pas trouvé de nouvelle répartition.")
             if (sum(v["poids"]) != total_poids or round(sum(v["fob"]), 2) != round(total_fob, 2)
@@ -696,7 +804,8 @@ class PageVerifier(ttk.Frame):
             res = generer.produire(self.app.base, v["poids"], profil["ratios"], self.app.table_imp,
                 generer.lire_registre(), mode="SAISI", fob_total=total_fob, fob_saisis=v["fob"],
                 colis_total=total_colis, colis_saisis=v["colis"], enregistrer=False, profil=profil,
-                plaque=plaque_saisie(self.app), importateur=importateur_choisi(self.app))
+                plaque=plaque_saisie(self.app), importateur=importateur_choisi(self.app),
+                taux=taux_choisi(self.app))
         except Exception as exc:
             messagebox.showinfo("Proposition actuelle conservée", str(exc), parent=self)
             return
@@ -705,15 +814,21 @@ class PageVerifier(ttk.Frame):
         self.app.pages["articles"].remplir(v["poids"], v["fob"], v["colis"], mode="SAISI")
         self.fichier = None
         self.finder.pack_forget()
+        if getattr(self, "notation", None) is not None:
+            self.notation.pack_forget()
         self._presenter(res)
         if not res["alertes"]:
             self.message.afficher("ok", "Nouvelle proposition calculée — mêmes totaux, rien d'exporté",
-                ["Vérifiez les articles et les taxes. Vous pouvez régénérer ou choisir « Générer le XML »."])
+                [guide + " " + texte_risque(alertes),
+                 "Vérifiez les articles et les taxes. Vous pouvez régénérer ou choisir « Générer le XML »."])
 
     def _montrer(self, res):
         r = res["resume"]
-        self.var_taux.set(f"Taux XML du dossier (CDF par unité de devise) : {nombre(r.get('taux'), 4)} · "
-                          f"Taxes globales reprises du XML de base : {nombre(r.get('taxes_globales'))} CDF")
+        origine = (f"Taux saisi appliqué (CDF par unité de devise) : {nombre(r.get('taux'), 4)}, "
+                   f"au lieu de {nombre(res['taux_xml'], 4)} dans le XML du dossier"
+                   if res.get("taux_choisi") else
+                   f"Taux XML du dossier (CDF par unité de devise) : {nombre(r.get('taux'), 4)}")
+        self.var_taux.set(f"{origine} · Taxes globales reprises du XML de base : {nombre(r.get('taxes_globales'))} CDF")
         self.cartes["poids"].definir(nombre(r["poids"]))
         self.cartes["fob"].definir(nombre(r["fob"], 2))
         self.cartes["colis"].definir(str(int(sum(res["colis"]))))
@@ -750,6 +865,25 @@ class PageVerifier(ttk.Frame):
             f"Modèle n° {identifiant} disponible dans Modèles générés. "
             "Une nouvelle proposition est en attente de validation locale. "
             "Si elle existait déjà, son statut est conservé.", parent=self)
+
+    def montrer_notation(self, identifiant):
+        self.modele_id = identifiant
+        self.notation.definir(None)
+        self.notation.pack(fill="x", pady=(0, 8), after=self.message)
+
+    def noter(self, note, commentaire=""):
+        if self.modele_id is None or self.app.session_verrouillee:
+            return
+        from asydec.declarations import modeles_generes
+        try:
+            modeles_generes.noter(self.modele_id, note, self.app.utilisateur, commentaire)
+        except Exception as exc:  # noqa: BLE001
+            messagebox.showerror("Note non enregistrée", str(exc), parent=self)
+            return
+        self.notation.definir(note, commentaire)
+        from asydec.ui.modeles_generes import EFFET_NOTE
+        self.message.afficher("ok", f"Modèle n° {self.modele_id} noté {note}/5 ({modeles_generes.NOTES[note]})",
+                              [EFFET_NOTE[note]])
 
     def comparer_xml(self):
         if self.app.session_verrouillee:
@@ -806,8 +940,9 @@ class PageVerifier(ttk.Frame):
         self.finder.pack(side="right", padx=8)
         try:
             from asydec.declarations import modeles_generes
-            modeles_generes.enregistrer(res, self.app.base, self.app.utilisateur, export=res['chemin'],
+            identifiant = modeles_generes.enregistrer(res, self.app.base, self.app.utilisateur, export=res['chemin'],
                                          reference=self.app.reference, module=getattr(self.app, 'module_travail', 'friperie'))
+            self.montrer_notation(identifiant)
         except Exception as exc:
             messagebox.showwarning("XML créé, suivi non enregistré",
                 "Le XML a bien été créé. Son ajout à la liste des modèles a échoué : " + str(exc), parent=self)

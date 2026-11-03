@@ -65,6 +65,8 @@ def preparer(identifiant, donneur, mode='importateur', base=None):
         traders.insert(position, copy.deepcopy(importateur))
         if d['plaque'] and d['plaque'] != moteur.infos_dossier(nouveau)['camion']:
             moteur.ecrire_plaque(nouveau, d['plaque'])
+        if d['resultat'].get('taux_choisi'):  # le taux saisi à la génération est conservé
+            moteur.ecrire_taux(nouveau, d['resultat']['taux_choisi'])
     else:
         if variantes.signature_racine(ancien) != variantes.signature_racine(bon):
             raise ValueError('Base incompatible : mêmes positions tarifaires, marchandises, ordre des articles et devise requis.')

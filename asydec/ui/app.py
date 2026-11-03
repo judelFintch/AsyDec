@@ -25,6 +25,7 @@ from asydec.ui.mediatheque import PageMediatheque
 from asydec.ui.modeles_generes import PageModelesGeneres
 from asydec.ui.outils import PageEtude, PageHistorique, PageRatios, PageRepartitions
 from asydec.ui.parametres import PageParametres
+from asydec.ui.plaque import texte_plaque
 from asydec.ui.references import PageReferences
 from asydec.ui.selection_xml import choisir as choisir_xml_partage
 
@@ -258,7 +259,7 @@ class AsyDec(tk.Tk):
         info = self.info
         choisi = AsyDec.importateur_choisi(self)
         self.var_bandeau.set(
-            f"{choisi['nom'] if choisi else info['importateur']}  ·  réf. {info['reference'] or '—'}  ·  camion {info['camion'] or '—'}"
+            f"{choisi['nom'] if choisi else info['importateur']}  ·  réf. {info['reference'] or '—'}  ·  camion {texte_plaque(self)}"
             f"  ·  {theme.nombre(info['fob'], 2)} USD  ·  {theme.nombre(info['poids'])} kg  ·  {info['colis']} colis")
 
     # ---------------------------------------------------------- importateur
@@ -480,7 +481,7 @@ class AsyDec(tk.Tk):
         """Calcule la déclaration avec les valeurs de l'étape 2. Lève ValueError si impossible."""
         if self.session_verrouillee:
             raise ValueError('La session est verrouillée.')
-        from asydec.ui.taux_change import confirmer
+        from asydec.ui.taux_change import confirmer, taux_choisi
         if not confirmer(self, [self.base], parent=self):
             raise ValueError('Calcul annulé : le taux de change doit être confirmé.')
         v = self.pages["articles"].valeurs()
@@ -490,7 +491,7 @@ class AsyDec(tk.Tk):
             mode=v["mode"], fob_total=v["fob_total"], fob_saisis=v["fob"],
             colis_total=v["colis_total"], colis_saisis=v["colis"],
             enregistrer=enregistrer, profil=self.profil, plaque=AsyDec.plaque_saisie(self),
-            importateur=AsyDec.importateur_choisi(self))
+            importateur=AsyDec.importateur_choisi(self), taux=taux_choisi(self))
         res['module'] = getattr(self, 'module_travail', 'friperie')
         if enregistrer:
             generer.ecrire_registre(registre)

@@ -6,6 +6,7 @@ import tkinter as tk
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
+from asydec.calcul import anomalies
 from asydec.calcul import moteur
 from asydec.calcul import variantes
 from asydec.declarations import etude_xml
@@ -15,6 +16,11 @@ from asydec.formats import date_locale
 from asydec.references import catalogue_xml
 from asydec.ui import theme
 from asydec.ui.importateurs import importateur_choisi, selecteur
+from asydec.ui import intentions
+from asydec.ui import compteur
+from asydec.ui import plaque
+from asydec.ui import taux_change
+from asydec.ui.modeles_generes import TEXTES_RISQUE, classer_propositions, texte_risque
 from asydec.ui.theme import nombre
 
 
@@ -41,7 +47,7 @@ class PageRepartitions(ttk.Frame):
         super().__init__(parent)
         self.app = app
         self.propositions, self.ecartes, self.deja_vues = [], [], {}
-        self.usages = {}
+        self.usages, self.alertes = {}, {}
         theme.entete_page(self, "Répartitions", "Proposez des répartitions poids / FOB / colis à partir de trois "
                           "totaux, d'après vos modèles enregistrés. Chaque proposition respecte les fourchettes de contrôle.")
 
@@ -56,6 +62,8 @@ class PageRepartitions(ttk.Frame):
         theme.bouton(saisie, "Rechercher", self.rechercher, principal=True).pack(side="left")
         self.autres = theme.bouton(saisie, "Autres propositions", lambda: self.rechercher(autres=True))
         self.autres.pack(side="left", padx=6)
+        intentions.selecteur(saisie, app)
+        taux_change.selecteur(saisie, app)
         theme.bouton(saisie, "Nouveaux modèles…", self.ajouter_modeles).pack(side="right")
         theme.bouton(saisie, "XML disponibles…", self.choisir_modeles).pack(side="right", padx=6)
         self.selection_modeles = None
@@ -65,10 +73,13 @@ class PageRepartitions(ttk.Frame):
         ligne_importateur.pack(fill="x")
         self.choix_importateur = selecteur(ligne_importateur, app)
         ttk.Label(ligne_importateur, text="Repris à l'étape Dossier et dans le XML généré.",
-                  style="Doux.TLabel").pack(side="left")
+                  style="Doux.TLabel").pack(side="left", padx=(0, 16))
+        plaque.selecteur(ligne_importateur, app, aide=False)
 
         self.message = theme.Message(self)
         self.message.pack(fill="x", pady=(8, 8))
+        self.var_possibles = tk.StringVar()
+        ttk.Label(self, textvariable=self.var_possibles, style="Doux.TLabel", wraplength=1100).pack(anchor="w", pady=(0, 6))
 
         barre = ttk.Frame(self)
         barre.pack(side="bottom", fill="x", pady=(12, 0))
@@ -79,7 +90,7 @@ class PageRepartitions(ttk.Frame):
 
         cadre, self.liste = theme.tableau(self, [
             ("n", "N°", 50, "center"), ("modele", "Modèle de référence", 300, "w"),
-            ("utilise", "Déjà utilisé", 210, "w"), ("score", "Proximité / 100", 120, "e"),
+            ("utilise", "Déjà utilisé", 210, "w"), ("risque", "Risque", 110, "w"), ("score", "Proximité / 100", 120, "e"),
             ("taux", "Taux CDF/devise", 120, "e"), ("taxes", "Taxes estimées CDF", 150, "e")], 6)
         cadre.pack(fill="x")
         self.liste.bind("<<TreeviewSelect>>", self.detailler)
@@ -90,6 +101,8 @@ class PageRepartitions(ttk.Frame):
         cadre.pack(fill="both", expand=True)
         self.var_total_declaration = tk.StringVar(value="Total taxes de la déclaration estimé : —")
         ttk.Label(self, textvariable=self.var_total_declaration, style="Section.TLabel").pack(anchor="e", pady=(8, 0))
+        self.var_risque = tk.StringVar()
+        ttk.Label(self, textvariable=self.var_risque, style="Doux.TLabel", wraplength=900).pack(anchor="w", pady=(4, 0))
 
     def afficher(self):
         n = len(self.app.xml_disponibles(generation=True))
@@ -116,16 +129,28 @@ class PageRepartitions(ttk.Frame):
             if not confirmer(self.app, chemins, parent=self):
                 self.message.afficher("alerte", "Recherche annulée : taux de change non confirmés")
                 return
+            intention = intentions.intention_choisie(self.app)
+            gardees = 3 if autres else 12
+            # Avec une intention, un choix plus large est tiré puis départagé.
             propositions, ecartes = variantes.rechercher_modeles(poids, fob, colis, chemins=chemins,
-                                                                 nombre=3 if autres else 12, exclure=vues,
+                                                                 nombre=gardees if intention == "proche" else 3 * gardees,
+                                                                 exclure=vues,
                                                                  dynamique=True if getattr(self.app, "module_travail", "friperie") == "divers" else None)
             for v in propositions:
                 v["resultat"] = generer.produire(
                     v["controle"], v["poids"], v["profil"]["ratios"], self.app.table_imp, {}, mode="SAISI",
                     fob_total=fob, fob_saisis=v["fob"], colis_total=colis, colis_saisis=v["colis"],
-                    enregistrer=False, profil=v["profil"])
-                vues.add(variantes.cle_variante(v))
+                    enregistrer=False, profil=v["profil"], taux=taux_change.taux_choisi(self.app),
+                    plaque=plaque.lire(self.app))
                 v["empreinte"] = modeles_generes.empreinte_fichier(v["controle"])
+            # Les moins risquées d'abord ; à risque égal, la meilleure pour l'intention (proximité par défaut).
+            cle = None if intention == "proche" else (lambda v: variantes.score_intention(
+                v, v["profil"], intention, v["resultat"]["resume"]["taxes_totales"]))
+            classees = classer_propositions(self.app, propositions, cle=cle)[:gardees]
+            propositions = [v for v, _ in classees]
+            for v in propositions:
+                vues.add(variantes.cle_variante(v))
+            self.alertes = {id(v): a for v, a in classees}
         except Exception as exc:  # noqa: BLE001
             self.message.afficher("erreur", "Aucune proposition", str(exc).splitlines()[:6])
             return
@@ -136,10 +161,30 @@ class PageRepartitions(ttk.Frame):
         deja = sum(1 for v in propositions if self.usages.get(v["empreinte"]))
         if deja:
             lignes.append(f"{deja} proposition(s) viennent d'un modèle déjà utilisé (en couleur, colonne « Déjà utilisé »).")
-        self.message.afficher("ok", f"{len(propositions)} proposition(s), de la plus proche à la moins proche de vos modèles",
+        risquees = sum(1 for v in propositions if anomalies.niveau(self.alertes[id(v)]) == "eleve")
+        if risquees:
+            lignes.append(f"{risquees} proposition(s) à risque élevé, placées en fin de liste (colonne « Risque »).")
+        ordre = ("de la plus proche à la moins proche de vos modèles" if intention == "proche"
+                 else f"selon l'intention « {variantes.INTENTIONS[intention]} »")
+        self.message.afficher("ok", f"{len(propositions)} proposition(s), des moins risquées aux plus risquées, "
+                              f"puis {ordre}",
                               lignes)
         self.autres.configure(state="normal")
         self.liste.selection_set("0")
+        self.actualiser_compteur(propositions, poids, fob, colis, len(vues))
+
+    def actualiser_compteur(self, propositions, poids, fob, colis, session):
+        """Modèles possibles : somme sur les XML de base des propositions (chacun donne des modèles distincts)."""
+        try:
+            profils = {v["controle"]: v["profil"] for v in propositions}
+            possibles = [compteur.estimation(base, poids, fob, colis, profil) for base, profil in profils.items()]
+            total = {cle: sum(e[cle] for e in possibles) for cle in ("estimation", "plafond", "acceptes", "essais")}
+            signatures = {tuple(map(tuple, p["signature"])): p for p in profils.values()}
+            enregistres = sum(compteur.enregistres(self.app, p, poids, fob, colis) for p in signatures.values())
+            self.var_possibles.set(compteur.texte(total, session, enregistres)
+                                   + f" · {len(profils)} XML de base")
+        except Exception:  # noqa: BLE001 - le compteur est une aide
+            self.var_possibles.set("")
 
     def _lire_usages(self):
         """Modèles déjà utilisés ; un suivi illisible n'empêche jamais de proposer."""
@@ -154,7 +199,8 @@ class PageRepartitions(ttk.Frame):
         for k, v in enumerate(self.propositions):
             usage = self.usages.get(v["empreinte"])
             self.liste.insert("", "end", iid=str(k), tags=("alerte",) if usage else (), values=(
-                k + 1, v["modele"], "Oui · " + texte_usage(usage) if usage else "—", nombre(v["proximite"], 2),
+                k + 1, v["modele"], "Oui · " + texte_usage(usage) if usage else "—",
+                TEXTES_RISQUE[anomalies.niveau(self.alertes.get(id(v), []))], nombre(v["proximite"], 2),
                 nombre(v["resultat"]["resume"]["taux"], 4), nombre(v["resultat"]["resume"]["taxes_totales"])))
         if choix:
             self.liste.selection_set(choix)
@@ -186,10 +232,12 @@ class PageRepartitions(ttk.Frame):
         self.detail.delete(*self.detail.get_children())
         if not v:
             self.var_total_declaration.set("Total taxes de la déclaration estimé : —")
+            self.var_risque.set("")
             self.signaler.configure(state="disabled", text=SIGNALER)
             return
         self.var_total_declaration.set(
             f"Total taxes de la déclaration estimé : {nombre(v['resultat']['resume']['taxes_totales'])} CDF")
+        self.var_risque.set(texte_risque(self.alertes.get(id(v), [])))
         usage = self.usages.get(v.get("empreinte"))
         self.signaler.configure(state="normal", text=RETIRER_SIGNALEMENT if usage and usage["signale"] else SIGNALER)
         for k in range(len(v["poids"])):
@@ -249,7 +297,11 @@ class PageRepartitions(ttk.Frame):
         v = self.selection()
         if not v:
             return
-        if not self.app.base and not self._ouvrir_dossier_proposition(v):
+        # Ouvrir un dossier remet la plaque à celle du XML : la plaque saisie ici est conservée.
+        saisie = plaque.lire(self.app)
+        ouvert = self.app.base or self._ouvrir_dossier_proposition(v)
+        plaque.remettre(self.app, saisie)
+        if not ouvert:
             return
         if not self.app.choisir_reference(v["controle"], v["profil"]):
             return

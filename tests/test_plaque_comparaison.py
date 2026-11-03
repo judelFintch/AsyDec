@@ -20,8 +20,13 @@ class PlaqueEtTraceTest(unittest.TestCase):
     def valider(self):
         M.changer_statut(self.identifiant, 'valide', 'alice', base=self.base)
 
-    def test_plaque_exige_validation_et_normalise(self):
-        self.assertRaisesRegex(ValueError, 'Validé', M.definir_plaque, self.identifiant, 'T546ECQ', 'alice', base=self.base)
+    def test_plaque_sur_tout_modele_non_supprime_et_normalise(self):
+        # Modèle généré, pas encore validé : la plaque se modifie quand même.
+        self.assertEqual(M.definir_plaque(self.identifiant, 'T1', 'alice', base=self.base), 'T1')
+        self.assertEqual(M.detail(self.identifiant, base=self.base)['statut'], 'en_attente')
+        M.supprimer(self.identifiant, 'alice', base=self.base)
+        self.assertRaisesRegex(ValueError, 'Restaurez', M.definir_plaque, self.identifiant, 'T2', 'alice', base=self.base)
+        M.restaurer(self.identifiant, 'alice', base=self.base)
         self.valider()
         self.assertEqual(M.definir_plaque(self.identifiant, '  t546ecq / t618ect ', 'alice', base=self.base),
                          'T546ECQ / T618ECT')
@@ -225,6 +230,42 @@ class TelechargementAvecPlaqueTest(unittest.TestCase):
         self.assertEqual(M.lire_export(self.identifiant, base=self.base), octets)
         self.assertEqual(M.modele_par_export(octets, base=self.base), self.identifiant)
         self.assertIn(b'OLD1', bytes(M.detail(self.identifiant, base=self.base)['modele_xml']))
+
+    def exporter_genere(self):
+        """Fichier généré par « Générer le XML », rattaché au modèle comme dans l'application."""
+        genere = self.racine / 'SHABANI 7800USD 19000KG 01.xml'
+        genere.write_bytes(bytes(M.detail(self.identifiant, base=self.base)['modele_xml']))
+        self.assertEqual(M.enregistrer(self.resultat, self.source, 'alice', export=genere, base=self.base),
+                         self.identifiant)
+        return genere
+
+    def test_plaque_reinscrite_dans_le_xml_genere_meme_non_valide(self):
+        M.changer_statut(self.identifiant, 'en_attente', 'alice', base=self.base)
+        genere = self.exporter_genere()
+        self.assertIsNone(M.mettre_a_jour_export(self.identifiant, 'alice', base=self.base))  # aucune plaque saisie
+        M.definir_plaque(self.identifiant, 'T546ECQ/T618ECT', 'bob', base=self.base)
+        self.assertEqual(Path(M.mettre_a_jour_export(self.identifiant, 'bob', base=self.base)), genere.resolve())
+        octets = genere.read_bytes()
+        self.assertEqual(octets.count(b'<Identity>T546ECQ/T618ECT</Identity>'), 2)
+        self.assertNotIn(b'OLD1', octets)
+        self.assertEqual(M.lire_export(self.identifiant, base=self.base), octets)
+        self.assertEqual(M.modele_par_export(octets, base=self.base), self.identifiant)
+        self.assertEqual(M.detail(self.identifiant, base=self.base)['statut'], 'en_attente')
+        # En dehors du bloc transport (plaque), le fichier est identique octet pour octet.
+        import re
+        hors_transport = lambda o: re.sub(rb'<Means_of_transport>.*?</Means_of_transport>', b'', o, flags=re.S)
+        self.assertEqual(hors_transport(octets),
+                         hors_transport(bytes(M.detail(self.identifiant, base=self.base)['modele_xml'])))
+
+    def test_xml_genere_modifie_ou_absent_jamais_ecrase(self):
+        genere = self.exporter_genere()
+        M.definir_plaque(self.identifiant, 'T546ECQ', 'alice', base=self.base)
+        genere.write_bytes(b'<ASYCUDA>retouche manuelle</ASYCUDA>')
+        self.assertRaisesRegex(ValueError, 'modifié', M.mettre_a_jour_export, self.identifiant, 'alice', base=self.base)
+        self.assertEqual(genere.read_bytes(), b'<ASYCUDA>retouche manuelle</ASYCUDA>')
+        genere.unlink()
+        self.assertRaisesRegex(ValueError, 'introuvable', M.mettre_a_jour_export, self.identifiant, 'alice', base=self.base)
+        self.assertFalse(genere.exists())
 
 
 class FichierXmlGenereTest(unittest.TestCase):

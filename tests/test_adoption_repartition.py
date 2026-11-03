@@ -67,6 +67,18 @@ class AdoptionRepartitionTest(unittest.TestCase):
         self.app.choisir_reference.assert_not_called()
         self.app.pages['articles'].remplir.assert_not_called()
 
+    def test_plaque_saisie_conservee_a_l_ouverture_du_dossier(self):
+        # Ouvrir la base remet la plaque à celle du XML : la saisie faite dans Répartitions doit survivre.
+        plaque = SimpleNamespace(valeur='T546ECQ/T618ECT')
+        self.app.var_plaque = SimpleNamespace(get=lambda: plaque.valeur, set=lambda v: setattr(plaque, 'valeur', v))
+        def ouvrir(_chemin):
+            plaque.valeur = ''
+            return True
+        self.app.ouvrir_base.side_effect = ouvrir
+        O.PageRepartitions.utiliser(self.page)
+        self.app.ouvrir_base.assert_called_once()
+        self.assertEqual(plaque.valeur, 'T546ECQ/T618ECT')
+
     def test_dossier_actif_reste_utilise(self):
         self.app.base='dossier-actif.xml'
         O.PageRepartitions.utiliser(self.page)

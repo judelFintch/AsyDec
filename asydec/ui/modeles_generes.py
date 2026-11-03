@@ -9,6 +9,7 @@ from asydec.declarations import export_pdf
 from asydec.declarations import modeles_generes as service
 from asydec.formats import date_locale, nombre
 from asydec.ui import theme
+from asydec.ui.notation import BarreNotation, etoiles
 
 
 def rangement(app,importateur,cle):
@@ -22,32 +23,74 @@ def rangement(app,importateur,cle):
         return None
 
 
+EFFET_NOTE={n:('Il servira d’exemple pour les prochaines répartitions aux mêmes articles.' if n>=4 else
+               'Les prochaines répartitions trop proches de lui seront signalées et placées après les autres.' if n<=2 else
+               'Note enregistrée : sans effet sur les prochaines répartitions.') for n in range(1,6)}
+
 TEXTES_RISQUE={'eleve':'● Élevé','moyen':'● À vérifier',None:'—'}
+
+
+def _contexte_anomalies(app):
+    """(groupes de références, modèles enregistrés) du module de travail ; lève une exception si illisible."""
+    from asydec.references import service_references
+    from asydec.references import catalogue_xml
+    conn = app.base_refs()
+    module = getattr(app, 'module_travail', 'friperie')
+    autorises = {d['id'] for d in catalogue_xml.lister(conn, module=module) if d['id'] is not None}
+    observations=[o for o in service_references.observations(conn,('accepte','non_verifie'))
+                  if o['document_id'] in autorises]
+    return anomalies.references_par_groupe(observations), service.donnees_analyse(module=module)
 
 
 def analyser_modeles(app):
     """{id: alertes} pour tous les modèles ; vide si les références ou les modèles sont illisibles."""
     try:
-        from asydec.references import service_references
-        from asydec.references import catalogue_xml
-        conn = app.base_refs()
-        module = getattr(app, 'module_travail', 'friperie')
-        autorises = {d['id'] for d in catalogue_xml.lister(conn, module=module) if d['id'] is not None}
-        observations=[o for o in service_references.observations(conn,('accepte','non_verifie'))
-                      if o['document_id'] in autorises]
-        modeles=service.donnees_analyse(module=getattr(app, 'module_travail', 'friperie'))
+        groupes, modeles = _contexte_anomalies(app)
     except Exception:  # noqa: BLE001 - l'analyse est une aide : la liste reste utilisable sans elle
         return {}
-    groupes=anomalies.references_par_groupe(observations)
     return {m['id']:anomalies.analyser(m,groupes,modeles) for m in modeles}
 
 
-def resume_risque(alertes):
+def classer_propositions(app, propositions, base=None, profil=None, cle=None):
+    """[(proposition, alertes)] du moins au plus risqué, ordre d'origine à risque égal.
+    base et profil : communs à toutes les propositions, sinon v['controle'] et v['profil'].
+    cle : note d'intention (plus petite = meilleure), qui départage à niveau de risque égal.
+    Sans références lisibles, les alertes restent vides et seule la note d'intention classe."""
+    from asydec.calcul import variantes
+    try:
+        groupes, modeles = _contexte_anomalies(app)
+    except Exception:  # noqa: BLE001 - l'analyse est une aide : la génération reste possible sans elle
+        sortie = [(v, []) for v in propositions]
+        return sorted(sortie, key=lambda t: cle(t[0])) if cle else sortie
+    contenus, sortie = {}, []
+    for v in propositions:
+        try:
+            chemin = base or v['controle']
+            if chemin not in contenus:
+                contenus[chemin] = Path(chemin).read_bytes()
+            modele = service.donnees_proposition(contenus[chemin], v,
+                                                 variantes.articles_ajustables(profil or v['profil']))
+            alertes = anomalies.analyser(modele, groupes, modeles)
+        except Exception:  # noqa: BLE001 - une proposition illisible n'est pas jugée, mais reste proposée
+            alertes = []
+        sortie.append((v, alertes))
+    if cle:
+        return sorted(sortie, key=lambda t: (anomalies.gravite(t[1])[0], cle(t[0])))
+    return sorted(sortie, key=lambda t: anomalies.gravite(t[1]))
+
+
+def texte_risque(alertes):
+    """Phrase courte sur le risque d'une proposition, pour les messages de génération."""
     graves=[a for a in alertes if a['niveau']!='info']
     if not graves:
         return 'Anomalies : aucun signal par rapport aux dossiers connus.'
     return (f"Anomalies : {anomalies.LIBELLES[anomalies.niveau(alertes)]} · {len(graves)} point(s) · "
-            f"{graves[0]['message']}  (bouton « Anomalies… » pour le détail)")
+            f"{graves[0]['message']}")
+
+
+def resume_risque(alertes):
+    texte=texte_risque(alertes)
+    return texte if anomalies.niveau(alertes) is None else texte+'  (bouton « Anomalies… » pour le détail)'
 
 
 def ecart_court(m):
@@ -77,7 +120,7 @@ class PageModelesGeneres(ttk.Frame):
             'Les anciens exports restent consultables dans Historique.')
         barre = ttk.Frame(self)
         barre.pack(fill='x', pady=8)
-        self.filtre = ttk.Combobox(barre,state='readonly',values=['Tous']+list(service.STATUTS.values())+['À risque ⚠','Bons modèles ★','Supprimés'],width=24)
+        self.filtre = ttk.Combobox(barre,state='readonly',values=['Tous']+list(service.STATUTS.values())+['À risque ⚠','Bons modèles ★','Bien notés (4-5)','Mal notés (1-2)','Supprimés'],width=24)
         self.filtre.set('Tous')
         self.filtre.pack(side='left',padx=4)
         self.filtre.bind('<<ComboboxSelected>>',lambda e:self.afficher())
@@ -91,8 +134,15 @@ class PageModelesGeneres(ttk.Frame):
         actions.pack(fill='x',pady=(0,8))
         self.xml_bouton=theme.bouton(actions,'Télécharger le XML…',self.telecharger_xml,state='disabled')
         self.xml_bouton.pack(side='right',padx=4)
-        self.plaque_bouton=theme.bouton(actions,'Plaque…',self.saisir_plaque,state='disabled')
-        self.plaque_bouton.pack(side='right',padx=4)
+        # Plaque du modèle sélectionné, modifiable directement, quel que soit son statut.
+        self.plaque_bouton=theme.bouton(actions,'Enregistrer la plaque',
+            lambda:self.saisir_plaque(plaque=self.var_plaque_modele.get()),state='disabled')
+        self.plaque_bouton.pack(side='right',padx=(4,12))
+        self.var_plaque_modele=tk.StringVar()
+        self.champ_plaque=ttk.Entry(actions,textvariable=self.var_plaque_modele,width=20,state='disabled')
+        self.champ_plaque.pack(side='right')
+        self.champ_plaque.bind('<Return>',lambda e:self.saisir_plaque(plaque=self.var_plaque_modele.get()))
+        ttk.Label(actions,text='Plaque',style='Doux.TLabel').pack(side='right',padx=(4,4))
         self.bon_bouton=theme.bouton(actions,'☆ Cocher bon modèle',self.basculer_bon,state='disabled')
         self.bon_bouton.pack(side='right',padx=4)
         self.supprimer_bouton=theme.bouton(actions,'Supprimer…',self.supprimer,state='disabled')
@@ -103,11 +153,15 @@ class PageModelesGeneres(ttk.Frame):
         versions.pack(fill='x',pady=(0,8))
         theme.bouton(versions,'Corriger le dossier…',self.corriger_dossier).pack(side='left',padx=4)
         theme.bouton(versions,'Reprendre pour modifier',self.reprendre).pack(side='left',padx=4)
+        # Note du modèle sélectionné : 4-5 = exemple à suivre, 1-2 = à éviter pour les prochaines générations.
+        self.notation=BarreNotation(self,self.noter)
+        self.notation.pack(fill='x',pady=(0,8))
+        self.notation.definir(None,actif=False)
         self.message=theme.Message(self)
         self.message.pack(fill='x',pady=6)
         # Colonnes lisibles d'un coup d'œil ; le reste est dans le panneau « Modèle sélectionné ».
         cadre,self.table=theme.tableau(self,[
-            ('bon','★',30,'center'),('id','N°',45,'e'),('risque','Risque',110,'w'),('plaque','Plaque',140,'w'),('importateur','Importateur',190,'w'),
+            ('bon','★',30,'center'),('note','Note',80,'center'),('id','N°',45,'e'),('risque','Risque',110,'w'),('plaque','Plaque',140,'w'),('importateur','Importateur',190,'w'),
             ('statut','Statut',95,'center'),('compare','Écart taxes comparé',150,'e'),('fob','FOB USD',95,'e'),
             ('poids','Poids kg',85,'e'),('taxes','Taxes CDF',110,'e'),('fichier','Fichier XML généré',230,'w')],12)
         cadre.pack(fill='both',expand=True)
@@ -130,6 +184,10 @@ class PageModelesGeneres(ttk.Frame):
             lignes=service.lister(filtre,supprimes=supprimes,module=getattr(self.app, 'module_travail', 'friperie'))
             if self.filtre.get()=='Bons modèles ★':
                 lignes=[m for m in lignes if m['bon']]
+            elif self.filtre.get()=='Bien notés (4-5)':
+                lignes=[m for m in lignes if (m.get('note') or 0)>=service.NOTE_BONNE]
+            elif self.filtre.get()=='Mal notés (1-2)':
+                lignes=[m for m in lignes if m.get('note') and m['note']<=service.NOTE_MAUVAISE]
             self.analyses=analyser_modeles(self.app)
             if self.filtre.get()=='À risque ⚠':
                 lignes=[m for m in lignes if anomalies.niveau(self.analyses.get(m['id'],[])) in ('eleve','moyen')]
@@ -148,7 +206,7 @@ class PageModelesGeneres(ttk.Frame):
             r=m['resultat']
             risque=anomalies.niveau(self.analyses.get(m['id'],[]))
             self.table.insert('','end',iid=identifiant,tags=(f'risque_{risque}' if risque else m['statut'],),
-                values=('★' if m['bon'] else '',identifiant,TEXTES_RISQUE[risque],m['plaque'] or '—',
+                values=('★' if m['bon'] else '',etoiles(m.get('note')),identifiant,TEXTES_RISQUE[risque],m['plaque'] or '—',
                 m['importateur'],STATUTS_COURTS[m['statut']],ecart_court(m),
                 nombre(r['resume']['fob'],2),nombre(r['resume']['poids']),nombre(r['resume'].get('taxes_totales')),
                 Path(m['chemin_xml']).name if m['chemin_xml'] else '—'))
@@ -163,7 +221,13 @@ class PageModelesGeneres(ttk.Frame):
         self.comparer_bouton.configure(state='normal' if modele.get('exporte') and libre else 'disabled')
         self.pdf_bouton.configure(state='normal' if modele.get('statut')=='valide' and libre else 'disabled')
         self.xml_bouton.configure(state='normal' if modele.get('statut')=='valide' and libre else 'disabled')
-        self.plaque_bouton.configure(state='normal' if modele.get('statut')=='valide' and libre else 'disabled')
+        modifiable=bool(modele) and libre and not modele.get('supprime')
+        self.plaque_bouton.configure(state='normal' if modifiable else 'disabled')
+        if hasattr(self,'notation'):
+            self.notation.definir(modele.get('note'),modele.get('note_commentaire'),modifiable)
+        if hasattr(self,'champ_plaque'):
+            self.var_plaque_modele.set(modele.get('plaque') or '')
+            self.champ_plaque.configure(state='normal' if modifiable else 'disabled')
         self.supprimer_bouton.configure(state='normal' if modele and libre else 'disabled')
         if hasattr(self,'bon_bouton'):
             self.bon_bouton.configure(state='normal' if modele and libre and not modele.get('supprime') else 'disabled',
@@ -238,9 +302,10 @@ class PageModelesGeneres(ttk.Frame):
             state='normal' if any(e['action']=='comparaison' for e in d['evenements']) else 'disabled').pack(side='right',padx=8)
         theme.bouton(boutons,'Corriger le dossier…',lambda:self.corriger_dossier(identifiant,fen)).pack(side='right',padx=8)
         theme.bouton(boutons,'Reprendre pour modifier',lambda:self.reprendre(identifiant,fen)).pack(side='right',padx=8)
+        if not d['supprime']:
+            theme.bouton(boutons,'Plaque…',lambda:self.saisir_plaque(identifiant,fen)).pack(side='right',padx=8)
         if d['statut']=='valide':
             theme.bouton(boutons,'Télécharger le XML…',lambda:self.telecharger_xml(identifiant,fen)).pack(side='right',padx=8)
-            theme.bouton(boutons,'Plaque…',lambda:self.saisir_plaque(identifiant,fen)).pack(side='right',padx=8)
             theme.bouton(boutons,'Imprimer en PDF…',lambda:self.imprimer(identifiant,fen)).pack(side='right',padx=8)
 
     def ouvrir_dossier(self):
@@ -341,6 +406,24 @@ class PageModelesGeneres(ttk.Frame):
         dates=[date_locale(e['date_utc']) for e in d['evenements'] if e['action']=='comparaison']
         return f"Comparé {len(dates)} fois, dernière le {dates[-1]}." if dates else 'Jamais comparé avec un XML.'
 
+    def noter(self,note,commentaire=''):
+        """Note le modèle sélectionné ; elle oriente les prochaines générations (4-5 suivi, 1-2 évité)."""
+        if self.app.session_verrouillee:
+            return
+        identifiant=self.selection()
+        if identifiant is None:
+            return
+        try:
+            service.noter(identifiant,note,self.app.utilisateur,commentaire)
+        except Exception as exc:
+            messagebox.showerror('Note non enregistrée',str(exc),parent=self)
+            return
+        self.afficher()
+        if self.table.exists(str(identifiant)):
+            self.table.selection_set(str(identifiant))
+        self.message.afficher('ok',f'Modèle n° {identifiant} noté {note}/5 ({service.NOTES[note]})',
+            [EFFET_NOTE[note]])
+
     def basculer_bon(self):
         """Coche ou décoche « bon modèle » : oriente les répartitions proposées, sans valider quoi que ce soit."""
         if self.app.session_verrouillee:
@@ -384,7 +467,8 @@ class PageModelesGeneres(ttk.Frame):
             return
         self.afficher()
 
-    def saisir_plaque(self,identifiant=None,parent=None):
+    def saisir_plaque(self,identifiant=None,parent=None,plaque=None):
+        """Plaque d'un modèle généré (en attente, validé ou rejeté) ; plaque=None : elle est demandée."""
         if self.app.session_verrouillee:
             return
         identifiant=identifiant if identifiant is not None else self.selection()
@@ -393,20 +477,31 @@ class PageModelesGeneres(ttk.Frame):
         parent=parent or self
         try:
             d=service.detail(identifiant)
-            if d['statut']!='valide':
-                raise ValueError('La plaque se saisit sur un modèle Validé localement.')
+            if d['supprime']:
+                raise ValueError('Restaurez le modèle avant de changer sa plaque.')
         except Exception as exc:
             messagebox.showerror('Plaque indisponible',str(exc),parent=parent)
             return
-        plaque=simpledialog.askstring('Plaque du camion',
-            f"Modèle n° {identifiant} : plaque du camion (ex. T546ECQ/T618ECT) :",initialvalue=d['plaque'],parent=parent)
+        if plaque is None:
+            plaque=simpledialog.askstring('Plaque du camion',
+                f"Modèle n° {identifiant} : plaque du camion (ex. T546ECQ/T618ECT) :",initialvalue=d['plaque'],parent=parent)
         if plaque is None or self.app.session_verrouillee:
             return
         try:
-            service.definir_plaque(identifiant,plaque,self.app.utilisateur)
+            plaque=service.definir_plaque(identifiant,plaque,self.app.utilisateur)
         except Exception as exc:
             messagebox.showerror('Plaque non enregistrée',str(exc),parent=parent)
             return
+        export=next((e for e in reversed(d['evenements']) if e['action']==service.EXPORT),None)
+        if export and plaque!=d['plaque'] and messagebox.askyesno('Mettre à jour le XML généré',
+                f"Plaque {plaque} enregistrée pour le modèle n° {identifiant}.\n\n"
+                "Inscrire aussi cette plaque dans le fichier XML déjà généré, à la même place ? "
+                "Seule la plaque change dans le fichier.",parent=parent):
+            try:
+                chemin=service.mettre_a_jour_export(identifiant,self.app.utilisateur)
+                messagebox.showinfo('XML mis à jour',f"Plaque {plaque} inscrite dans :\n{chemin}",parent=parent)
+            except Exception as exc:
+                messagebox.showerror('XML non mis à jour',str(exc),parent=parent)
         self.afficher()
         if self.table.exists(str(identifiant)):
             self.table.selection_set(str(identifiant))

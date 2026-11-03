@@ -99,6 +99,24 @@ def ecrire_importateur(racine, code, bloc):
     _ecrire(racine, "Traders/Consignee/Consignee_name", bloc)
 
 
+def ecrire_taux(racine, taux):
+    """Remplace le taux de change des montants en devise (taux nuls laissés tels quels).
+    La base RLS, fixée en devise, est reconvertie au nouveau taux. Renvoie l'ancien taux."""
+    taux = float(taux)
+    if not (math.isfinite(taux) and taux > 0):
+        raise ValueError("Le taux de change doit être un nombre strictement positif.")
+    ancien = _fl(_txt(racine, "Valuation/Gs_Invoice/Currency_rate"))
+    if not ancien > 0:
+        raise ValueError("Le XML de base n'a pas de taux de change positif à remplacer.")
+    for noeud in racine.iter("Currency_rate"):
+        if _fl((noeud.text or "").strip()) > 0:
+            noeud.text = _nombre(taux)
+    for ligne in racine.iter("Taxation_line"):
+        if _txt(ligne, "Duty_tax_code") == "RLS":
+            _ecrire(ligne, "Duty_tax_Base", _nombre(round(_fl(_txt(ligne, "Duty_tax_Base")) / ancien) * taux))
+    return ancien
+
+
 def infos_dossier(racine):
     nom = _txt(racine, "Traders/Consignee/Consignee_name").splitlines()
     its = articles(racine)

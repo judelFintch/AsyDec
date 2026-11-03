@@ -198,8 +198,9 @@ def ecrire_registre(reg):
 # --------------------------------------------------------------------------
 def produire(base, poids, ratios, table_imp, registre, mode="RATIOS", fob_total=None,
              fob_saisis=None, colis_total=None, colis_saisis=None, enregistrer=True, profil=None, plaque=None,
-             importateur=None):
+             importateur=None, taux=None):
     """Calcule une déclaration. Si enregistrer=False, rien n'est écrit (aperçu).
+    taux : taux de change à appliquer à la place de celui du XML de base (None = taux du XML).
     Renvoie un dictionnaire : chemin, nom, resume, alertes, fob, colis, info."""
     alertes = []
     arbre = moteur.charger(base)
@@ -221,6 +222,15 @@ def produire(base, poids, ratios, table_imp, registre, mode="RATIOS", fob_total=
         alertes.append(f"Importateur inscrit dans le XML : {info['importateur']} (XML de base : {ancien or 'aucun'}).")
     else:
         importateur = None
+    taux_xml = info.get("taux")
+    if taux is not None and float(taux) != taux_xml:
+        # Taux saisi : il remplace celui du XML de base, qui n'est pas modifié.
+        moteur.ecrire_taux(arbre.getroot(), taux)
+        info = moteur.infos_dossier(arbre.getroot())
+        alertes.append(f"Taux appliqué : 1 USD = {info['taux']:g} CDF (XML de base : {taux_xml:g}). "
+                       "Les taxes globales restent celles du XML de base : à vérifier.")
+    else:
+        taux = None
     n = len(info["fob_articles"])
     poids = list(poids)
     if len(poids) != n or any(p is None for p in poids):
@@ -292,7 +302,8 @@ def produire(base, poids, ratios, table_imp, registre, mode="RATIOS", fob_total=
             registre[cle] ={"fichier": nom, "poids": poids, "date": datetime.datetime.now().isoformat(timespec="minutes")}
     return {"chemin": chemin, "nom": nom, "resume": resume, "alertes": alertes,
             "fob": fob, "colis": colis, "info": info, "mode": mode, "plaque": plaque,
-            "importateur_choisi": importateur}
+            "importateur_choisi": importateur, "taux_choisi": info["taux"] if taux is not None else None,
+            "taux_xml": taux_xml}
 
 
 # --------------------------------------------------------------------------

@@ -75,6 +75,20 @@ class AnomaliesTest(unittest.TestCase):
         alertes = A.analyser(modele(ratio1=2.0, ecart=2, statut='rejete'), self.groupes)
         self.assertEqual(self.niveaux(alertes), sorted(self.niveaux(alertes), key=A.NIVEAUX.index))
 
+    def test_ajustable_explicite_prime_sur_la_position(self):
+        m = modele(ratio1=2.0, position1=4)
+        m['articles'][0]['ajustable'] = False
+        self.assertNotIn('ajustable', A.analyser(m, self.groupes)[0]['message'])
+        m = modele(ratio1=2.0)
+        m['articles'][0]['ajustable'] = True
+        self.assertIn('ajustable', A.analyser(m, self.groupes)[0]['message'])
+
+    def test_gravite_aucun_signal_puis_a_verifier_puis_eleve(self):
+        info = {'niveau': 'info', 'message': '', 'article': None}
+        moyen, eleve = dict(info, niveau='moyen'), dict(info, niveau='eleve')
+        cles = [A.gravite(a) for a in ([eleve], [moyen, moyen], [moyen], [info], [])]
+        self.assertEqual(sorted(cles), [(0, 0), (0, 0), (1, 1), (1, 2), (2, 1)])
+
 
 class InterfaceAnomaliesTest(unittest.TestCase):
     def test_references_illisibles_liste_utilisable(self):
@@ -82,6 +96,42 @@ class InterfaceAnomaliesTest(unittest.TestCase):
         self.assertEqual(U.analyser_modeles(SimpleNamespace()), {})
         self.assertIn('aucun signal', U.resume_risque([]))
         self.assertIn('Risque élevé', U.resume_risque([{'niveau': 'eleve', 'message': 'x', 'article': None}]))
+
+    def test_propositions_classees_du_moins_au_plus_risque(self):
+        import asydec.ui.modeles_generes as U
+        risques = {'a': [{'niveau': 'eleve', 'message': 'x', 'article': None}], 'b': [],
+                   'c': [{'niveau': 'moyen', 'message': 'y', 'article': None}], 'd': []}
+        propositions = [{'nom': n, 'poids': [1], 'fob': [1], 'colis': [10]} for n in 'abcd']
+        with patch.object(U, '_contexte_anomalies', return_value=({}, [])), \
+                patch.object(U.Path, 'read_bytes', return_value=b''), \
+                patch.object(U.service, 'donnees_proposition', side_effect=lambda _x, v, _a: v['nom']), \
+                patch.object(U.anomalies, 'analyser', side_effect=lambda nom, *_: risques[nom]):
+            classees = U.classer_propositions(SimpleNamespace(), propositions, base='base.xml',
+                                              profil={'ajustables': ()})
+        self.assertEqual([v['nom'] for v, _ in classees], ['b', 'd', 'c', 'a'])
+
+    def test_propositions_sans_references_ordre_conserve(self):
+        import asydec.ui.modeles_generes as U
+        propositions = [{'n': 1}, {'n': 2}]
+        self.assertEqual(U.classer_propositions(SimpleNamespace(), propositions), [(propositions[0], []),
+                                                                                   (propositions[1], [])])
+
+
+class PropositionAuFormatAnalyseTest(unittest.TestCase):
+    def test_articles_du_xml_avec_valeurs_proposees_et_ajustables(self):
+        from asydec import chemins
+        from asydec.calcul import moteur
+        from asydec.declarations import modeles_generes as M
+        base = next(iter(sorted(chemins.MODELES_XML.glob('*.xml'))), None)
+        if base is None:
+            self.skipTest('aucun modèle XML local')
+        n = len(moteur.infos_dossier(moteur.charger(str(base)).getroot())['poids_articles'])
+        proposition = {'poids': [100 + k for k in range(n)], 'fob': [50.5] * n, 'colis': [10 + k for k in range(n)]}
+        donnees = M.donnees_proposition(base.read_bytes(), proposition, ajustables=(0,))
+        self.assertIsNone(donnees['id'])
+        self.assertEqual([a['poids'] for a in donnees['articles']], proposition['poids'])
+        self.assertEqual([a['ajustable'] for a in donnees['articles']], [True] + [False] * (n - 1))
+        self.assertTrue(all(len(a['groupe']) == 3 for a in donnees['articles']))
 
 
 if __name__ == '__main__':

@@ -321,6 +321,57 @@ def distance_parts(v, ref):
     return distance
 
 
+# Intention de génération : ce que l'utilisateur veut obtenir parmi les répartitions valides.
+INTENTIONS = {
+    'proche': 'Le plus proche d’un dossier',
+    'ratio_sur': 'Meilleur ratio (le plus sûr)',
+    'taxes_basses': 'Taxes les plus basses',
+    'moyen': 'Le plus moyen',
+}
+
+
+def _ratios_observes(profil, k):
+    return [r['info']['fob_articles'][k]/r['info']['poids_articles'][k] for r in profil['references']]
+
+
+def _parts_moyennes(profil):
+    """Parts moyennes de poids, FOB et colis par article sur toutes les références."""
+    moyenne = {}
+    for cle, champ in (('poids', 'poids_articles'), ('fob', 'fob_articles'), ('colis', 'colis_articles')):
+        parts = [[x/sum(r['info'][champ]) for x in r['info'][champ]]
+                 for r in profil['references'] if sum(r['info'][champ]) > 0]
+        moyenne[cle] = [sum(c)/len(parts) for c in zip(*parts)] if parts else []
+    return moyenne
+
+
+def score_intention(v, profil, intention, taxes=None):
+    """Note d'une proposition pour l'intention choisie : plus petite = plus conforme (0 = idéale).
+
+    ratio_sur : écart moyen des ratios FOB/kg au milieu de la fourchette observée, en demi-largeurs
+    de fourchette (0 = au centre, 1 = sur un bord). taxes_basses : total des taxes estimé, à fournir.
+    moyen : distance des parts aux parts moyennes des références. proche : distance actuelle."""
+    if intention == 'taxes_basses':
+        if taxes is None:
+            raise ValueError('Le total des taxes estimé est nécessaire pour cette intention.')
+        return float(taxes)
+    if intention == 'ratio_sur':
+        ecarts = []
+        for k, (p, f) in enumerate(zip(v['poids'], v['fob'])):
+            observes = _ratios_observes(profil, k) or [profil['ratios'][k]]
+            bas, haut = min(observes), max(observes)
+            milieu = (bas + haut)/2
+            ecarts.append(abs(f/p - milieu)/((haut - bas)/2 if haut > bas else milieu))
+        return sum(ecarts)/len(ecarts)
+    if intention == 'moyen':
+        moyenne = _parts_moyennes(profil)
+        if not moyenne['poids']:
+            return v.get('distance', 0)
+        return distance_parts(v, moyenne)
+    if intention == 'proche':
+        return v.get('distance', 0)
+    raise ValueError(f'Intention inconnue : {intention}')
+
+
 def plus_proche(propositions, modeles):
     """Proposition la plus proche d'un des modèles retenus : (proposition, modèle, proximité %)."""
     choix = min(((distance_parts(p, m), i, p, m) for i, p in enumerate(propositions) for m in modeles),
@@ -360,6 +411,43 @@ def fob_controles(poids, profil, total=None):
         valeurs[k]+=deplacement
         reste-=deplacement
     return [x/100 for x in valeurs]
+
+
+def estimer_possibles(poids_total, fob_total, colis_total, profil, essais=120, graine=0):
+    """Estimation du nombre de répartitions distinctes (poids entiers) qui passent tous les contrôles.
+
+    Comme le générateur, on explore les poids autour des parts de chaque référence (±25 %) :
+    nombre de combinaisons de poids de cette zone × part acceptée sur un échantillon tiré au hasard.
+    La plus grande zone est retenue : c'est un ordre de grandeur (borne basse), pas un compte exact.
+    Renvoie {'estimation', 'plafond' (si aucun accepté : moins que ce nombre), 'acceptes', 'essais'}."""
+    W, n = int(poids_total), len(profil['ratios'])
+    rng = random.Random(graine)
+    estimation = plafond = 0.0
+    acceptes = total = 0
+    for ref in profil['references'][:10]:
+        parts = ref['info']['poids_articles']
+        somme = sum(parts)
+        bas = [max(1, math.floor(W * p / somme * .75)) for p in parts]
+        haut = [max(b, math.ceil(W * p / somme * 1.25)) for b, p in zip(bas, parts)]
+        volume = math.prod(h - b + 1 for b, h in zip(bas[:-1], haut[:-1]))
+        ok = 0
+        for _ in range(essais):
+            poids = [rng.randint(b, h) for b, h in zip(bas[:-1], haut[:-1])]
+            dernier = W - sum(poids)
+            if not bas[-1] <= dernier <= haut[-1]:
+                continue
+            poids.append(dernier)
+            try:
+                fob = fob_controles(poids, profil, fob_total)
+                v = {'poids': poids, 'fob': fob, 'colis': moteur.colis_gradues(poids, fob, int(colis_total))}
+                controler(v, profil)
+            except (ValueError, ArithmeticError):
+                continue
+            ok += 1
+        acceptes, total = acceptes + ok, total + essais
+        estimation = max(estimation, volume * ok / essais)
+        plafond = max(plafond, volume / essais)
+    return {'estimation': estimation, 'plafond': plafond, 'acceptes': acceptes, 'essais': total}
 
 
 def rechercher_modeles(poids, fob, colis, chemins=None, nombre=12, exclure=None, dynamique=None):

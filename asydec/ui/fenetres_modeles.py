@@ -82,10 +82,10 @@ def _boutons_fiche(page, cadre, fen, d):
                ('Détails des taxes…', lambda: page.details_taxes(d, fen), True),
                ('Comparaisons enregistrées…', lambda: page.voir_comparaisons(d, fen), compare),
                ('Corriger le dossier…', lambda: page.corriger_dossier(identifiant, fen), True),
+               ('Plaque…', lambda: page.saisir_plaque(identifiant, fen), not d.get('supprime')),
                ('Reprendre pour modifier', lambda: page.reprendre(identifiant, fen), True)]
     if d['statut'] == 'valide':
         actions += [('Télécharger le XML…', lambda: page.telecharger_xml(identifiant, fen), True),
-                    ('Plaque…', lambda: page.saisir_plaque(identifiant, fen), True),
                     ('Imprimer en PDF…', lambda: page.imprimer(identifiant, fen), True)]
     for k, (texte, commande, actif) in enumerate(actions):
         theme.bouton(boutons, texte, commande, state='normal' if actif else 'disabled').pack(
