@@ -1,8 +1,10 @@
 # CAP AsyDec — tableau de bord actuel
-Date : 27 octobre 2026. Responsable : Atlas.
+Date : 3 novembre 2026. Responsable : Atlas.
 Règle : plan → GO → livraison → revue croisée → commit Atlas ; lots séquentiels pour économiser les tokens.
 Objectif : références persistantes → propositions contrôlées → export XML → comparaison → suivi.
-Dernière suite : 226 tests réussis (27/10, UI-116, UI-117 et REF-104 non commités).
+Dernière suite : 402 tests réussis (03/11). UI-116, UI-117 et REF-104 sont intégrés depuis (commits du 27/10 au 03/11).
+Nettoyage du 03/11 : ancienne interface `ui/ancienne/` retirée (point P8 de RAPPORT_AGENT_REFERENCES.md), journal des erreurs ignorées dans `DONNEES/asydec.log`, `requirements.txt` ajouté.
+Reporté sur décision utilisateur (03/11) : plafonnement des ratios des articles ajustables 4/7/8 d'après les modèles acceptés.
 
 | Agent | Lot | État |
 |---|---|---|

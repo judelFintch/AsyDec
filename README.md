@@ -10,7 +10,7 @@ Python 3.10 ou plus récent, avec Tkinter.
 
 ```bash
 python3 -m venv .venv
-.venv/bin/pip install openpyxl sv-ttk
+.venv/bin/pip install -r requirements.txt
 ```
 
 `sv-ttk` (thème moderne, sans dépendance) est facultatif : sans lui, l'interface
@@ -55,6 +55,31 @@ La taille de la fenêtre et les fichiers récents sont mémorisés dans `~/.asyd
   avec un seuil d'écart (10 % par défaut). L'analyse peut être exportée en Excel.
 - **Historique.** Liste les déclarations générées, les plus récentes d'abord, avec un
   filtre par importateur. Un double-clic affiche le fichier dans le Finder.
+
+## Rapport des comparaisons
+
+Menu **Outils → Rapport des comparaisons** : toutes les comparaisons « XML généré / XML comparé »
+enregistrées, analysées ensemble (écart = XML comparé − XML généré).
+
+Chaque comparaison reçoit un **diagnostic** :
+
+| Diagnostic | Sens |
+|---|---|
+| Identique | Mêmes taxes (à l'arrondi près). |
+| Écart dû au taux | Même répartition ; l'écart disparaît une fois l'effet du taux de change retiré. |
+| Écart de calcul | Même répartition, mais un écart subsiste hors taux : à examiner (articles ou taxes globales). |
+| Répartition différente | Mêmes totaux, poids/FOB/colis répartis autrement entre les articles. |
+| Autre dossier | Importateur, devise, totaux ou articles différents : l'écart de taxes ne juge pas le calcul. |
+
+- « Ce qu'il faut retenir » résume en phrases : écarts de calcul et leur origine, part du taux,
+  taxes au barème différent, taxes qui partagent le même écart (base CIF commune), articles dont le
+  ratio FOB/kg diffère, répartitions différentes.
+- Onglets : comparaisons, par taxe (répartitions identiques, taux neutralisé), par article, par importateur.
+- Double-clic : la comparaison détaillée. « Exporter Excel… » : synthèse et quatre feuilles de détail.
+- Une même comparaison répétée n'est comptée qu'une fois. Les anciennes comparaisons sans détail sont
+  reconstituées à partir du XML exporté archivé, si le fichier comparé est toujours là et inchangé.
+- Les taxes globales sont reprises telles quelles du XML de base par le moteur : un écart sur elles
+  est signalé comme tel.
 
 ## Récupération des ratios
 
@@ -160,8 +185,8 @@ OUTILS/
 │   ├── calcul/              règles de calcul, sans fichiers ni interface
 │   ├── declarations/        production, étude, comparaison et export des déclarations
 │   ├── references/          base SQLite des XML de référence et catalogue partagé
-│   ├── systeme/             compte local, préférences, remise à zéro, rechargement
-│   └── ui/                  interface Tkinter (ui/ancienne/ : ancienne interface)
+│   ├── systeme/             compte local, préférences, remise à zéro, rechargement, journal
+│   └── ui/                  interface Tkinter
 ├── tests/                   tests unitaires, un fichier par fonctionnalité
 ├── docs/                    rapports et notes de suivi du projet
 └── DONNEES/, CONFIG_LOCAL/, MODELES_XML/, …   données locales, exclues de Git
@@ -180,6 +205,7 @@ Les données restent à la racine d'`OUTILS` : leurs chemins sont tous définis 
 | `declarations/generer.py` | Production d'une déclaration, nommage, registre, traitement de `SAISIE.xlsx` |
 | `declarations/etude_xml.py` | Lecture descriptive des XML, comparaison à une référence, export |
 | `declarations/comparaison_prediction.py` | Comparaison d'une proposition à un XML SYDONIA |
+| `declarations/rapport_comparaisons.py` | Rapport de toutes les comparaisons : diagnostic, analyse, export Excel |
 | `declarations/modeles_generes.py` | Modèles générés : enregistrement, validation, comparaisons, export XML |
 | `declarations/export_pdf.py` | PDF des modèles et des comparaisons |
 | `declarations/tableau_excel.py` | Lecture d'un tableau d'articles dans un fichier Excel |
@@ -190,6 +216,7 @@ Les données restent à la racine d'`OUTILS` : leurs chemins sont tous définis 
 | `references/catalogue_xml.py` | Médiathèques XML, une par type de dossier |
 | `systeme/gestion_locale.py` | Compte administrateur, préférences, remise à zéro |
 | `systeme/rechargement.py` | Détection d'une nouvelle version du code (bouton « Recharger ») |
+| `systeme/journal.py` | Journal des erreurs ignorées (`DONNEES/asydec.log`) |
 | `ui/` | `app.py` (fenêtre), `etapes.py` (3 étapes), `outils.py` (outils), `theme.py`, une page par fichier |
 
 ## Données et vérifications
@@ -200,8 +227,9 @@ Les données locales sont exclues de Git. `MODELES_XML` contient les modèles de
 `IMPORTATEUR FOBUSD POIDSKG NN.xml`. Aucun fichier existant n'est écrasé.
 
 Tests : `.venv/bin/python -B -m unittest discover -s tests -t .`
-Dans l'ancienne interface, le bouton Refresh recharge le code local et réinitialise les
-saisies non enregistrées.
+
+Les erreurs des aides facultatives (compteur, analyse des anomalies, dossier proposé par défaut…)
+ne bloquent pas l'interface ; leur trace complète est notée dans `DONNEES/asydec.log`.
 
 ## Choisir l'importateur d'un dossier
 

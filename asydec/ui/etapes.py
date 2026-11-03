@@ -20,6 +20,7 @@ from asydec.ui import plaque
 from asydec.ui import taux_change
 from asydec.ui.taux_change import taux_choisi
 from asydec.ui.theme import nombre
+from asydec.systeme.journal import erreur_ignoree
 
 REFERENCE_DOSSIER = "Le XML du dossier (par défaut)"
 
@@ -49,9 +50,25 @@ def tirages(intention):
     return 8 if intention == "proche" else 30
 
 
+def declarations_reelles(profil):
+    """Répartitions des déclarations réelles (XML comparés) retenues comme références du profil."""
+    return [{'id': r['nom'], 'poids': r['info']['poids_articles'], 'fob': r['info']['fob_articles'],
+             'colis': r['info']['colis_articles']}
+            for r in (profil or {}).get('references', ()) if r.get('confiance') == variantes.CONFIANCE_REELLE]
+
+
+def texte_inspiration(proposition):
+    """« Inspirée de … » : la référence dont la proposition est la plus proche, et sa nature."""
+    if not proposition.get('reference_proche'):
+        return ""
+    return (f" Inspirée de : {proposition.get('source_proche', 'référence').lower()} "
+            f"« {proposition['reference_proche']} » ({nombre(proposition.get('proximite'), 1)} % de ressemblance).")
+
+
 def choisir_proposition(app, propositions, profil, total_fob, total_colis, bons=()):
     """(proposition, alertes, guide) : parmi les moins risquées, la meilleure pour l'intention choisie ;
-    pour « le plus proche », la plus ressemblante aux bons modèles ★ s'il y en a."""
+    pour « le plus proche », la plus ressemblante aux déclarations réelles comparées, sinon aux bons
+    modèles ★ s'il y en a."""
     from asydec.calcul import anomalies
     intention = intention_choisie(app)
     if intention == "proche":
@@ -59,12 +76,17 @@ def choisir_proposition(app, propositions, profil, total_fob, total_colis, bons=
         meilleur = anomalies.niveau(classees[0][1])
         moins_risquees = [v for v, a in classees if anomalies.niveau(a) == meilleur]
         alertes = {id(v): a for v, a in classees}
-        if bons:
+        reelles = declarations_reelles(profil)
+        if reelles:
+            proposition, modele, proximite = variantes.plus_proche(moins_risquees, reelles)
+            guide = (f"Guidée par vos déclarations réelles ({len(reelles)}) : la plus proche de « {modele['id']} » "
+                     f"({nombre(proximite, 1)} % de ressemblance).")
+        elif bons:
             proposition, modele, proximite = variantes.plus_proche(moins_risquees, bons)
             guide = f"Guidée par vos bons modèles ★ : la plus proche du n° {modele['id']} ({nombre(proximite, 1)} % de ressemblance)."
         else:
             proposition = moins_risquees[0]
-            guide = "Aucun bon modèle ★ coché pour ces articles : tirage libre."
+            guide = "Aucune déclaration réelle comparée ni bon modèle ★ pour ces articles : tirage libre."
         return proposition, alertes[id(proposition)], guide
 
     def taxes(v):
@@ -80,7 +102,7 @@ def choisir_proposition(app, propositions, profil, total_fob, total_colis, bons=
 
     proposition, alertes = classer_propositions(app, propositions, base=app.base, profil=profil, cle=cle)[0]
     guide = (f"Intention « {variantes.INTENTIONS[intention]} » : la meilleure de {len(propositions)} "
-             "répartitions valides, parmi les moins risquées.")
+             "répartitions valides, parmi les moins risquées." + texte_inspiration(proposition))
     return proposition, alertes, guide
 
 
@@ -445,6 +467,7 @@ class PageArticles(ttk.Frame):
             return modeles_generes.bons_modeles(variantes.signature(self.app.base),
                 module=getattr(self.app, 'module_travail', 'friperie'))
         except Exception:  # noqa: BLE001 - l'aide est facultative, le tirage libre reste possible
+            erreur_ignoree('propositions des bons modèles')
             return []
 
     def regenerer(self):
@@ -569,6 +592,7 @@ class PageArticles(ttk.Frame):
             session = len(self.deja_vues.get(self.cle_session(poids, fob, colis), ()))
             self.var_possibles.set(compteur.calculer(self.app, self.app.base, self.app.profil, poids, fob, colis, session))
         except Exception:  # noqa: BLE001 - le compteur est une aide
+            erreur_ignoree('compteur des modèles possibles')
             self.var_possibles.set("")
 
     def actualiser(self):
@@ -898,7 +922,7 @@ class PageVerifier(ttk.Frame):
                 options["initialdir"] = generer.dossier_rangement(
                     importateur, "sources", getattr(self.app, "table_imp", None))
         except Exception:  # noqa: BLE001 - emplacement habituel à défaut
-            pass
+            erreur_ignoree('dossier initial de comparaison')
         chemin = filedialog.askopenfilename(parent=self, title="Comparer le XML généré avec un fichier fourni",
                                             filetypes=[("XML", "*.xml")], **options)
         if not chemin:

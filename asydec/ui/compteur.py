@@ -3,6 +3,7 @@ import math
 
 from asydec.calcul import variantes
 from asydec.formats import nombre
+from asydec.systeme.journal import erreur_ignoree
 
 EXPOSANTS = str.maketrans('0123456789-', '⁰¹²³⁴⁵⁶⁷⁸⁹⁻')
 _CACHE = {}
@@ -42,6 +43,7 @@ def enregistres(app, profil, poids, fob, colis):
         return modeles_generes.nombre_generes(profil['signature'], poids, fob, colis,
                                               module=getattr(app, 'module_travail', 'friperie'))
     except Exception:  # noqa: BLE001 - le compteur est une aide
+        erreur_ignoree('nombre de modèles générés')
         return 0
 
 
@@ -63,5 +65,6 @@ def calculer(app, base, profil, poids, fob, colis, session):
             return ""
         possibles = estimation(base, poids, fob, colis, profil)
     except Exception:  # noqa: BLE001 - le compteur est une aide
+        erreur_ignoree('estimation des modèles possibles')
         return ""
     return texte(possibles, session, enregistres(app, profil, poids, fob, colis))

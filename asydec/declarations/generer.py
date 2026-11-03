@@ -20,6 +20,7 @@ from openpyxl.worksheet.datavalidation import DataValidation
 from asydec import chemins
 from asydec.calcul import moteur
 from asydec.calcul import variantes
+from asydec.systeme.journal import erreur_ignoree
 
 ICI = str(chemins.RACINE)
 DEC = str(chemins.DEC_FRIPERIE)
@@ -347,7 +348,7 @@ def charger_reglages():
             table_imp = [(r[0], r[1]) for r in wb["IMPORTATEURS"].iter_rows(min_row=2, values_only=True) if r[0]]
             wb.close()
         except Exception:  # noqa: BLE001 - réglages par défaut si le fichier est illisible
-            pass
+            erreur_ignoree('lecture des réglages de SAISIE.xlsx')
     return ratios, table_imp
 
 

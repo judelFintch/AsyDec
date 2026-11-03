@@ -13,6 +13,36 @@ BIBLIOTHEQUE = chemins.MODELES_XML
 # 10 + 11 + ... + 17 : plus petit total possible avec 8 articles gradués.
 COLIS_MINIMUM = sum(range(10, 18))
 
+# Confiance d'une référence de génération : une déclaration réelle (XML comparé) vaut plus qu'un bon
+# modèle, qui vaut plus qu'un XML de la bibliothèque. Plus elle est fiable, plus elle est tirée souvent
+# (poids), plus on reste près de ses parts (écartement) et plus elle attire le classement (attraction).
+CONFIANCE_REELLE, CONFIANCE_BON, CONFIANCE_BIBLIOTHEQUE = 3, 2, 1
+SOURCES = {CONFIANCE_REELLE: 'Déclaration réelle', CONFIANCE_BON: 'Bon modèle', CONFIANCE_BIBLIOTHEQUE: 'Bibliothèque'}
+ECARTEMENT = {CONFIANCE_REELLE: .10, CONFIANCE_BON: .15}
+ATTRACTION = {CONFIANCE_REELLE: .6, CONFIANCE_BON: .8, CONFIANCE_BIBLIOTHEQUE: 1.0}
+# Distance des parts en dessous de laquelle une répartition recopie un modèle rejeté ou mal noté
+# (même seuil que anomalies.SEUILS['proche_rejete']).
+DISTANCE_A_EVITER = 0.02
+
+
+def _confiance(ref):
+    return ref.get('confiance', CONFIANCE_BIBLIOTHEQUE)
+
+
+def _tirer_parts(rng, profil, ecartement):
+    """Parts de poids tirées autour d'une référence choisie au prorata de sa confiance ;
+    écartement = variation relative maximale pour une référence de la bibliothèque."""
+    references = profil['references']
+    ref = rng.choices(references, weights=[_confiance(r) for r in references])[0]
+    marge = ECARTEMENT.get(_confiance(ref), ecartement)
+    return [p * rng.uniform(1 - marge, 1 + marge) for p in ref['info']['poids_articles']]
+
+
+def a_eviter(v, profil):
+    """Vrai si la répartition est presque celle d'un modèle rejeté ou mal noté."""
+    return any(len(m['poids']) == len(v['poids']) and distance_parts(v, m) <= DISTANCE_A_EVITER
+               for m in profil.get('a_eviter', ()))
+
 
 def verifier_modele(chemin):
     arbre = moteur.charger(chemin)
@@ -184,8 +214,7 @@ def generer(poids_total, fob_total, colis_total, ratios, nombre=12, graine=None,
                 continue
         i,j = rng.choice(paires)
         if profil:
-            reference = rng.choice(profil['references'])['info']['poids_articles']
-            parts = [p * rng.uniform(.8, 1.2) for p in reference]
+            parts = _tirer_parts(rng, profil, .2)
         else:
             parts = [rng.expovariate(1) for _ in ratios]
         echelle = rng.uniform(.02,.8) * float(poids_total) / sum(parts)
@@ -219,6 +248,8 @@ def generer(poids_total, fob_total, colis_total, ratios, nombre=12, graine=None,
                 controler(v, profil)
             except ValueError:
                 continue
+            if a_eviter(v, profil):
+                continue
             v.update(evaluer(v, profil))
         resultats.append(v)
         if len(resultats) >= (nombre * 10 if profil else nombre):
@@ -228,27 +259,51 @@ def generer(poids_total, fob_total, colis_total, ratios, nombre=12, graine=None,
     return sorted(resultats, key=lambda v: v.get("distance", 0))[:nombre]
 
 
-def construire_profil(choisi, chemins=None, dynamique=None, catalogue=None):
-    """catalogue : catalogue des articles (gestion dynamique) ; rôle et bornes suivent alors chaque article."""
+def _empreinte(chemin):
+    return hashlib.sha256(Path(chemin).read_bytes()).hexdigest()
+
+
+def construire_profil(choisi, chemins=None, dynamique=None, catalogue=None, confiance=None):
+    """catalogue : catalogue des articles (gestion dynamique) ; rôle et bornes suivent alors chaque article.
+
+    confiance : {'reelles': [chemins des XML réels comparés], 'bons': [répartitions des bons modèles],
+    'a_eviter': [répartitions rejetées ou mal notées]} (voir modeles_generes.confiance_generation).
+    Les déclarations réelles aux mêmes articles deviennent des références prioritaires et élargissent
+    les fourchettes de ratios ; les autres sont ignorées sans bruit."""
+    confiance = confiance or {}
     info = verifier_modele(choisi)
     sig = signature(choisi)
     references, exclus = [], []
     chemins = list(chemins if chemins is not None else modeles())
     if str(choisi) not in [str(p) for p in chemins]:
         chemins.append(choisi)
+    reelles = {}
+    for chemin in confiance.get('reelles', ()):
+        try:
+            reelles[_empreinte(chemin)] = chemin
+        except OSError:
+            continue
+    connus = {str(p) for p in chemins}
+    chemins += [c for c in reelles.values() if str(c) not in connus]
     empreintes = set()
     for chemin in chemins:
+        empreinte = None
         try:
-            empreinte = hashlib.sha256(Path(chemin).read_bytes()).hexdigest()
+            empreinte = _empreinte(chemin)
             if empreinte in empreintes:
                 continue
+            reelle = empreinte in reelles
+            if reelle and signature(chemin) != sig:
+                continue  # déclaration réelle d'autres articles : précieuse, mais pas pour ce dossier
             autre = verifier_modele(chemin)
             if signature(chemin) != sig:
                 raise ValueError('articles incompatibles')
-            references.append({'nom': Path(chemin).name, 'info': autre})
+            references.append({'nom': Path(chemin).name, 'info': autre,
+                               'confiance': CONFIANCE_REELLE if reelle else CONFIANCE_BIBLIOTHEQUE})
             empreintes.add(empreinte)
         except Exception as exc:
-            exclus.append(f'{Path(chemin).name} : {exc}')
+            if empreinte not in reelles:
+                exclus.append(f'{Path(chemin).name} : {exc}')
     ratios = [f/p for f,p in zip(info['fob_articles'],info['poids_articles'])]
     dynamique = len(ratios) != 8 if dynamique is None else dynamique
     ajustables = () if dynamique else moteur.ARTICLES_VARIABLES
@@ -261,9 +316,26 @@ def construire_profil(choisi, chemins=None, dynamique=None, catalogue=None):
         entrees = [catalogue.get(cle) for cle in articles.articles_du_xml(choisi)]
         if None not in entrees:
             ajustables = tuple(k for k, e in enumerate(entrees) if e['ajustable'])
+            reels = [[r['info']['fob_articles'][k]/r['info']['poids_articles'][k] for r in references
+                      if _confiance(r) == CONFIANCE_REELLE] for k in range(len(ratios))]
             bornes = [(ratios[k], ratios[k]) if k in ajustables else
-                      (min(e['ratio_min'], ratios[k]), max(e['ratio_max'], ratios[k])) for k, e in enumerate(entrees)]
-    return {'ratios':ratios, 'bornes':bornes, 'references':references, 'exclus':exclus, 'signature':sig, 'variables_libres':not dynamique, 'ajustables':ajustables, 'dynamique':dynamique}
+                      (min(e['ratio_min'], ratios[k], *reels[k]), max(e['ratio_max'], ratios[k], *reels[k]))
+                      for k, e in enumerate(entrees)]
+    # Bons modèles : modèles de répartition, sans élargir les fourchettes (ils en sont déjà issus).
+    for bon in confiance.get('bons', ()):
+        if len(bon['poids']) == len(ratios) and all(p > 0 for p in bon['poids']):
+            references.append({'nom': f"modèle n° {bon['id']}", 'confiance': CONFIANCE_BON, 'info': {
+                'poids_articles': list(bon['poids']), 'fob_articles': list(bon['fob']), 'colis_articles': list(bon['colis'])}})
+    a_eviter_ = [m for m in confiance.get('a_eviter', ()) if len(m['poids']) == len(ratios)]
+    return {'ratios':ratios, 'bornes':bornes, 'references':references, 'exclus':exclus, 'signature':sig, 'variables_libres':not dynamique, 'ajustables':ajustables, 'dynamique':dynamique,
+            'a_eviter':a_eviter_}
+
+
+def resume_confiance(profil):
+    """{source: nombre} des références du profil, et nombre de répartitions à éviter."""
+    compte = {nom: sum(1 for r in profil.get('references', ()) if _confiance(r) == niveau) for niveau, nom in SOURCES.items()}
+    compte['À éviter'] = len(profil.get('a_eviter', ()))
+    return compte
 
 
 def articles_ajustables(profil):
@@ -304,8 +376,11 @@ def evaluer(v, profil):
             ecart=sum(abs(v['fob'][k]/v['poids'][k]-profil['ratios'][k]) /
                       (v['fob'][k]/v['poids'][k]+profil['ratios'][k]) for k in articles_ajustables(profil))/max(1, len(articles_ajustables(profil)))
             distance=.8*distance+.2*ecart
-        if meilleur is None or distance < meilleur['distance']:
-            meilleur = {'distance':distance, 'proximite':round(100*(1-distance),2), 'reference_proche':ref['nom']}
+        # Classement : une référence fiable « attire » ; la proximité affichée reste la distance réelle.
+        attiree = distance * ATTRACTION.get(_confiance(ref), 1.0)
+        if meilleur is None or attiree < meilleur['distance']:
+            meilleur = {'distance':attiree, 'proximite':round(100*(1-distance),2), 'reference_proche':ref['nom'],
+                        'confiance':_confiance(ref), 'source_proche':SOURCES[_confiance(ref)]}
     return meilleur
 
 
@@ -532,8 +607,7 @@ def generer_equilibres(W,F,colis,profil,nombre=12,graine=None,exclure=None):
     resultats=[]
     variables=set(articles_ajustables(profil))
     for tentative in range(10000):
-        ref=rng.choice(profil['references'])['info']['poids_articles']
-        parts=[p*rng.uniform(.75,1.25) for p in ref]
+        parts=_tirer_parts(rng,profil,.25)
         # Explore aussi des poids faibles sur les articles bornés, pour les petits FOB.
         if tentative%3==0:
             facteur=10**rng.uniform(-4,0)
@@ -550,7 +624,7 @@ def generer_equilibres(W,F,colis,profil,nombre=12,graine=None,exclure=None):
         except ValueError:
             continue
         cle=cle_variante(v)
-        if cle in vus or cle in exclus:
+        if cle in vus or cle in exclus or a_eviter(v,profil):
             continue
         vus.add(cle)
         v.update(evaluer(v,profil))

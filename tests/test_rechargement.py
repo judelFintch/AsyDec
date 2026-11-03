@@ -36,9 +36,9 @@ class EmpreinteTest(unittest.TestCase):
         self.assertEqual(R.commande()[1:], ['-m', 'asydec'])
 
     def test_sous_paquets_surveilles(self):
-        (self.racine / 'ui' / 'ancienne').mkdir()
-        (self.racine / 'ui' / 'ancienne' / 'vue.py').write_text('c = 1\n')
-        self.assertIn('ui/ancienne/vue.py', R.empreinte(self.racine))
+        (self.racine / 'ui' / 'module').mkdir()
+        (self.racine / 'ui' / 'module' / 'vue.py').write_text('c = 1\n')
+        self.assertIn('ui/module/vue.py', R.empreinte(self.racine))
 
 
 class BoutonRechargerTest(unittest.TestCase):

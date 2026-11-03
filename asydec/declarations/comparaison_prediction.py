@@ -26,8 +26,14 @@ def comparer(resultat, chemin_base, chemin_fourni):
 
 def comparer_xmls(chemin_genere, chemin_fourni):
     """Compare les valeurs effectivement inscrites dans le XML généré, sans recalcul."""
-    genere = extraire(Path(chemin_genere).read_bytes())
-    fourni = extraire(Path(chemin_fourni).read_bytes())
+    return comparer_octets(Path(chemin_genere).read_bytes(), Path(chemin_fourni).read_bytes(),
+                           chemin_genere, chemin_fourni)
+
+
+def comparer_octets(octets_genere, octets_fourni, chemin_genere, chemin_fourni):
+    """Comme comparer_xmls, à partir des contenus (ex. export archivé) ; les chemins ne servent qu'au rapport."""
+    genere = extraire(octets_genere)
+    fourni = extraire(octets_fourni)
     v = genere['valorisation']
     resultat = {'resume': {k: v[c] for k,c in (
         ('poids','poids_total'),('fob','fob_total'),('cif','cif_total'),('taxes_totales','taxes_totales'),

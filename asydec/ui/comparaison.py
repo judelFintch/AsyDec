@@ -7,6 +7,7 @@ from tkinter import ttk, filedialog, messagebox
 from asydec.declarations import export_pdf
 from asydec.ui import theme
 from asydec.ui.theme import nombre
+from asydec.systeme.journal import erreur_ignoree
 
 
 def dossier_pdf(parent, importateur):
@@ -16,6 +17,7 @@ def dossier_pdf(parent, importateur):
         table = getattr(parent.winfo_toplevel(), 'table_imp', None)
         return generer.dossier_rangement(importateur, 'pdf', table) if importateur else None
     except Exception:  # noqa: BLE001 - la fenêtre s'ouvrira alors à l'emplacement habituel
+        erreur_ignoree('dossier initial du PDF')
         return None
 
 

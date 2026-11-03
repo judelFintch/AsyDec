@@ -15,6 +15,7 @@ from asydec.references import base_references
 from asydec.references import catalogue_xml
 from asydec.references import importateurs
 from asydec.systeme import gestion_locale as local
+from asydec.systeme import journal
 from asydec.systeme import rechargement
 from asydec.ui import theme
 from asydec.ui.modules import PageAccueil, PageDivers
@@ -25,6 +26,7 @@ from asydec.ui.mediatheque import PageMediatheque
 from asydec.ui.modeles_generes import PageModelesGeneres
 from asydec.ui.outils import PageEtude, PageHistorique, PageRatios, PageRepartitions
 from asydec.ui.parametres import PageParametres
+from asydec.ui.rapport_comparaisons import PageRapportComparaisons
 from asydec.ui.plaque import texte_plaque
 from asydec.ui.references import PageReferences
 from asydec.ui.selection_xml import choisir as choisir_xml_partage
@@ -32,6 +34,7 @@ from asydec.ui.selection_xml import choisir as choisir_xml_partage
 PREFERENCES = local.CONFIGURATION / "preferences.json"
 ETAPES = [("dossier", "1   Dossier"), ("articles", "2   Articles"), ("verifier", "3   Vérifier et générer")]
 OUTILS = [("mediatheque", "Médiathèque XML"), ("modeles_generes", "Modèles générés"),
+          ("rapport_comparaisons", "Rapport des comparaisons"),
           ("references", "Bibliothèque des références"),
           ("repartitions", "Répartitions"), ("ratios", "Récupération des ratios"),
           ("etude", "Étude des XML"), ("historique", "Historique")]
@@ -96,7 +99,8 @@ class AsyDec(tk.Tk):
         self.var_importateur = tk.StringVar(value=IMPORTATEUR_XML)
         self._importateurs = {}
         for cle, classe in [("accueil", PageAccueil), ("divers", PageDivers), ("dossier", PageDossier), ("articles", PageArticles), ("verifier", PageVerifier),
-                            ("modeles_generes", PageModelesGeneres), ("mediatheque", PageMediatheque), ("references", PageReferences),
+                            ("modeles_generes", PageModelesGeneres), ("rapport_comparaisons", PageRapportComparaisons),
+                            ("mediatheque", PageMediatheque), ("references", PageReferences),
                             ("repartitions", PageRepartitions), ("ratios", PageRatios), ("etude", PageEtude),
                             ("historique", PageHistorique), ("parametres", PageParametres)]:
             page = classe(contenu, self)
@@ -235,7 +239,7 @@ class AsyDec(tk.Tk):
             erreurs = self.partager_xml([chemin])  # rejoint la médiathèque du module ouvert
             if erreurs:
                 raise ValueError('Le XML ne peut pas être ajouté à la médiathèque.')
-            profil = variantes.construire_profil(chemin, self.chemins_xml_disponibles(generation=True),
+            profil = self.profil_generation(chemin,
                 dynamique=True if getattr(self, "module_travail", "friperie") == "divers" else None)
         except Exception as exc:  # noqa: BLE001 - message montré à l'utilisateur
             messagebox.showerror("XML de base", str(exc))
@@ -316,7 +320,7 @@ class AsyDec(tk.Tk):
         from asydec.calcul import composition
         chemin = str(base) if selection is None else composition.composer(base, selection, nombre, chemins.DONNEES/'compositions')
         info = moteur.infos_dossier(moteur.charger(chemin).getroot())
-        profil = variantes.construire_profil(chemin, self.chemins_xml_disponibles(generation=True),
+        profil = self.profil_generation(chemin,
                                             dynamique=True if selection is not None else None)
         profil['composition_fixe'] = selection is not None
         self.base, self.info, self.reference, self.profil = chemin, info, chemin, profil
@@ -342,7 +346,7 @@ class AsyDec(tk.Tk):
             compose = chemin != str(self.base_dossier)
             # Friperie : une base composée garde ses articles ajustables, même à 5 ou 10 articles.
             # Divers : entièrement dynamique, chaque article garde son ratio.
-            profil = variantes.construire_profil(chemin, self.chemins_xml_disponibles(generation=True),
+            profil = self.profil_generation(chemin,
                                                  dynamique=True if divers else (False if compose else None),
                                                  catalogue=catalogue if compose else None)
         except Exception as exc:  # noqa: BLE001 - message montré à l'utilisateur
@@ -415,6 +419,21 @@ class AsyDec(tk.Tk):
     def chemins_xml_disponibles(self, generation=False):
         return [d['chemin'] for d in self.xml_disponibles(generation)]
 
+    def confiance_generation(self, chemin):
+        """Déclarations réelles comparées, bons modèles et modèles à éviter, pour guider la génération.
+        Facultatif : sans eux, la génération reste celle de la médiathèque seule."""
+        try:
+            return modeles_generes.confiance_generation(variantes.signature(chemin),
+                                                        module=getattr(self, 'module_travail', 'friperie'))
+        except Exception:  # noqa: BLE001 - la génération reste possible sans ces repères
+            journal.erreur_ignoree('repères de confiance de la génération')
+            return None
+
+    def profil_generation(self, chemin, **options):
+        """Profil de génération : médiathèque du module, enrichie des repères de confiance."""
+        return variantes.construire_profil(chemin, self.chemins_xml_disponibles(generation=True),
+                                           confiance=self.confiance_generation(chemin), **options)
+
     def choisir_xml_disponibles(self, multiple=False, generation=False):
         try:
             documents = self.xml_disponibles(generation)
@@ -466,7 +485,7 @@ class AsyDec(tk.Tk):
         try:
             if catalogue_xml.est_retire(chemin):
                 raise ValueError('Ce XML a été retiré de la liste. Rechargez-le volontairement pour le réutiliser.')
-            profil = profil or variantes.construire_profil(chemin, self.chemins_xml_disponibles(generation=True),
+            profil = profil or self.profil_generation(chemin,
                 dynamique=True if getattr(self, 'module_travail', 'friperie') == 'divers' else None)
             if variantes.signature(self.base) != profil["signature"]:
                 raise ValueError("Ce modèle n'a pas les mêmes articles (codes et désignations) que le dossier.")
@@ -641,6 +660,7 @@ class AsyDec(tk.Tk):
 
 
 def main():
+    journal.activer()
     while True:
         utilisateur = demander_connexion()
         if utilisateur is None:

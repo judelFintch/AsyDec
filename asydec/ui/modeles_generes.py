@@ -10,6 +10,7 @@ from asydec.declarations import modeles_generes as service
 from asydec.formats import date_locale, nombre
 from asydec.ui import theme
 from asydec.ui.notation import BarreNotation, etoiles
+from asydec.systeme.journal import erreur_ignoree
 
 
 def rangement(app,importateur,cle):
@@ -20,6 +21,7 @@ def rangement(app,importateur,cle):
         from asydec.declarations import generer
         return generer.dossier_rangement(importateur,cle,getattr(app,'table_imp',None))
     except Exception:  # noqa: BLE001 - la fenêtre s'ouvrira à l'emplacement habituel
+        erreur_ignoree('dossier initial')
         return None
 
 
@@ -36,9 +38,12 @@ def _contexte_anomalies(app):
     from asydec.references import catalogue_xml
     conn = app.base_refs()
     module = getattr(app, 'module_travail', 'friperie')
-    autorises = {d['id'] for d in catalogue_xml.lister(conn, module=module) if d['id'] is not None}
+    documents = [d for d in catalogue_xml.lister(conn, module=module) if d['id'] is not None]
+    autorises = {d['id'] for d in documents}
     observations=[o for o in service_references.observations(conn,('accepte','non_verifie'))
                   if o['document_id'] in autorises]
+    # Déclarations réelles comparées : elles comptent dans les fourchettes, même hors médiathèque.
+    observations += service.observations_reelles(module=module, connues={d['empreinte'] for d in documents})
     return anomalies.references_par_groupe(observations), service.donnees_analyse(module=module)
 
 
@@ -47,6 +52,7 @@ def analyser_modeles(app):
     try:
         groupes, modeles = _contexte_anomalies(app)
     except Exception:  # noqa: BLE001 - l'analyse est une aide : la liste reste utilisable sans elle
+        erreur_ignoree('analyse des anomalies des modèles')
         return {}
     return {m['id']:anomalies.analyser(m,groupes,modeles) for m in modeles}
 
@@ -60,6 +66,7 @@ def classer_propositions(app, propositions, base=None, profil=None, cle=None):
     try:
         groupes, modeles = _contexte_anomalies(app)
     except Exception:  # noqa: BLE001 - l'analyse est une aide : la génération reste possible sans elle
+        erreur_ignoree('analyse des anomalies des propositions')
         sortie = [(v, []) for v in propositions]
         return sorted(sortie, key=lambda t: cle(t[0])) if cle else sortie
     contenus, sortie = {}, []
@@ -72,6 +79,7 @@ def classer_propositions(app, propositions, base=None, profil=None, cle=None):
                                                  variantes.articles_ajustables(profil or v['profil']))
             alertes = anomalies.analyser(modele, groupes, modeles)
         except Exception:  # noqa: BLE001 - une proposition illisible n'est pas jugée, mais reste proposée
+            erreur_ignoree("analyse d'une proposition")
             alertes = []
         sortie.append((v, alertes))
     if cle:

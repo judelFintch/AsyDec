@@ -381,18 +381,80 @@ def noter(identifiant, note, auteur, commentaire='', base=None):
     return note
 
 
+def _repartition(m):
+    r = m['resultat']
+    return {'id': m['id'], 'poids': [a['poids'] for a in r['resume']['articles']],
+            'fob': list(r['fob']), 'colis': list(r['colis'])}
+
+
 def bons_modeles(signature, base=None, module=None):
     """Répartitions des modèles cochés ★ ou bien notés (4 ou 5), non supprimés, dont les articles sont
     ceux de cette signature."""
-    sortie = []
-    for m in lister(base=base, module=module):
-        exemple = m['bon'] or (m['note'] or 0) >= NOTE_BONNE
-        if not exemple or _signature_modele(m['id'], base) != signature:
+    return [_repartition(m) for m in lister(base=base, module=module)
+            if (m['bon'] or (m['note'] or 0) >= NOTE_BONNE) and _signature_modele(m['id'], base) == signature]
+
+
+def modeles_a_eviter(signature, base=None, module=None):
+    """Répartitions des modèles rejetés localement ou notés 1-2, aux articles de cette signature."""
+    return [_repartition(m) for m in lister(base=base, module=module)
+            if (m['statut'] == 'rejete' or (m['note'] is not None and m['note'] <= NOTE_MAUVAISE))
+            and _signature_modele(m['id'], base) == signature]
+
+
+def declarations_comparees(base=None, module=None):
+    """XML réels qui ont servi à comparer un modèle (non supprimé) du module, encore présents et intacts :
+    [{'chemin', 'nom', 'sha256', 'modele', 'date_utc'}], un par contenu, le plus récent d'abord.
+    Ce sont des déclarations SYDONIA effectives : les références les plus sûres pour générer."""
+    gardes = {m['id'] for m in lister(base=base, module=module)}
+    with _connexion(base) as conn:
+        traces = conn.execute('SELECT modele_id, date_utc, detail FROM evenements WHERE action=? ORDER BY id DESC',
+                              (COMPARAISON,)).fetchall()
+    sortie, vus = [], set()
+    for t in traces:
+        if t['modele_id'] not in gardes:
             continue
-        r = m['resultat']
-        sortie.append({'id': m['id'], 'poids': [a['poids'] for a in r['resume']['articles']],
-                       'fob': list(r['fob']), 'colis': list(r['colis'])})
+        try:
+            infos = json.loads(t['detail'])
+            chemin, attendu = Path(infos['fichier']), infos['sha256']
+            if attendu in vus or _sha(chemin.read_bytes()) != attendu:
+                continue
+        except (ValueError, KeyError, TypeError, OSError):
+            continue
+        vus.add(attendu)
+        sortie.append({'chemin': str(chemin), 'nom': chemin.name, 'sha256': attendu,
+                       'modele': t['modele_id'], 'date_utc': t['date_utc']})
     return sortie
+
+
+def observations_reelles(base=None, module=None, connues=()):
+    """Articles des déclarations réelles comparées, au format de service_references.observations
+    (pour anomalies.references_par_groupe). connues : empreintes déjà présentes dans les références."""
+    sortie = []
+    for d in declarations_comparees(base=base, module=module):
+        if d['sha256'] in connues:
+            continue
+        try:
+            donnees = extraire(Path(d['chemin']).read_bytes())
+        except (ValueError, OSError):
+            continue
+        devise = donnees['document']['devise'] or 'NON RENSEIGNEE'
+        for a in donnees['articles']:
+            if a['ratio'] is None or a['poids_brut'] is None or a['fob'] is None:
+                continue
+            sortie.append({'document_id': f"reel:{d['sha256']}", 'fichier': d['nom'], 'statut': 'reelle',
+                           'importateur': donnees['document']['importateur'] or '', 'devise': devise,
+                           'position': a['position'], 'code': a['code'] or '', 'designation': a['designation'] or '',
+                           'poids': float(a['poids_brut']), 'fob': float(a['fob']), 'ratio': float(a['ratio']),
+                           'groupe': (devise, a['code'] or '', a['designation_normalisee'] or '')})
+    return sortie
+
+
+def confiance_generation(signature, base=None, module=None):
+    """Argument « confiance » de variantes.construire_profil : déclarations réelles comparées,
+    bons modèles et modèles à éviter du module."""
+    return {'reelles': [d['chemin'] for d in declarations_comparees(base=base, module=module)],
+            'bons': bons_modeles(signature, base=base, module=module),
+            'a_eviter': modeles_a_eviter(signature, base=base, module=module)}
 
 
 def nombre_generes(signature, poids, fob, colis, base=None, module=None):
@@ -725,6 +787,25 @@ def comparaisons(d):
                        'total_compare': _decimal_ou_rien(infos.get('total_compare')),
                        'ecart_total': _decimal_ou_rien(infos.get('ecart_total')), 'rapport': infos.get('rapport')})
     return sortie
+
+
+def reconstituer_comparaison(d, comparaison, base=None):
+    """Rapport d'une ancienne comparaison enregistrée sans lui (comparaisons()) : export archivé face au
+    fichier comparé, seulement s'il est encore sur le disque et inchangé. None sinon."""
+    trace = next(e for e in d['evenements'] if e['id'] == comparaison['evenement'])
+    attendu = json.loads(trace['detail']).get('sha256')
+    try:
+        genere = lire_export(d['id'], base=base)
+        fourni = Path(comparaison['fichier']).read_bytes()
+    except (ValueError, OSError):
+        return None
+    if not attendu or _sha(fourni) != attendu:
+        return None
+    try:
+        return comparaison_prediction.comparer_octets(
+            genere, fourni, _chemin_export(_dernier(d['evenements'], EXPORT)['detail']), comparaison['fichier'])
+    except ValueError:
+        return None
 
 
 def _dernier_ecart(detail_):
