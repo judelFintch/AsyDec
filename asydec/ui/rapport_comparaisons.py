@@ -4,9 +4,12 @@ from pathlib import Path
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 
+from asydec.declarations import detection_reelles
 from asydec.declarations import rapport_comparaisons as service
 from asydec.formats import date_locale, nombre
+from asydec.systeme.journal import erreur_ignoree
 from asydec.ui import theme
+from asydec.systeme import espace_travail
 
 TOUS = 'Tous les diagnostics'
 COULEURS = {service.CALCUL: theme.ERREUR, service.TAUX: theme.ALERTE, service.IDENTIQUE: theme.OK,
@@ -43,6 +46,12 @@ class PageRapportComparaisons(ttk.Frame):
         self.ouvrir_bouton = theme.bouton(barre, 'Ouvrir la comparaison…', self.ouvrir, state='disabled')
         self.ouvrir_bouton.pack(side='left', padx=4)
         theme.bouton(barre, 'Exporter Excel…', self.exporter).pack(side='right')
+        self.detection_bouton = theme.bouton(barre, 'Déclarations réelles détectées…', self.examiner_detection,
+                                             state='disabled')
+        self.detection_bouton.pack(side='right', padx=8)
+        self.candidats = []
+        self.bandeau = theme.Message(self)
+        self.bandeau.pack(fill='x', pady=(0, 8))
 
         cartes = ttk.Frame(self)
         cartes.pack(fill='x')
@@ -114,6 +123,7 @@ class PageRapportComparaisons(ttk.Frame):
             self.toutes = []
             self.ecrire_constats([f'Rapport indisponible : {exc}'])
             return
+        self.detecter()
         importateurs = sorted({e['importateur'] for e in self.toutes if e['importateur']})
         self.filtre_importateur.configure(values=['Tous les importateurs'] + importateurs)
         if self.filtre_importateur.get() not in importateurs:
@@ -179,6 +189,28 @@ class PageRapportComparaisons(ttk.Frame):
                 g['importateur'], g['n'], _pct(g['moyen']), _pct(g['hors_taux_moyen'], 3),
                 ', '.join(f'{d} : {n}' for d, n in g['diagnostics'].items())))
 
+    def detecter(self):
+        """Cherche dans les dossiers des importateurs les déclarations SYDONIA réelles pas encore connues."""
+        try:
+            self.candidats = detection_reelles.detecter(module=getattr(self.app, 'module_travail', 'friperie'))
+        except Exception:  # noqa: BLE001 - la détection est une aide : le rapport reste disponible
+            erreur_ignoree('détection des déclarations réelles')
+            self.candidats = []
+        self.detection_bouton.configure(state='normal' if self.candidats else 'disabled')
+        if not self.candidats:
+            self.bandeau.vider()
+            return
+        rattachees = sum(1 for c in self.candidats if c['modele'] is not None)
+        self.bandeau.afficher('alerte', f"{len(self.candidats)} déclaration(s) réelle(s) SYDONIA détectée(s) dans vos dossiers",
+            [f"{rattachees} rattachable(s) à un modèle par la plaque, {len(self.candidats) - rattachees} sans modèle. "
+             "Ce sont vos repères les plus sûrs : « Déclarations réelles détectées… » pour les vérifier et les ajouter."])
+
+    def examiner_detection(self):
+        fenetre = FenetreDetection(self, self.candidats)
+        self.wait_window(fenetre)
+        if fenetre.enregistre:
+            self.afficher()
+
     # ----------------------------------------------------------------- actions
     def entree_choisie(self, rapport=False):
         selection = self.tables['comparaisons'].selection()
@@ -204,7 +236,8 @@ class PageRapportComparaisons(ttk.Frame):
             return
         chemin = filedialog.asksaveasfilename(parent=self, title='Exporter le rapport des comparaisons',
             defaultextension='.xlsx', filetypes=[('Excel', '*.xlsx')],
-            initialfile=f'Rapport des comparaisons {datetime.datetime.now():%Y-%m-%d %H%M}.xlsx')
+            initialfile=f'Rapport des comparaisons {datetime.datetime.now():%Y-%m-%d %H%M}.xlsx',
+            **espace_travail.options_rapport())
         if not chemin:
             return
         try:
@@ -213,3 +246,100 @@ class PageRapportComparaisons(ttk.Frame):
             messagebox.showerror('Export impossible', str(exc), parent=self)
             return
         messagebox.showinfo('Rapport exporté', chemin, parent=self)
+
+
+AUCUN = 'Aucun : retenir comme déclaration réelle seule'
+
+
+class FenetreDetection(tk.Toplevel):
+    """Déclarations réelles détectées : l'utilisateur vérifie chaque rattachement avant d'enregistrer."""
+
+    def __init__(self, parent, candidats):
+        super().__init__(parent)
+        self.page, self.enregistre = parent, False
+        self.candidats = {str(k): dict(c) for k, c in enumerate(candidats)}
+        self.title('Déclarations réelles détectées')
+        self.geometry('1280x620')
+        self.transient(parent.winfo_toplevel())
+        cadre = ttk.Frame(self, padding=16)
+        cadre.pack(fill='both', expand=True)
+        theme.entete_page(cadre, 'Déclarations réelles détectées',
+            'XML SYDONIA trouvés dans les dossiers des importateurs : numéro d’enregistrement propre au fichier, '
+            'ni export AsyDec ni gabarit. Rattachés par la plaque du tracteur. Les lignes à vérifier ne sont pas '
+            'sélectionnées d’office. Une comparaison enregistrée ne peut plus être effacée.')
+        zone, self.table = theme.tableau(cadre, [
+            ('fichier', 'Fichier', 200, 'w'), ('plaque', 'Plaque', 140, 'w'), ('importateur', 'Importateur', 170, 'w'),
+            ('enregistrement', 'Enregistrement', 105, 'w'), ('date', 'Date', 85, 'w'), ('liquidee', 'Liquidée', 65, 'center'),
+            ('action', 'Action proposée', 210, 'w'), ('verifier', 'À vérifier', 300, 'w')], 12)
+        zone.pack(fill='both', expand=True)
+        self.table.configure(selectmode='extended')
+        choix = ttk.Frame(cadre)
+        choix.pack(fill='x', pady=8)
+        ttk.Label(choix, text='Modèle de la ligne sélectionnée :').pack(side='left')
+        self.modele = ttk.Combobox(choix, state='disabled', width=48)
+        self.modele.pack(side='left', padx=6)
+        self.modele.bind('<<ComboboxSelected>>', lambda e: self.changer_modele())
+        boutons = ttk.Frame(cadre)
+        boutons.pack(fill='x')
+        theme.bouton(boutons, 'Fermer', self.destroy).pack(side='right')
+        theme.bouton(boutons, 'Enregistrer la sélection', self.enregistrer, principal=True).pack(side='right', padx=8)
+        self.var_selection = tk.StringVar()
+        ttk.Label(boutons, textvariable=self.var_selection, style='Doux.TLabel').pack(side='left')
+        for iid, c in self.candidats.items():
+            self.table.insert('', 'end', iid=iid, values=self.valeurs(c))
+        self.table.selection_set([iid for iid, c in self.candidats.items() if not self.a_verifier(c)])
+        self.table.bind('<<TreeviewSelect>>', lambda e: self.actualiser())
+        self.actualiser()
+
+    @staticmethod
+    def a_verifier(c):
+        return any(a.startswith(('Articles différents', 'Enregistrée le')) for a in c['avertissements'])
+
+    @staticmethod
+    def action(c):
+        return f"Comparer au modèle n° {c['modele']}" if c['modele'] is not None else 'Retenir comme déclaration réelle'
+
+    def valeurs(self, c):
+        return (c['nom'], c['camion'] or '—', c['importateur'] or '—', c['enregistrement'],
+                c['date'].strftime('%d/%m/%Y') if c['date'] else '—', '✓' if c['liquidee'] else '',
+                self.action(c), ' '.join(c['avertissements']) or '—')
+
+    def actualiser(self):
+        selection = self.table.selection()
+        self.var_selection.set(f'{len(selection)} ligne(s) sélectionnée(s) sur {len(self.candidats)}.')
+        if len(selection) != 1:
+            self.modele.configure(state='disabled', values=[])
+            self.modele.set('')
+            return
+        c = self.candidats[selection[0]]
+        self.modele.configure(state='readonly', values=[f"n° {m}" for m in c['modeles']] + [AUCUN])
+        self.modele.set(f"n° {c['modele']}" if c['modele'] is not None else AUCUN)
+
+    def changer_modele(self):
+        selection = self.table.selection()
+        if len(selection) != 1:
+            return
+        c = self.candidats[selection[0]]
+        texte = self.modele.get()
+        c['modele'] = None if texte == AUCUN else int(texte.removeprefix('n° '))
+        self.table.item(selection[0], values=self.valeurs(c))
+
+    def enregistrer(self):
+        choisis = [self.candidats[i] for i in self.table.selection()]
+        if not choisis:
+            messagebox.showinfo('Aucune sélection', 'Sélectionnez les déclarations à enregistrer.', parent=self)
+            return
+        comparer = sum(1 for c in choisis if c['modele'] is not None)
+        if not messagebox.askyesno('Confirmer', f"{comparer} comparaison(s) seront enregistrées et "
+                                   f"{len(choisis) - comparer} déclaration(s) retenues sans modèle.\n\n"
+                                   'Cet historique ne peut plus être effacé. Continuer ?', parent=self):
+            return
+        app = self.page.app
+        comparees, retenues, erreurs = detection_reelles.enregistrer(
+            choisis, getattr(app, 'utilisateur', ''), module=getattr(app, 'module_travail', 'friperie'),
+            table_imp=getattr(app, 'table_imp', None))
+        self.enregistre = bool(comparees or retenues)
+        lignes = [f'{comparees} comparaison(s) enregistrée(s), {retenues} déclaration(s) retenue(s).'] + erreurs
+        (messagebox.showwarning if erreurs else messagebox.showinfo)('Déclarations réelles', '\n'.join(lignes), parent=self)
+        if not erreurs:
+            self.destroy()

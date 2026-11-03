@@ -200,7 +200,8 @@ class ChoixDansApplicationTest(unittest.TestCase):
         app = SimpleNamespace(session_verrouillee=False, base=base, var_importateur=self.var, _importateurs={},
                               partager_xml=lambda _c: [], chemins_xml_disponibles=lambda generation: [], prefs={},
                               reglages={'memoriser_recents': False}, _ecrire_prefs=Mock(), pages=pages,
-                              var_bandeau=Mock(), module_travail='friperie')
+                              var_bandeau=Mock(), module_travail='friperie', confiance_generation=lambda chemin: None)
+        app.profil_generation = lambda chemin, **options: AsyDec.profil_generation(app, chemin, **options)
         AsyDec.ouvrir_base(app, str(BASE))
 
     @unittest.skipIf(BASE is None, 'aucun modèle XML local')

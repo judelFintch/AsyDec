@@ -56,6 +56,17 @@ class RegenerationArticlesTest(unittest.TestCase):
         self.assertIn('n° 3', self.page.message.titre.cget('text'))
         self.assertRegex(self.page.var_taxes.get(), r'Total taxes estimé : [\d ]+ CDF')
 
+    def test_compteur_des_modeles_possibles_calcule(self):
+        # Régression : une liste d'étiquettes nommée « totaux » masquait la méthode totaux() et le
+        # compteur échouait en silence à chaque saisie.
+        self.assertEqual(self.page.totaux(), (self.app.info['poids'], self.app.info['fob'], self.app.info['colis']))
+        with patch.object(E.compteur, 'calculer', return_value='≈ 200 possibles') as calculer, \
+                patch.object(E, 'erreur_ignoree') as ignoree:
+            self.page.actualiser_compteur()
+        ignoree.assert_not_called()
+        calculer.assert_called_once()
+        self.assertEqual(self.page.var_possibles.get(), '≈ 200 possibles')
+
     def test_poids_total_decimal_refuse_sans_toucher_au_tableau(self):
         E.remplir(self.page.e_poids[0], 220.5)
         avant = self.page.valeurs()

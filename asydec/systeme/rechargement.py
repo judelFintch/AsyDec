@@ -8,6 +8,8 @@ PAQUET = chemins.RACINE / 'asydec'
 
 def empreinte(racine=PAQUET):
     """Date et taille de chaque module de l'application, sous-paquets compris ; les tests sont ignorés."""
+    if getattr(sys, 'frozen', False):
+        return {}
     sortie = {}
     for fichier in sorted(racine.rglob('*.py')):
         if fichier.name.startswith('test_'):
@@ -22,4 +24,4 @@ def empreinte(racine=PAQUET):
 
 def commande():
     """Arguments de relance : même interpréteur, paquet principal (à lancer depuis chemins.RACINE)."""
-    return [sys.executable, '-m', 'asydec']
+    return [sys.executable] if getattr(sys, 'frozen', False) else [sys.executable, '-m', 'asydec']

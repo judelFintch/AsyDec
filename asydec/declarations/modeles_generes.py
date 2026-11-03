@@ -61,6 +61,11 @@ CREATE TABLE IF NOT EXISTS signalements_references (
  auteur TEXT NOT NULL, utilise INTEGER NOT NULL CHECK(utilise IN (0,1)));
 CREATE TRIGGER IF NOT EXISTS signalements_immuables BEFORE UPDATE ON signalements_references BEGIN SELECT RAISE(ABORT,'Historique immuable'); END;
 CREATE TRIGGER IF NOT EXISTS signalements_conserves BEFORE DELETE ON signalements_references BEGIN SELECT RAISE(ABORT,'Historique conservé'); END;
+CREATE TABLE IF NOT EXISTS declarations_reelles (
+ id INTEGER PRIMARY KEY, sha256 TEXT NOT NULL UNIQUE, chemin TEXT NOT NULL, nom TEXT NOT NULL,
+ module TEXT NOT NULL, date_utc TEXT NOT NULL, auteur TEXT NOT NULL);
+CREATE TRIGGER IF NOT EXISTS declarations_reelles_immuables BEFORE UPDATE ON declarations_reelles BEGIN SELECT RAISE(ABORT,'Historique immuable'); END;
+CREATE TRIGGER IF NOT EXISTS declarations_reelles_conservees BEFORE DELETE ON declarations_reelles BEGIN SELECT RAISE(ABORT,'Historique conservé'); END;
 '''
 
 
@@ -158,7 +163,7 @@ def _snapshot(source, resultat, lignes):
     arbre = ET.ElementTree(ET.fromstring(source))
     if resultat.get('taux_choisi'):
         moteur.ecrire_taux(arbre.getroot(), resultat['taux_choisi'])
-    resume = moteur.recalculer(arbre, lignes, resultat['colis'])
+    resume = moteur.recalculer(arbre, lignes, resultat['colis'], taux_globales=resultat.get('taux_globales'))
     if resultat.get('plaque'):
         moteur.ecrire_plaque(arbre.getroot(), resultat['plaque'])
     if resultat.get('importateur_choisi'):
@@ -430,7 +435,7 @@ def observations_reelles(base=None, module=None, connues=()):
     """Articles des déclarations réelles comparées, au format de service_references.observations
     (pour anomalies.references_par_groupe). connues : empreintes déjà présentes dans les références."""
     sortie = []
-    for d in declarations_comparees(base=base, module=module):
+    for d in declarations_reelles(base=base, module=module):
         if d['sha256'] in connues:
             continue
         try:
@@ -449,12 +454,87 @@ def observations_reelles(base=None, module=None, connues=()):
     return sortie
 
 
+def ajouter_declaration_reelle(chemin, auteur, module='friperie', base=None):
+    """Retient un XML SYDONIA réel sans modèle correspondant (le fichier n'est ni copié ni modifié)."""
+    if module not in ('friperie', 'divers'):
+        raise ValueError('Type de dossier inconnu.')
+    auteur, chemin = _auteur(auteur), Path(chemin).resolve()
+    sha = _sha(chemin.read_bytes())
+    with _connexion(base) as conn:
+        conn.execute('INSERT OR IGNORE INTO declarations_reelles (sha256, chemin, nom, module, date_utc, auteur) '
+                     'VALUES (?,?,?,?,?,?)', (sha, str(chemin), chemin.name, module, _maintenant(), auteur))
+    return sha
+
+
+def declarations_reelles(base=None, module=None):
+    """Toutes les déclarations réelles connues et intactes : celles comparées à un modèle, puis celles
+    retenues sans modèle. Même format que declarations_comparees (modele = None pour les secondes)."""
+    sortie = declarations_comparees(base=base, module=module)
+    vus = {d['sha256'] for d in sortie}
+    with _connexion(base) as conn:
+        lignes = conn.execute('SELECT * FROM declarations_reelles ORDER BY id DESC').fetchall()
+    for l in lignes:
+        if l['sha256'] in vus or (module is not None and l['module'] != module):
+            continue
+        try:
+            if _sha(Path(l['chemin']).read_bytes()) != l['sha256']:
+                continue
+        except OSError:
+            continue
+        vus.add(l['sha256'])
+        sortie.append({'chemin': l['chemin'], 'nom': l['nom'], 'sha256': l['sha256'], 'modele': None,
+                       'date_utc': l['date_utc']})
+    return sortie
+
+
+def empreintes_exports(base=None):
+    """Empreintes de tous les XML exportés par AsyDec (archivés ou anciens exports)."""
+    with _connexion(base) as conn:
+        archives = {r['sha256'] for r in conn.execute('SELECT sha256 FROM exports_xml')}
+        details = [r['detail'] for r in conn.execute('SELECT detail FROM evenements WHERE action=?', (EXPORT,))]
+    for detail_ in details:
+        try:
+            archives.add(json.loads(detail_)['sha256'])
+        except (ValueError, KeyError, TypeError):
+            continue
+    return archives
+
+
+# Taxes globales : les XML n'en donnent que le total, mais les déclarations réelles montrent une part
+# fixe du CIF. Elle n'est apprise que si au moins 2 déclarations concordent à 0,02 point près.
+GLOBALES_MINIMUM, GLOBALES_DISPERSION = 2, Decimal('0.0002')
+
+
+def taux_taxes_globales(base=None, module=None):
+    """Part du CIF prise par les taxes globales dans les déclarations réelles comparées :
+    {'taux' (Σ globales / Σ CIF), 'n', 'min', 'max', 'ecart_max' (CDF)} ou None si trop peu
+    de déclarations ou si elles ne concordent pas (règle différente, à ne pas deviner)."""
+    observations = []
+    for d in declarations_reelles(base=base, module=module):
+        try:
+            v = extraire(Path(d['chemin']).read_bytes())['valorisation']
+            cif, globales = Decimal(v['cif_total']), Decimal(v['taxes_globales'])
+        except (ValueError, OSError, TypeError, ArithmeticError):
+            continue
+        if cif > 0 and globales > 0:
+            observations.append((cif, globales))
+    if len(observations) < GLOBALES_MINIMUM:
+        return None
+    parts = [g / c for c, g in observations]
+    if max(parts) - min(parts) > GLOBALES_DISPERSION:
+        return None
+    taux = sum(g for _, g in observations) / sum(c for c, _ in observations)
+    return {'taux': taux, 'n': len(observations), 'min': min(parts), 'max': max(parts),
+            'ecart_max': max(abs(g - (c * taux).to_integral_value()) for c, g in observations)}
+
+
 def confiance_generation(signature, base=None, module=None):
     """Argument « confiance » de variantes.construire_profil : déclarations réelles comparées,
     bons modèles et modèles à éviter du module."""
-    return {'reelles': [d['chemin'] for d in declarations_comparees(base=base, module=module)],
+    return {'reelles': [d['chemin'] for d in declarations_reelles(base=base, module=module)],
             'bons': bons_modeles(signature, base=base, module=module),
-            'a_eviter': modeles_a_eviter(signature, base=base, module=module)}
+            'a_eviter': modeles_a_eviter(signature, base=base, module=module),
+            'taxes_globales': taux_taxes_globales(base=base, module=module)}
 
 
 def nombre_generes(signature, poids, fob, colis, base=None, module=None):

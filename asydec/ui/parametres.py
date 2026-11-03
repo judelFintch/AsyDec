@@ -2,6 +2,7 @@
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
+from asydec.systeme import espace_travail
 from asydec.systeme import gestion_locale as local
 from asydec.ui import theme
 
@@ -36,6 +37,15 @@ class PageParametres(ttk.Frame):
         ttk.Combobox(general, textvariable=self.page, values=list(LIBELLES.values()), state='readonly', width=35).pack(anchor='w', pady=4)
         ttk.Label(general, text='Verrouillage après inactivité (minutes ; 0 = désactivé)').pack(anchor='w', pady=(12, 3))
         ttk.Spinbox(general, from_=0, to=240, textvariable=self.delai, width=8).pack(anchor='w')
+        ttk.Label(general, text='Dossier de travail (fichiers produits par AsyDec)', style='Section.TLabel').pack(anchor='w', pady=(16, 4))
+        self.var_espace = tk.StringVar()
+        ttk.Label(general, textvariable=self.var_espace, wraplength=760).pack(anchor='w')
+        ligne = ttk.Frame(general)
+        ligne.pack(anchor='w', pady=5)
+        theme.bouton(ligne, 'Changer…', app.choisir_espace_travail).pack(side='left')
+        theme.bouton(ligne, 'Ouvrir', self.ouvrir_espace_travail).pack(side='left', padx=6)
+        theme.bouton(ligne, 'Ranger mes fichiers existants…', self.ranger_existants).pack(side='left')
+        self.afficher_espace_travail()
         barre = ttk.Frame(general)
         barre.pack(fill='x', pady=20)
         theme.bouton(barre, 'Enregistrer les paramètres', self.enregistrer, principal=True).pack(side='left')
@@ -67,6 +77,34 @@ class PageParametres(ttk.Frame):
         ttk.Entry(reset, textvariable=self.phrase, width=40).pack(anchor='w', pady=4)
         theme.bouton(reset, 'Réinitialiser les données de travail…', self.reinitialiser).pack(anchor='w', pady=15)
         self.charger_champs(app.reglages)
+
+    def afficher_espace_travail(self):
+        racine = espace_travail.racine()
+        self.var_espace.set(str(racine) if racine else
+                            'Aucun : les fichiers vont encore dans l’ancienne organisation (DEC FRIPERIE). Cliquez sur « Changer… ».')
+
+    def ouvrir_espace_travail(self):
+        from asydec.ui.espace_travail import ouvrir_dans_finder
+        racine = espace_travail.racine()
+        if racine is None:
+            messagebox.showinfo('Dossier de travail', 'Choisissez d’abord le dossier de travail.', parent=self)
+            return
+        ouvrir_dans_finder(espace_travail.preparer(racine))
+
+    def ranger_existants(self):
+        from asydec.ui import espace_travail as fenetres
+        if espace_travail.racine() is None:
+            messagebox.showinfo('Dossier de travail', 'Choisissez d’abord le dossier de travail.', parent=self)
+            return
+        try:
+            plan = [p for p in fenetres.planifier(self.app) if not p['deja']]
+        except Exception as exc:  # noqa: BLE001 - message montré à l'utilisateur
+            messagebox.showerror('Analyse impossible', str(exc), parent=self)
+            return
+        if not plan:
+            messagebox.showinfo('Rien à ranger', 'Tous vos fichiers existants sont déjà rangés.', parent=self)
+            return
+        self.wait_window(fenetres.FenetreRangement(self, plan))
 
     def charger_champs(self, reglages):
         self.organisation.set(reglages['organisation'])

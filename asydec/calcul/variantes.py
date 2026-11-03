@@ -328,7 +328,7 @@ def construire_profil(choisi, chemins=None, dynamique=None, catalogue=None, conf
                 'poids_articles': list(bon['poids']), 'fob_articles': list(bon['fob']), 'colis_articles': list(bon['colis'])}})
     a_eviter_ = [m for m in confiance.get('a_eviter', ()) if len(m['poids']) == len(ratios)]
     return {'ratios':ratios, 'bornes':bornes, 'references':references, 'exclus':exclus, 'signature':sig, 'variables_libres':not dynamique, 'ajustables':ajustables, 'dynamique':dynamique,
-            'a_eviter':a_eviter_}
+            'a_eviter':a_eviter_, 'taxes_globales':confiance.get('taxes_globales')}
 
 
 def resume_confiance(profil):
@@ -525,8 +525,9 @@ def estimer_possibles(poids_total, fob_total, colis_total, profil, essais=120, g
     return {'estimation': estimation, 'plafond': plafond, 'acceptes': acceptes, 'essais': total}
 
 
-def rechercher_modeles(poids, fob, colis, chemins=None, nombre=12, exclure=None, dynamique=None):
-    """Recherche uniquement dans les références conservées, sans XML de dossier."""
+def rechercher_modeles(poids, fob, colis, chemins=None, nombre=12, exclure=None, dynamique=None, confiance=None):
+    """Recherche uniquement dans les références conservées, sans XML de dossier.
+    confiance : fonction chemin -> repères de construire_profil (déclarations réelles, bons modèles…)."""
     if any(v is None or not math.isfinite(float(v)) or v<=0 for v in (poids,fob,colis)):
         raise ValueError('Les trois totaux doivent être finis et strictement positifs.')
     if int(colis)!=colis or colis<10:
@@ -546,7 +547,7 @@ def rechercher_modeles(poids, fob, colis, chemins=None, nombre=12, exclure=None,
             devise=moteur._txt(moteur.charger(chemin).getroot(),'Valuation/Gs_Invoice/Currency_code')
             if devise and devise!='USD':
                 raise ValueError('La saisie FOB est en USD : modèle de devise différente.')
-            profil=construire_profil(chemin,chemins,dynamique=dynamique)
+            profil=construire_profil(chemin,chemins,dynamique=dynamique,confiance=confiance(chemin) if confiance else None)
             valeurs=generer(poids,fob,colis,profil['ratios'],nombre=3,profil=profil,exclure=exclure)
             for v in valeurs:
                 v['profil']=profil

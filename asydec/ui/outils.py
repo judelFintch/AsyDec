@@ -22,6 +22,8 @@ from asydec.ui import plaque
 from asydec.ui import taux_change
 from asydec.ui.modeles_generes import TEXTES_RISQUE, classer_propositions, texte_risque
 from asydec.ui.theme import nombre
+from asydec.systeme.journal import erreur_ignoree
+from asydec.systeme import espace_travail
 
 
 # ==========================================================================
@@ -104,9 +106,20 @@ class PageRepartitions(ttk.Frame):
         self.var_risque = tk.StringVar()
         ttk.Label(self, textvariable=self.var_risque, style="Doux.TLabel", wraplength=900).pack(anchor="w", pady=(4, 0))
 
+    def declarations_reelles(self):
+        """XML réels comparés aux modèles du module : candidats et références prioritaires de la recherche."""
+        try:
+            return [d['chemin'] for d in modeles_generes.declarations_reelles(
+                module=getattr(self.app, 'module_travail', 'friperie'))]
+        except Exception:  # noqa: BLE001 - la recherche reste possible avec la médiathèque seule
+            erreur_ignoree('déclarations réelles des répartitions')
+            return []
+
     def afficher(self):
         n = len(self.app.xml_disponibles(generation=True))
-        self.var_modeles.set(f"{n} modèle(s) enregistré(s)")
+        reelles = len(self.declarations_reelles())
+        self.var_modeles.set(f"{n} modèle(s) enregistré(s)"
+                             + (f" · {reelles} déclaration(s) réelle(s), prioritaires" if reelles else ""))
         self.choix_importateur.configure(values=self.app.importateurs_proposes())
         if self.app.info and not self.champs["fob"].get():
             i = self.app.info
@@ -124,7 +137,8 @@ class PageRepartitions(ttk.Frame):
             self.update_idletasks()
             cle = (poids, fob, colis)
             vues = self.deja_vues.setdefault(cle, set())
-            chemins = self.selection_modeles or self.app.chemins_xml_disponibles(generation=True)
+            chemins = self.selection_modeles or (self.app.chemins_xml_disponibles(generation=True)
+                                                 + self.declarations_reelles())
             from asydec.ui.taux_change import confirmer
             if not confirmer(self.app, chemins, parent=self):
                 self.message.afficher("alerte", "Recherche annulée : taux de change non confirmés")
@@ -135,7 +149,8 @@ class PageRepartitions(ttk.Frame):
             propositions, ecartes = variantes.rechercher_modeles(poids, fob, colis, chemins=chemins,
                                                                  nombre=gardees if intention == "proche" else 3 * gardees,
                                                                  exclure=vues,
-                                                                 dynamique=True if getattr(self.app, "module_travail", "friperie") == "divers" else None)
+                                                                 dynamique=True if getattr(self.app, "module_travail", "friperie") == "divers" else None,
+                                                                 confiance=getattr(self.app, "confiance_generation", None))
             for v in propositions:
                 v["resultat"] = generer.produire(
                     v["controle"], v["poids"], v["profil"]["ratios"], self.app.table_imp, {}, mode="SAISI",
@@ -441,7 +456,7 @@ class PageEtude(ttk.Frame):
             return
         chemin = filedialog.asksaveasfilename(
             title="Exporter l'analyse", defaultextension=".xlsx", filetypes=[("Excel", "*.xlsx")],
-            initialfile=f"Analyse XML {datetime.datetime.now():%Y-%m-%d %H%M}.xlsx")
+            initialfile=f"Analyse XML {datetime.datetime.now():%Y-%m-%d %H%M}.xlsx", **espace_travail.options_rapport())
         if not chemin:
             return
         try:
@@ -471,7 +486,7 @@ class PageHistorique(ttk.Frame):
         self.filtre.bind("<<ComboboxSelected>>", lambda e: self.afficher())
         theme.bouton(barre, "Reprendre pour modifier", self.reprendre).pack(side="right", padx=8)
         theme.bouton(barre, "Ouvrir le dossier des déclarations",
-                     lambda: subprocess.run(["open", generer.DEC], check=False)).pack(side="right")
+                     lambda: subprocess.run(["open", espace_travail.dossier_ouverture()], check=False)).pack(side="right")
         self.var_total = tk.StringVar()
         ttk.Label(barre, textvariable=self.var_total, style="Doux.TLabel").pack(side="left", padx=12)
         cadre, self.liste = theme.tableau(self, [
@@ -483,11 +498,25 @@ class PageHistorique(ttk.Frame):
         resultats = []
         modules = modeles_generes.modules_exports()
         module = getattr(self.app, 'module_travail', 'friperie')
-        for dossier in Path(generer.DEC).iterdir():
-            historique = dossier / "1 - HISTORIQUE"
-            if dossier.is_dir() and historique.is_dir():
-                resultats += [(p.stat().st_mtime, dossier.name, p) for p in historique.glob("*.xml")
-                              if modules.get(str(p.resolve()), 'friperie') == module]
+        # Dossier de travail (1 - IMPORTATEURS/<IMP>/2 - DECLARATIONS GENEREES), puis ancienne organisation.
+        emplacements = []
+        racine = espace_travail.racine()
+        if racine is not None:
+            emplacements.append((racine / espace_travail.IMPORTATEURS, espace_travail.RANGEMENT["historique"]))
+        emplacements.append((Path(generer.DEC), espace_travail.ANCIEN_RANGEMENT["historique"]))
+        vus = set()
+        for parent, sous_dossier in emplacements:
+            if not parent.is_dir():
+                continue
+            for dossier in parent.iterdir():
+                historique = dossier / sous_dossier
+                if not (dossier.is_dir() and historique.is_dir()):
+                    continue
+                for p in historique.glob("*.xml"):
+                    if p.resolve() in vus or modules.get(str(p.resolve()), 'friperie') != module:
+                        continue
+                    vus.add(p.resolve())
+                    resultats.append((p.stat().st_mtime, dossier.name, p))
         return sorted(resultats, reverse=True)
 
     def afficher(self):
@@ -576,11 +605,11 @@ class PageRatios(ttk.Frame):
             self._ajouter(chemins)
 
     def ajouter_fichiers(self):
-        self._ajouter(filedialog.askopenfilenames(title="XML à analyser", initialdir=generer.DEC,
+        self._ajouter(filedialog.askopenfilenames(title="XML à analyser", initialdir=espace_travail.dossier_ouverture(),
                                                   filetypes=[("XML", "*.xml")]))
 
     def ajouter_dossier(self):
-        dossier = filedialog.askdirectory(title="Dossier de XML (sous-dossiers inclus)", initialdir=generer.DEC)
+        dossier = filedialog.askdirectory(title="Dossier de XML (sous-dossiers inclus)", initialdir=espace_travail.dossier_ouverture())
         if dossier:
             self._ajouter(sorted(p for p in Path(dossier).rglob("*") if p.is_file() and p.suffix.lower() == ".xml"))
 
@@ -627,7 +656,7 @@ class PageRatios(ttk.Frame):
             return
         chemin = filedialog.asksaveasfilename(
             title="Exporter les ratios", defaultextension=".xlsx", filetypes=[("Excel", "*.xlsx")],
-            initialfile=f"Ratios {datetime.datetime.now():%Y-%m-%d %H%M}.xlsx")
+            initialfile=f"Ratios {datetime.datetime.now():%Y-%m-%d %H%M}.xlsx", **espace_travail.options_rapport())
         if not chemin:
             return
         from asydec.calcul import ratios

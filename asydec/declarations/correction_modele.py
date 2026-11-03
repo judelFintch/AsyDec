@@ -75,7 +75,7 @@ def preparer(identifiant, donneur, mode='importateur', base=None):
     r = d['resultat']
     lignes = [(a['fob'], a['poids']) for a in r['resume']['articles']]
     arbre = ET.ElementTree(nouveau)
-    resume = moteur.recalculer(arbre, lignes, r['colis'])
+    resume = moteur.recalculer(arbre, lignes, r['colis'], taux_globales=r.get('taux_globales'))
     info = moteur.infos_dossier(nouveau)
     if not info['taux'] > 0:
         raise ValueError('Le taux de change du dossier doit être positif.')
@@ -84,6 +84,8 @@ def preparer(identifiant, donneur, mode='importateur', base=None):
                 'fob':[f for f, _ in lignes], 'colis':list(r['colis']), 'info':info,
                 'mode':'SAISI', 'alertes':['Dossier corrigé : nouvelle version à valider.']}
     resultat['reference'] = copy.deepcopy(r.get('reference') or {'nom':d['nom'], 'sha256':modeles._sha(d['base_xml'])})
+    if r.get('taux_globales'):  # même règle de taxes globales que la version d'origine
+        resultat['taux_globales'] = r['taux_globales']
     if mode == 'importateur':
         if d['plaque']:
             resultat['plaque'] = d['plaque']

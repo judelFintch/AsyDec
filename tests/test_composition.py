@@ -65,7 +65,9 @@ class CompositionTest(unittest.TestCase):
     def test_application_et_retour_base_classique(self):
         page=SimpleNamespace(nouvelle_base=Mock(),reprendre_base=Mock())
         app=SimpleNamespace(session_verrouillee=False,module_travail='friperie',base_dossier=str(self.base),base=str(self.base),
-            chemins_xml_disponibles=lambda generation=False:[str(self.base)],pages={'articles':page},montrer=Mock())
+            chemins_xml_disponibles=lambda generation=False:[str(self.base)],pages={'articles':page},montrer=Mock(),
+            confiance_generation=lambda chemin:None)
+        app.profil_generation=lambda chemin,**options:AsyDec.profil_generation(app,chemin,**options)
         with patch('asydec.ui.app.chemins.DONNEES',self.racine):
             AsyDec.appliquer_composition(app,C.choisir_automatiquement(self.entrees,3,graine=3),3)
             self.assertEqual(len(app.profil['ratios']),3)

@@ -4,7 +4,8 @@ Utilisation : double-cliquer sur « LANCER.command », ou
     .venv/bin/python generer.py
 
 Chaque ligne de la feuille SAISIE dont le statut est « A GENERER » produit
-un fichier XML, rangé dans DEC FRIPERIE/<IMPORTATEUR>/1 - HISTORIQUE/.
+un fichier XML, rangé dans le dossier de travail :
+1 - IMPORTATEURS/<IMPORTATEUR>/2 - DECLARATIONS GENEREES/ (voir systeme.espace_travail).
 Le résultat (nom du fichier, taxes, alertes) est réécrit dans la ligne.
 """
 import datetime
@@ -20,6 +21,8 @@ from openpyxl.worksheet.datavalidation import DataValidation
 from asydec import chemins
 from asydec.calcul import moteur
 from asydec.calcul import variantes
+from asydec.formats import nombre as nombre_fr
+from asydec.systeme import espace_travail
 from asydec.systeme.journal import erreur_ignoree
 
 ICI = str(chemins.RACINE)
@@ -99,14 +102,14 @@ def creer_modele():
         "MODE D'EMPLOI",
         "1. Feuille SAISIE : une ligne par déclaration.",
         "2. Statut = A GENERER pour les lignes à traiter (EXEMPLE et FAIT sont ignorées).",
-        "3. Fichier de base : le XML SYDONIA du dossier (nom seul : il est cherché dans DEC FRIPERIE).",
+        "3. Fichier de base : le XML SYDONIA du dossier (nom seul : il est cherché dans le dossier de travail et DEC FRIPERIE).",
         "4. Poids 1 à 8 : les poids du colisage, dans l'ordre des articles du fichier de base.",
         "5. Mode RATIOS : FOB calculés dans les bornes des XML ; ratios 4/7/8 ajustables, autres dans les fourchettes.",
         "   Mode SAISI : les FOB 1 à 8 sont contrôlés avec les mêmes règles ; incohérence = refus.",
         "6. Colis : saisir les 8 entiers positifs, ou aucun : estimation graduée (minimum 10, tous différents).",
         "   (vide = total du fichier de base).",
         "7. Lancer : double-clic sur LANCER.command. Les colonnes grises se remplissent.",
-        "8. Le fichier est rangé dans DEC FRIPERIE/<IMPORTATEUR>/1 - HISTORIQUE, nommé",
+        "8. Le fichier est rangé dans le dossier de travail, 1 - IMPORTATEURS/<IMPORTATEUR>/2 - DECLARATIONS GENEREES, nommé",
         "   IMPORTATEUR FOBUSD POIDSKG NN.xml (NN = numéro suivant). Rien n'est jamais écrasé.",
     ]:
         wa.append([ligne])
@@ -125,15 +128,18 @@ def trouver_base(nom):
     if os.path.isabs(nom) and os.path.exists(nom):
         return nom
     trouves = []
-    for dossier, _, fichiers in os.walk(DEC):
-        if os.sep + "OUTILS" in dossier + os.sep and dossier.startswith(ICI):
-            continue
-        if nom in fichiers:
-            trouves.append(os.path.join(dossier, nom))
+    for racine in espace_travail.emplacements_lecture(DEC):
+        for dossier, _, fichiers in os.walk(racine):
+            if dossier == ICI or dossier.startswith(ICI + os.sep):
+                continue
+            if nom in fichiers:
+                trouves.append(os.path.join(dossier, nom))
     if not trouves:
-        raise ValueError(f"Fichier de base introuvable dans DEC FRIPERIE : {nom}")
-    # Priorité aux fichiers de base de l'utilisateur
-    trouves.sort(key=lambda p: (0 if "VOS FICHIERS" in p else 1, p))
+        raise ValueError(f"Fichier de base introuvable dans le dossier de travail ni dans DEC FRIPERIE : {nom}")
+    # Priorité aux bases de l'utilisateur, d'abord dans le dossier de travail.
+    trouves = list(dict.fromkeys(trouves))
+    bases = (espace_travail.RANGEMENT["sources"], espace_travail.ANCIEN_RANGEMENT["sources"])
+    trouves.sort(key=lambda p: (0 if any(b in p for b in bases) else 1, not espace_travail.dans_espace(p), p))
     return trouves[0]
 
 
@@ -144,28 +150,38 @@ def nom_dossier(importateur, table):
     return re.sub(r"^SOCIETE\s+", "", importateur.upper()).replace(".", "").strip() or "INCONNU"
 
 
-# Rangement d'un importateur dans DEC FRIPERIE/<IMPORTATEUR>/ : un sous-dossier par type de fichier.
-RANGEMENT = {"historique": "1 - HISTORIQUE", "sources": "2 - VOS FICHIERS (bases et SYDONIA)",
-             "valides": "4 - XML VALIDES", "pdf": "5 - PDF"}  # « 3 - A ESSAYER » existe déjà chez certains
-
-
 def dossier_rangement(importateur, cle, table_imp=None, creer=True):
-    """Sous-dossier de rangement de l'importateur ; créé au besoin, jamais vidé ni déplacé."""
+    """Sous-dossier de rangement de l'importateur dans le dossier de travail (clé de
+    espace_travail.RANGEMENT) ; créé au besoin, jamais vidé ni déplacé."""
     table = IMPORTATEURS_DEFAUT if table_imp is None else table_imp
-    chemin = os.path.join(DEC, nom_dossier(importateur or "", table), RANGEMENT[cle])
-    if creer:
-        os.makedirs(chemin, exist_ok=True)
-    return chemin
+    return str(espace_travail.dossier_importateur(nom_dossier(importateur or "", table), cle, creer, ancienne=DEC))
+
+
+def ranger_fichier(source, importateur, cle, table_imp=None):
+    """Copie un fichier reçu (base SYDONIA, déclaration réelle) dans le dossier de l'importateur, s'il
+    n'est pas déjà dans le dossier de travail. Renvoie le chemin rangé ; l'original n'est pas touché.
+    En cas d'échec de la copie, le fichier d'origine est renvoyé (le travail continue)."""
+    if not importateur:
+        return str(source)
+    table = IMPORTATEURS_DEFAUT if table_imp is None else table_imp
+    try:
+        return str(espace_travail.ranger_copie(source, nom_dossier(importateur, table), cle, ancienne=DEC))
+    except (OSError, ValueError):
+        erreur_ignoree(f'rangement de {os.path.basename(str(source))}')
+        return str(source)
 
 
 def numero_suivant(dossier_imp):
+    """Numéro suivant parmi les déclarations déjà générées, dans le dossier de travail et l'ancienne
+    organisation : la numérotation continue sans doublon après le changement de dossier."""
     motif = re.compile(re.escape(dossier_imp) + r" .*KG (\d{2})(?:-\d{2})?(?: - .*)?\.xml$", re.I)
     maxi = 0
-    for _, _, fichiers in os.walk(DEC):
-        for f in fichiers:
-            m = motif.match(f)
-            if m:
-                maxi = max(maxi, int(m.group(1)))
+    for racine in espace_travail.emplacements_lecture(DEC):
+        for _, _, fichiers in os.walk(racine):
+            for f in fichiers:
+                m = motif.match(f)
+                if m:
+                    maxi = max(maxi, int(m.group(1)))
     return maxi + 1
 
 
@@ -228,8 +244,9 @@ def produire(base, poids, ratios, table_imp, registre, mode="RATIOS", fob_total=
         # Taux saisi : il remplace celui du XML de base, qui n'est pas modifié.
         moteur.ecrire_taux(arbre.getroot(), taux)
         info = moteur.infos_dossier(arbre.getroot())
-        alertes.append(f"Taux appliqué : 1 USD = {info['taux']:g} CDF (XML de base : {taux_xml:g}). "
-                       "Les taxes globales restent celles du XML de base : à vérifier.")
+        alertes.append(f"Taux appliqué : 1 USD = {info['taux']:g} CDF (XML de base : {taux_xml:g})."
+                       + ("" if (profil or {}).get('taxes_globales') else
+                          " Les taxes globales restent celles du XML de base : à vérifier."))
     else:
         taux = None
     n = len(info["fob_articles"])
@@ -285,9 +302,14 @@ def produire(base, poids, ratios, table_imp, registre, mode="RATIOS", fob_total=
         alertes.append(f"ATTENTION : poids par article différents du dernier fichier généré pour ce camion "
                        f"({precedent['fichier']}). Vérifier le colisage.")
 
-    resume = moteur.recalculer(arbre, list(zip(fob, poids)), colis)
+    globales_base = arbre.getroot().findtext("Financial/Amounts/Global_taxes")
+    regle = profil.get('taxes_globales')
+    taux_globales = regle['taux'] if regle else None
+    resume = moteur.recalculer(arbre, list(zip(fob, poids)), colis, taux_globales=taux_globales)
+    if regle:
+        alertes.extend(alertes_taxes_globales(regle, base, globales_base, resume))
     dossier_imp = nom_dossier(info["importateur"], table_imp)
-    dest = os.path.join(DEC, dossier_imp, RANGEMENT["historique"])
+    dest = str(espace_travail.dossier_importateur(dossier_imp, "historique", creer=False, ancienne=DEC))
     nn = numero_suivant(dossier_imp)
     while True:
         nom = f"{dossier_imp} {fmt_nom(resume['fob'])}USD {fmt_nom(resume['poids'])}KG {nn:02d}.xml"
@@ -297,14 +319,33 @@ def produire(base, poids, ratios, table_imp, registre, mode="RATIOS", fob_total=
         nn += 1
     if enregistrer:
         os.makedirs(dest, exist_ok=True)
-        os.makedirs(os.path.join(DEC, dossier_imp, RANGEMENT["sources"]), exist_ok=True)
+        espace_travail.dossier_importateur(dossier_imp, "sources", ancienne=DEC)
         moteur.enregistrer(arbre, chemin)
         if cle:
             registre[cle] ={"fichier": nom, "poids": poids, "date": datetime.datetime.now().isoformat(timespec="minutes")}
     return {"chemin": chemin, "nom": nom, "resume": resume, "alertes": alertes,
             "fob": fob, "colis": colis, "info": info, "mode": mode, "plaque": plaque,
             "importateur_choisi": importateur, "taux_choisi": info["taux"] if taux is not None else None,
-            "taux_xml": taux_xml}
+            "taux_xml": taux_xml, "taux_globales": str(taux_globales) if taux_globales is not None else None}
+
+
+# Écart (en points de pourcentage du CIF) au-delà duquel le XML de base est signalé comme périmé.
+ECART_GLOBALES_BASE = 0.05
+
+
+def alertes_taxes_globales(regle, base, globales_base, resume):
+    """Explique le recalcul des taxes globales et signale un XML de base à la règle différente."""
+    pct = float(regle['taux']) * 100
+    alertes = [f"Taxes globales recalculées : {nombre_fr(pct, 3)} % du CIF, règle apprise sur {regle['n']} déclaration(s) "
+               f"réelle(s) (précision ± {regle['ecart_max']} CDF) ; montant {nombre_fr(resume['taxes_globales'])} CDF."]
+    racine = moteur.charger(base).getroot()
+    cif_base = moteur._fl(moteur._txt(racine, "Valuation/Total_CIF"))
+    if cif_base and globales_base:
+        part_base = float(globales_base) / cif_base * 100
+        if abs(part_base - pct) > ECART_GLOBALES_BASE:
+            alertes.append(f"XML de base {os.path.basename(str(base))} : taxes globales à {nombre_fr(part_base, 3)} % du CIF "
+                           f"au lieu de {nombre_fr(pct, 3)} % dans les déclarations réelles — base ancienne ou règle changée.")
+    return alertes
 
 
 # --------------------------------------------------------------------------
@@ -324,7 +365,7 @@ def traiter(ws, row, ratios, table_imp, registre):
     )
     resume, alertes = res["resume"], res["alertes"]
     ws.cell(row=row, column=COL["statut"]).value = "FAIT"
-    ws.cell(row=row, column=COL["fichier"]).value = os.path.relpath(res["chemin"], DEC)
+    ws.cell(row=row, column=COL["fichier"]).value = espace_travail.relatif(res["chemin"])
     ws.cell(row=row, column=COL["fob_final"]).value = resume["fob"]
     ws.cell(row=row, column=COL["poids_final"]).value = resume["poids"]
     ws.cell(row=row, column=COL["taxes"]).value = resume["taxes_totales"]

@@ -22,3 +22,9 @@ DONNEES/
 # Local administrator credentials, preferences, and reset recovery archives
 CONFIG_LOCAL/
 SAUVEGARDES/
+
+# Applications compilées et métadonnées générées
+build/
+dist/
+packaging/*.spec
+asydec/construction.json

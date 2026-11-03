@@ -1,2 +1,3 @@
 openpyxl>=3.1
 sv-ttk>=2.6  # facultatif : thème moderne
+certifi>=2024.2

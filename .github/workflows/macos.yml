@@ -1,0 +1,59 @@
+name: Application macOS
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: application-macos
+  cancel-in-progress: false
+jobs:
+  construire:
+    strategy:
+      matrix:
+        include:
+          - runner: macos-15
+            arch: arm64
+          - runner: macos-15-intel
+            arch: x86_64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -r requirements.txt 'pyinstaller==6.22.3'
+      - name: Tests
+        run: python scripts/verifier.py
+      - name: Construire
+        run: python scripts/construire_mac.py
+      - name: Vérifier l’application
+        run: |
+          ASYDEC_HOME="$RUNNER_TEMP/asydec-diagnostic" dist/AsyDec.app/Contents/MacOS/AsyDec --diagnostic
+          codesign --verify --deep --strict dist/AsyDec.app
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-${{ matrix.arch }}
+          path: |
+            dist/AsyDec-macos-${{ matrix.arch }}.zip
+            dist/AsyDec-macos-${{ matrix.arch }}.json
+  publier:
+    needs: construire
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: macos-*
+          merge-multiple: true
+          path: distribution
+      - name: Publier après réussite des deux constructions
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          REVISION: ${{ github.sha }}
+          CONSTRUCTION: ${{ github.run_number }}
+        run: |
+          gh release create "macos-${CONSTRUCTION}" distribution/* --target "$REVISION" --title "AsyDec Mac 1.0.${CONSTRUCTION}" --notes "Application Mac construite et testée depuis main. Révision : ${REVISION}." --latest

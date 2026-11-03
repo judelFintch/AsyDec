@@ -24,6 +24,36 @@ utilise le thème standard.
 | `INTERFACE.command` | Même interface que `ASYDEC.command`, gardé pour les anciens raccourcis |
 | `LANCER.command` | Génération par lot depuis `SAISIE.xlsx` (lignes « A GENERER ») |
 
+## Dossier de travail
+
+Au premier lancement, AsyDec demande où ranger les fichiers qu'il produit (`Documents/AsyDec` proposé).
+Tout y est classé par importateur et par type :
+
+```
+<dossier de travail>/
+├── 1 - IMPORTATEURS/<IMPORTATEUR>/
+│   ├── 1 - BASES SYDONIA/            XML de base reçus (copiés à l'ouverture)
+│   ├── 2 - DECLARATIONS GENEREES/    sorties du générateur, numérotées
+│   ├── 3 - XML VALIDES/              modèles validés téléchargés, nommés par plaque
+│   ├── 4 - DECLARATIONS REELLES/     déclarations SYDONIA comparées (copiées à la comparaison)
+│   ├── 5 - PDF/
+│   └── 6 - FACTURES/
+├── 2 - RAPPORTS/AAAA-MM/             exports Excel (comparaisons, ratios, études, références)
+├── 3 - A TRIER/                      anciens fichiers dont l'importateur n'est pas reconnu
+└── 4 - SAUVEGARDES/
+```
+
+- Un fichier reçu (base, déclaration réelle) est **copié** dans le bon dossier ; l'original reste en place.
+  Rien n'est jamais écrasé : un autre contenu sous le même nom devient « nom (2).xml ».
+- Les données internes (bases SQLite, compte, médiathèque archivée) restent dans `OUTILS`.
+- La numérotation, la recherche des bases, l'Historique et la détection des déclarations réelles lisent
+  aussi l'ancienne organisation (`DEC FRIPERIE/<IMPORTATEUR>/1 - HISTORIQUE`…).
+- **Paramètres → Dossier de travail** : changer de dossier, l'ouvrir, ou **Ranger mes fichiers
+  existants…** : aperçu puis copie des anciens fichiers dans la nouvelle organisation (type déduit du
+  contenu du XML, puis du dossier d'origine ; doublons copiés une seule fois ; compte rendu dans
+  `2 - RAPPORTS`). Un second passage ne recopie rien.
+- Sans dossier de travail choisi (scripts, tests), l'ancienne organisation est utilisée.
+
 ## L'interface
 
 Le bandeau du haut rappelle le dossier ouvert : importateur, référence, camion et totaux.
@@ -55,6 +85,46 @@ La taille de la fenêtre et les fichiers récents sont mémorisés dans `~/.asyd
   avec un seuil d'écart (10 % par défaut). L'analyse peut être exportée en Excel.
 - **Historique.** Liste les déclarations générées, les plus récentes d'abord, avec un
   filtre par importateur. Un double-clic affiche le fichier dans le Finder.
+
+## Génération guidée par la confiance
+
+Les répartitions sont tirées autour des dossiers connus, mais tous ne pèsent pas pareil :
+
+| Repère | Confiance | Effet sur la génération |
+|---|---|---|
+| **Déclaration réelle** : XML SYDONIA ayant servi à comparer un modèle | 3 | Tirée 3 fois plus souvent, parts tenues à ±10 %, attire le classement, élargit les fourchettes de ratios et compte dans l'analyse des risques |
+| Bon modèle ★ ou noté 4-5 | 2 | Tiré 2 fois plus souvent, parts à ±15 % |
+| XML de la médiathèque | 1 | Comportement d'origine (±20 à 25 %) |
+| Modèle rejeté ou noté 1-2 | — | Toute répartition presque identique est écartée dès la recherche |
+
+- Une déclaration réelle n'est retenue que si elle a les mêmes articles que le dossier et si le
+  fichier comparé est toujours là, inchangé ; un modèle supprimé n'apporte plus la sienne.
+- Intention « Le plus proche » : la proposition la plus proche des déclarations réelles d'abord,
+  sinon des bons modèles ★. Chaque proposition dit de quelle référence elle s'inspire.
+- La page **Répartitions** cherche aussi à partir des déclarations réelles comparées.
+- Sans comparaison, note ni ★, la génération reste exactement celle de la médiathèque.
+
+## Taxes globales recalculées
+
+Les XML ne détaillent pas les taxes globales (lignes vides), seulement leur total. Dans les déclarations
+réelles, ce total est une part fixe du CIF (14,810 % sur les premières, à ±85 CDF près). Dès que
+2 déclarations réelles concordent à 0,02 point près, cette part est apprise et les taxes globales sont
+recalculées sur le nouveau CIF, au lieu d'être recopiées du XML de base. L'aperçu l'indique, et signale
+un XML de base dont les taxes globales s'écartent de la règle (base ancienne). Sans règle apprise,
+le montant du XML de base est repris comme avant.
+
+## Déclarations réelles détectées
+
+À l'ouverture du **Rapport des comparaisons**, AsyDec parcourt les dossiers des importateurs (hors
+`OUTILS`) à la recherche de déclarations SYDONIA réelles encore inconnues : numéro d'enregistrement
+propre au fichier (pas un gabarit recopié), ni export AsyDec, ni XML de base d'un modèle. Chacune est
+rattachée au modèle exporté de même plaque de tracteur.
+
+« Déclarations réelles détectées… » : vérifier, changer le modèle d'une ligne ou choisir « Aucun »,
+puis enregistrer. Rattachée, la déclaration devient une comparaison ; sans modèle, elle est retenue
+comme déclaration réelle. Dans les deux cas, elle guide aussitôt la génération et la règle des taxes
+globales. Les lignes à vérifier (articles différents, enregistrée avant le modèle) ne sont pas
+sélectionnées d'office. Rien n'est enregistré sans confirmation.
 
 ## Rapport des comparaisons
 
@@ -206,6 +276,7 @@ Les données restent à la racine d'`OUTILS` : leurs chemins sont tous définis 
 | `declarations/etude_xml.py` | Lecture descriptive des XML, comparaison à une référence, export |
 | `declarations/comparaison_prediction.py` | Comparaison d'une proposition à un XML SYDONIA |
 | `declarations/rapport_comparaisons.py` | Rapport de toutes les comparaisons : diagnostic, analyse, export Excel |
+| `declarations/detection_reelles.py` | Détection des déclarations SYDONIA réelles dans les dossiers, rattachement aux modèles |
 | `declarations/modeles_generes.py` | Modèles générés : enregistrement, validation, comparaisons, export XML |
 | `declarations/export_pdf.py` | PDF des modèles et des comparaisons |
 | `declarations/tableau_excel.py` | Lecture d'un tableau d'articles dans un fichier Excel |
@@ -217,6 +288,8 @@ Les données restent à la racine d'`OUTILS` : leurs chemins sont tous définis 
 | `systeme/gestion_locale.py` | Compte administrateur, préférences, remise à zéro |
 | `systeme/rechargement.py` | Détection d'une nouvelle version du code (bouton « Recharger ») |
 | `systeme/journal.py` | Journal des erreurs ignorées (`DONNEES/asydec.log`) |
+| `systeme/espace_travail.py` | Dossier de travail : organisation, emplacements, copies rangées |
+| `declarations/rangement_existants.py` | Rangement (copie) des fichiers de l'ancienne organisation |
 | `ui/` | `app.py` (fenêtre), `etapes.py` (3 étapes), `outils.py` (outils), `theme.py`, une page par fichier |
 
 ## Données et vérifications

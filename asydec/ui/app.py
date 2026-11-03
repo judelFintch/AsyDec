@@ -15,6 +15,7 @@ from asydec.references import base_references
 from asydec.references import catalogue_xml
 from asydec.references import importateurs
 from asydec.systeme import gestion_locale as local
+from asydec.systeme import espace_travail
 from asydec.systeme import journal
 from asydec.systeme import rechargement
 from asydec.ui import theme
@@ -24,6 +25,8 @@ from asydec.ui.etapes import PageArticles, PageDossier, PageVerifier
 from asydec.ui.importateurs import IMPORTATEUR_XML
 from asydec.ui.mediatheque import PageMediatheque
 from asydec.ui.modeles_generes import PageModelesGeneres
+from asydec.ui.factures import PageBibliothequeFactures
+from asydec.ui.mises_a_jour import PageMisesAJour
 from asydec.ui.outils import PageEtude, PageHistorique, PageRatios, PageRepartitions
 from asydec.ui.parametres import PageParametres
 from asydec.ui.rapport_comparaisons import PageRapportComparaisons
@@ -99,7 +102,7 @@ class AsyDec(tk.Tk):
         self.var_importateur = tk.StringVar(value=IMPORTATEUR_XML)
         self._importateurs = {}
         for cle, classe in [("accueil", PageAccueil), ("divers", PageDivers), ("dossier", PageDossier), ("articles", PageArticles), ("verifier", PageVerifier),
-                            ("modeles_generes", PageModelesGeneres), ("rapport_comparaisons", PageRapportComparaisons),
+                            ("modeles_generes", PageModelesGeneres), ("factures", PageBibliothequeFactures), ("mises_a_jour", PageMisesAJour), ("rapport_comparaisons", PageRapportComparaisons),
                             ("mediatheque", PageMediatheque), ("references", PageReferences),
                             ("repartitions", PageRepartitions), ("ratios", PageRatios), ("etude", PageEtude),
                             ("historique", PageHistorique), ("parametres", PageParametres)]:
@@ -120,8 +123,13 @@ class AsyDec(tk.Tk):
         self.bind_all('<Motion>', self._activite, add='+')
         self._minuteur_session = self.after(1000, self._surveiller_session)
         self._minuteur_code = self.after(5000, self._surveiller_code)
+        if chemins.COMPILE:
+            self.after(3000, lambda: self.pages['mises_a_jour'].verifier(discret=True))
         if erreur_reglages:
             self.after_idle(lambda: messagebox.showwarning('Paramètres à vérifier', erreur_reglages, parent=self))
+        elif espace_travail.racine() is None:
+            # Premier lancement : où ranger les fichiers produits ? (reposée tant qu'aucun dossier n'est choisi)
+            self.after(400, self.choisir_espace_travail)
 
     # ------------------------------------------------------------ structure
     def _bandeau(self):
@@ -163,7 +171,7 @@ class AsyDec(tk.Tk):
         commun.pack(side='bottom', fill='x', pady=12)
         tk.Label(commun, text='OUTILS COMMUNS', font=(theme.POLICE, 10, 'bold'),
                  fg=theme.TEXTE_DOUX, bg=theme.FOND_LATERAL, anchor='w').pack(fill='x', padx=8)
-        for cle, texte in (('parametres', 'Paramètres'),):
+        for cle, texte in (('factures', 'Modèles de facture'), ('mises_a_jour', 'Mises à jour Mac'), ('parametres', 'Paramètres')):
             lien = tk.Label(commun, text=texte, font=(theme.POLICE, 13), anchor='w', padx=10, pady=7,
                             bg=theme.FOND_LATERAL, fg=theme.TEXTE, cursor='hand2')
             lien.pack(fill='x')
@@ -208,7 +216,7 @@ class AsyDec(tk.Tk):
             self.module_actif = None
         elif cle == 'divers':
             self.module_actif = 'divers'
-        elif cle != 'parametres':
+        elif cle not in ('parametres', 'factures', 'mises_a_jour'):
             self.module_actif = getattr(self, 'module_travail', 'friperie')
         self.var_module.set({'friperie': 'Friperie', 'divers': 'Divers'}.get(self.module_actif, 'Modules'))
         if self.module_actif in ('friperie', 'divers'):
@@ -236,6 +244,8 @@ class AsyDec(tk.Tk):
         try:
             chemin = generer.trouver_base(chemin)
             info = moteur.infos_dossier(moteur.charger(chemin).getroot())
+            # Base reçue hors du dossier de travail : copiée dans 1 - BASES SYDONIA de l'importateur.
+            chemin = generer.ranger_fichier(chemin, info['importateur'], 'sources', getattr(self, 'table_imp', None))
             erreurs = self.partager_xml([chemin])  # rejoint la médiathèque du module ouvert
             if erreurs:
                 raise ValueError('Le XML ne peut pas être ajouté à la médiathèque.')
@@ -418,6 +428,15 @@ class AsyDec(tk.Tk):
 
     def chemins_xml_disponibles(self, generation=False):
         return [d['chemin'] for d in self.xml_disponibles(generation)]
+
+    def choisir_espace_travail(self):
+        if self.session_verrouillee:
+            return None
+        from asydec.ui import espace_travail as fenetres
+        choisi = fenetres.choisir(self, premier_lancement=espace_travail.racine() is None)
+        if choisi is not None and 'parametres' in getattr(self, 'pages', {}):
+            self.pages['parametres'].afficher_espace_travail()
+        return choisi
 
     def confiance_generation(self, chemin):
         """Déclarations réelles comparées, bons modèles et modèles à éviter, pour guider la génération.
@@ -660,6 +679,9 @@ class AsyDec(tk.Tk):
 
 
 def main():
+    if chemins.COMPILE:
+        from asydec.ui.import_installation import proposer
+        proposer()
     journal.activer()
     while True:
         utilisateur = demander_connexion()

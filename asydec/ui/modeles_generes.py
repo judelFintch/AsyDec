@@ -161,6 +161,7 @@ class PageModelesGeneres(ttk.Frame):
         versions.pack(fill='x',pady=(0,8))
         theme.bouton(versions,'Corriger le dossier…',self.corriger_dossier).pack(side='left',padx=4)
         theme.bouton(versions,'Reprendre pour modifier',self.reprendre).pack(side='left',padx=4)
+        theme.bouton(versions,'Factures Word…',self.facturer).pack(side='left',padx=4)
         # Note du modèle sélectionné : 4-5 = exemple à suivre, 1-2 = à éviter pour les prochaines générations.
         self.notation=BarreNotation(self,self.noter)
         self.notation.pack(fill='x',pady=(0,8))
@@ -250,13 +251,19 @@ class PageModelesGeneres(ttk.Frame):
         compare=(f"Comparé {m['comparaisons']} fois, dernière le {date_locale(m['compare_utc'])}"
                  + (f" · écart du total des taxes {nombre(m['dernier_ecart'])} CDF" if m.get('dernier_ecart') is not None else '')
                  if m['comparaisons'] else 'Jamais comparé avec un XML')
+        try:
+            from asydec.declarations import factures
+            suggestion = factures.resume_suggestion(m)
+        except Exception:
+            erreur_ignoree('suggestion de modèle de facture')
+            suggestion = 'Facture : bibliothèque indisponible.'
         self.var_resume.set('\n'.join((
             f"{'★ Bon modèle · ' if m['bon'] else ''}N° {m['id']} · {m['importateur']} · plaque {m['plaque'] or '—'} · {service.STATUTS[m['statut']]}",
             f"FOB {nombre(r['fob'],2)} USD · poids {nombre(r['poids'])} kg · colis {nombre(sum(m['resultat']['colis']))} · "
             f"total taxes estimé {nombre(r.get('taxes_totales'))} CDF",
             f"Créé le {date_locale(m['cree_utc'])} par {m['auteur']} · dernier événement le {date_locale(m['modifie_utc'])} · {compare}",
             f"Fichier XML généré : {m['chemin_xml'] or 'aucun (proposition non exportée)'}",
-            resume_risque(self.analyses.get(m['id'],[])))))
+            resume_risque(self.analyses.get(m['id'],[])), suggestion)))
 
     def selection(self):
         choix=self.table.selection()
@@ -582,6 +589,16 @@ class PageModelesGeneres(ttk.Frame):
         self.afficher()
         messagebox.showinfo('XML enregistré',destination,parent=parent)
 
+    def facturer(self):
+        if self.app.session_verrouillee:
+            return
+        identifiant = self.selection()
+        if identifiant is None:
+            messagebox.showinfo('Facture', 'Sélectionnez un modèle généré.', parent=self)
+            return
+        from asydec.ui.factures import ouvrir
+        ouvrir(self, self.app, identifiant)
+
     def imprimer(self,identifiant=None,parent=None):
         if self.app.session_verrouillee:
             return
@@ -635,11 +652,14 @@ class PageModelesGeneres(ttk.Frame):
             messagebox.showerror('Comparaison indisponible',str(exc),parent=self)
             return
         importateur=self.modeles.get(str(identifiant),{}).get('importateur','')
-        options={'initialdir':dossier} if (dossier:=rangement(self.app,importateur,'sources')) else {}
+        options={'initialdir':dossier} if (dossier:=rangement(self.app,importateur,'reelles')) else {}
         chemin=filedialog.askopenfilename(parent=self,title='Comparer le XML généré avec un fichier fourni',
             filetypes=[('XML','*.xml')],**options)
         if not chemin:
             return
+        # Le fichier comparé est une déclaration réelle : rangée avec celles de l'importateur.
+        from asydec.declarations import generer
+        chemin=generer.ranger_fichier(chemin,importateur,'reelles',getattr(self.app,'table_imp',None))
         try:
             from asydec.declarations.comparaison_prediction import comparer_xmls
             from asydec.ui.comparaison import afficher

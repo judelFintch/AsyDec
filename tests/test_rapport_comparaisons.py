@@ -70,7 +70,7 @@ class DiagnosticTest(unittest.TestCase):
         self.assertEqual(R.decomposition(e), {'articles': 0, 'globales': 100})
         phrases = R.constats([e])
         self.assertTrue(any(p.startswith('⚠ Modèle N° 1') for p in phrases))
-        self.assertTrue(any('taxes globales' in p and 'telles quelles' in p for p in phrases))
+        self.assertTrue(any('taxes globales' in p and 'part du CIF' in p for p in phrases))
 
     def test_arrondi_a_taux_egal_reste_identique(self):
         self.assertEqual(entree(rapport(taxes_articles=('1000', '1003')))['diagnostic'], R.IDENTIQUE)
@@ -193,9 +193,11 @@ class PageTest(unittest.TestCase):
         racine = tk.Tk()
         racine.withdraw()
         self.addCleanup(racine.destroy)
-        with patch.object(R, 'collecter', return_value=entrees):
+        with patch.object(R, 'collecter', return_value=entrees), \
+                patch('asydec.ui.rapport_comparaisons.detection_reelles.detecter', return_value=[]):
             page = PageRapportComparaisons(racine, SimpleNamespace(module_travail='friperie'))
             page.afficher()
+            self.assertEqual(str(page.detection_bouton['state']), 'disabled')
         table = page.tables['comparaisons']
         self.assertEqual(len(table.get_children()), 2)
         self.assertEqual(page.cartes['calcul'].valeur.get(), '1')
@@ -205,7 +207,8 @@ class PageTest(unittest.TestCase):
         self.assertEqual(table.get_children(), ('1',))
         page.filtre.set('Tous les diagnostics')
         page.filtre_importateur.set('SHABANI')
-        page.recalculer()
+        with patch.object(R, 'collecter', return_value=entrees):
+            page.recalculer()
         self.assertEqual(table.get_children(), ('2',))
 
 

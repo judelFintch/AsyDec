@@ -232,9 +232,11 @@ def colis_gradues(poids, fob, total, minimum=10):
 # --------------------------------------------------------------------------
 # Recalcul complet
 # --------------------------------------------------------------------------
-def recalculer(arbre, lignes, colis=None):
+def recalculer(arbre, lignes, colis=None, taux_globales=None):
     """lignes = [(fob_usd, poids_kg), ...] dans l'ordre des articles du fichier.
     colis = liste de colis par article (ou None pour garder ceux du fichier).
+    taux_globales = part du CIF total prise par les taxes globales (ex. 0,14810) : elles sont alors
+    recalculées ; None = montant du fichier repris tel quel (les XML n'en détaillent pas les lignes).
     Modifie l'arbre et renvoie un résumé."""
     r = arbre.getroot()
     V0 = r.find("Valuation")
@@ -327,7 +329,11 @@ def recalculer(arbre, lignes, colis=None):
     _ecrire(V, "Total_cost", str(cout_tot))
     _ecrire(r, "General_information/Value_details", str(cout_tot))
     _ecrire(V, "Total_CIF", str(arrondi(fact_tot) + cout_tot))
-    globales = int(_fl(_txt(r, "Financial/Amounts/Global_taxes")))
+    cif_total = arrondi(fact_tot) + cout_tot
+    if taux_globales is None:
+        globales = int(_fl(_txt(r, "Financial/Amounts/Global_taxes")))
+    else:
+        globales = arrondi(cif_total * float(taux_globales))
     _ecrire(r, "Financial/Amounts/Global_taxes", str(globales))
     _ecrire(r, "Financial/Amounts/Totals_taxes", str(taxes_articles + globales))
 
@@ -337,7 +343,7 @@ def recalculer(arbre, lignes, colis=None):
         r.find("Property/Nbers/Total_number_of_packages").text = str(int(sum(colis)))
 
     resume.update({
-        "fob": TOTAL, "poids": TOTAL_KG, "cif": arrondi(fact_tot) + cout_tot,
+        "fob": TOTAL, "poids": TOTAL_KG, "cif": cif_total,
         "taxes_articles": taxes_articles, "taxes_globales": globales,
         "taxes_totales": taxes_articles + globales,
         "colis": colis if colis is not None else [int(_fl(_txt(i, "Packages/Number_of_packages"))) for i in its],

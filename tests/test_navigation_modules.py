@@ -8,7 +8,7 @@ from asydec.ui.app import AsyDec
 
 class NavigationModulesTest(unittest.TestCase):
     def app(self):
-        pages = {cle: Mock() for cle in ('accueil', 'divers', 'dossier', 'repartitions', 'parametres')}
+        pages = {cle: Mock() for cle in ('accueil', 'divers', 'dossier', 'repartitions', 'parametres', 'factures')}
         pages['repartitions'].liste.get_children.return_value = ()
         pages['repartitions'].detail.get_children.return_value = ()
         return SimpleNamespace(session_verrouillee=False, base=None, liens={}, pages=pages,
@@ -38,6 +38,13 @@ class NavigationModulesTest(unittest.TestCase):
         self.assertEqual(app.module_actif, 'friperie')
         app.navigation_friperie.pack.assert_called_once()
         app.pages['repartitions'].afficher.assert_called_once()
+
+    def test_bibliotheque_factures_sans_dossier(self):
+        app = self.app()
+        AsyDec.montrer(app, 'factures')
+        self.assertIsNone(app.module_actif)
+        app.pages['factures'].tkraise.assert_called_once()
+        app.pages['factures'].afficher.assert_called_once()
 
     def test_entree_friperie_respecte_la_page_preferee(self):
         app = self.app()

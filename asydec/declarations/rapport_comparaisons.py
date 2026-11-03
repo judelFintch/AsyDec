@@ -295,8 +295,8 @@ def constats(entrees, ind=None, taxes=None, articles=None):
                        f"une fois le taux neutralisé{detail}. Principales taxes : {_taxes_responsables(e) or '—'}.")
         reste = abs(e['ecart_hors_taux'])
         if reste and abs(parts.get('globales', 0)) >= reste * Decimal('0.8'):
-            phrases.append("   → L'écart vient des taxes globales. Le moteur les reprend telles quelles du XML de base, "
-                           "sans les recalculer : vérifiez leur montant dans le XML de base de ce dossier.")
+            phrases.append("   → L'écart vient des taxes globales, reprises du XML de base pour ce modèle. Les nouvelles "
+                           "générations les recalculent en part du CIF dès que 2 déclarations réelles concordent.")
         elif reste and abs(parts.get('articles', 0)) >= reste * Decimal('0.8'):
             phrases.append("   → L'écart vient des taxes des articles : comparez leurs bases et taux dans « Détails des taxes… ».")
     if ind['meme_repartition'] and not calculs:

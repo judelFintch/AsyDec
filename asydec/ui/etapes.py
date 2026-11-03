@@ -21,6 +21,7 @@ from asydec.ui import taux_change
 from asydec.ui.taux_change import taux_choisi
 from asydec.ui.theme import nombre
 from asydec.systeme.journal import erreur_ignoree
+from asydec.systeme import espace_travail
 
 REFERENCE_DOSSIER = "Le XML du dossier (par défaut)"
 
@@ -216,7 +217,7 @@ class PageDossier(ttk.Frame):
 
     def parcourir(self):
         chemin = filedialog.askopenfilename(
-            initialdir=self.app.prefs.get("dernier_dossier", generer.DEC), title="XML de base du dossier",
+            initialdir=self.app.prefs.get("dernier_dossier", espace_travail.dossier_ouverture()), title="XML de base du dossier",
             filetypes=[("Déclarations XML", "*.xml"), ("Tous", "*.*")])
         if chemin:
             self._ouvrir(chemin)
@@ -352,9 +353,9 @@ class PageArticles(ttk.Frame):
                 e.grid(row=k + 1, column=colonne, padx=5, pady=2)
                 e.bind("<KeyRelease>", self.planifier)
                 liste.append(e)
-        self.totaux = [ttk.Label(grille, text="", style="Total.TLabel", anchor="e") for _ in range(3)]
+        self.etiquettes_totaux = [ttk.Label(grille, text="", style="Total.TLabel", anchor="e") for _ in range(3)]
         ttk.Label(grille, text="Total", style="Total.TLabel").grid(row=n+1, column=1, padx=5, pady=(8, 0), sticky="w")
-        for c, label in enumerate(self.totaux):
+        for c, label in enumerate(self.etiquettes_totaux):
             label.grid(row=n+1, column=2 + c, padx=5, pady=(8, 0), sticky="e")
         self.panneau.decorer(grille, self.noms)
 
@@ -649,9 +650,9 @@ class PageArticles(ttk.Frame):
 
         somme = lambda liste: sum(x for x in liste if x is not None)
         colis = v["colis"]
-        self.totaux[0].configure(text=nombre(somme(poids)))
-        self.totaux[1].configure(text=nombre(somme(fob), 2) if fob and None not in fob else "—")
-        self.totaux[2].configure(text=str(int(somme(colis))) if colis else "auto")
+        self.etiquettes_totaux[0].configure(text=nombre(somme(poids)))
+        self.etiquettes_totaux[1].configure(text=nombre(somme(fob), 2) if fob and None not in fob else "—")
+        self.etiquettes_totaux[2].configure(text=str(int(somme(colis))) if colis else "auto")
         complet = all(p is not None for p in poids)
         self.cartes["poids"].definir(nombre(somme(poids)) if complet else "—",
                                      "" if complet else "poids incomplets")
@@ -857,7 +858,7 @@ class PageVerifier(ttk.Frame):
         self.cartes["fob"].definir(nombre(r["fob"], 2))
         self.cartes["colis"].definir(str(int(sum(res["colis"]))))
         self.cartes["taxes"].definir(nombre(r["taxes_totales"]))
-        dossier = os.path.relpath(os.path.dirname(res["chemin"]), generer.DEC)
+        dossier = espace_travail.relatif(os.path.dirname(res["chemin"]))
         self.var_fichier.set(f"Fichier :  {res['nom']}     dans  {dossier}")
         noms = res["info"]["designations"]
         for k, a in enumerate(r["articles"]):
@@ -915,18 +916,20 @@ class PageVerifier(ttk.Frame):
         if not self.fichier or not Path(self.fichier).is_file():
             self.comparer_bouton.configure(state="disabled")
             return
-        options = {}
+        options, importateur = {}, None
         try:
             importateur = (self.resultat or {}).get("info", {}).get("importateur")
             if importateur:
                 options["initialdir"] = generer.dossier_rangement(
-                    importateur, "sources", getattr(self.app, "table_imp", None))
+                    importateur, "reelles", getattr(self.app, "table_imp", None))
         except Exception:  # noqa: BLE001 - emplacement habituel à défaut
             erreur_ignoree('dossier initial de comparaison')
         chemin = filedialog.askopenfilename(parent=self, title="Comparer le XML généré avec un fichier fourni",
                                             filetypes=[("XML", "*.xml")], **options)
         if not chemin:
             return
+        # Le fichier comparé est une déclaration réelle : rangée avec celles de l'importateur.
+        chemin = generer.ranger_fichier(chemin, importateur, "reelles", getattr(self.app, "table_imp", None))
         try:
             from asydec.declarations.comparaison_prediction import comparer_xmls
             from asydec.ui.comparaison import afficher
@@ -959,7 +962,7 @@ class PageVerifier(ttk.Frame):
             return
         self.fichier = res["chemin"]
         self.comparer_bouton.configure(state="normal" if Path(self.fichier).is_file() else "disabled")
-        self.message.afficher("ok", "✓  Déclaration enregistrée", [os.path.relpath(res["chemin"], generer.DEC)])
+        self.message.afficher("ok", "✓  Déclaration enregistrée", [espace_travail.relatif(res["chemin"])])
         self.generer.configure(state="disabled", text="Généré  ✓")
         self.finder.pack(side="right", padx=8)
         try:

@@ -15,6 +15,7 @@ from asydec.references import import_references
 from asydec.references import service_references as service
 from asydec.ui import theme
 from asydec.ui.theme import nombre
+from asydec.systeme import espace_travail
 
 # Correction d'événement et onglet Marchandises (avec export) : conservés mais ni
 # construits ni déclenchables tant qu'une tâche dédiée ne les active pas.
@@ -429,13 +430,13 @@ class PageReferences(ttk.Frame):
     def importer_fichiers(self):
         if not IMPORT_ACTIF or getattr(self.app, "session_verrouillee", False) or self.tache is not None:
             return
-        self._importer(filedialog.askopenfilenames(title="XML à importer dans la base", initialdir=generer.DEC,
+        self._importer(filedialog.askopenfilenames(title="XML à importer dans la base", initialdir=espace_travail.dossier_ouverture(),
                                                    filetypes=[("XML", "*.xml")]))
 
     def importer_dossier(self):
         if not IMPORT_ACTIF or getattr(self.app, "session_verrouillee", False) or self.tache is not None:
             return
-        dossier = filedialog.askdirectory(title="Dossier de XML (sous-dossiers inclus)", initialdir=generer.DEC)
+        dossier = filedialog.askdirectory(title="Dossier de XML (sous-dossiers inclus)", initialdir=espace_travail.dossier_ouverture())
         if dossier:
             self._importer(import_references.lister_xml(dossier), nom=dossier)
 
@@ -627,7 +628,7 @@ class PageReferences(ttk.Frame):
             return
         chemin = filedialog.asksaveasfilename(
             title="Exporter les fourchettes", defaultextension=".xlsx", filetypes=[("Excel", "*.xlsx")],
-            initialfile=f"Références {datetime.datetime.now():%Y-%m-%d %H%M}.xlsx")
+            initialfile=f"Références {datetime.datetime.now():%Y-%m-%d %H%M}.xlsx", **espace_travail.options_rapport())
         if not chemin:
             return
         try:
