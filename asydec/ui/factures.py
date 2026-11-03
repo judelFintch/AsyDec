@@ -1,4 +1,5 @@
 """Chargement des modèles Word, émission et téléchargement des factures archivées."""
+import re
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 from pathlib import Path
@@ -11,6 +12,24 @@ AIDE = ('Les factures avec tableau commercial et liste de colisage reconnues son
         'Plaque obligatoire : {{PLAQUE}} (reprise du modèle généré).\n\nFacultatifs : {{NUMERO_MANIFESTE}}, {{DATE_FACTURE}}, {{IMPORTATEUR}}, {{MODELE_ID}}.\n\n'
         'Placez les unités kg et USD à côté des champs. Les champs peuvent se trouver dans les tableaux, '
         'en-têtes et pieds de page. Le modèle original reste intact.')
+
+
+def nom_fichier(modele_id, defaut):
+    """Nom proposé pour le Word : la plaque du camion (« T867DNM-T569DNE.docx »), sinon defaut."""
+    try:
+        from asydec.declarations import modeles_generes
+        plaque = modeles_generes.detail(modele_id).get('plaque')
+    except (OSError, ValueError):
+        plaque = None
+    # Aucune plaque ne peut introduire un chemin : « / » et caractères interdits deviennent « - ».
+    texte = re.sub(r'\s*[<>:"/\\|?*\x00-\x1f\x7f]+\s*', '-', str(plaque or ''))
+    texte = ' '.join(texte.split()).strip(' .-')[:120]
+    return f'{texte or defaut}.docx'
+
+
+def destinataire(gabarit):
+    """Destinataire (Consignee) repéré dans le Word : l'élément qui distingue les modèles entre eux."""
+    return gabarit.get('destinataire') or 'Destinataire non repéré'
 
 
 def retirer(parent, gabarits):
@@ -66,7 +85,8 @@ def ouvrir(parent, app, modele_id):
         contexte.set(f"Plaque du modèle : {d['plaque']}" if d.get('plaque') else
                      'Plaque obligatoire : renseignez-la et enregistrez-la dans Modèles générés avant de créer la facture.')
         modeles = factures.classer_gabarits(factures.lister_modeles(), d)
-        choix['values'] = [f"{'Conseillé : ' if m['propose'] else ''}{m['nom']} (n° {m['id']})" for m in modeles]
+        choix['values'] = [f"{'Conseillé : ' if m['propose'] else ''}{destinataire(m)} — {m['nom']} (n° {m['id']})"
+                           for m in modeles]
         if selection_id is not None:
             choix.set('')
             for i, g in enumerate(modeles):
@@ -120,7 +140,7 @@ def ouvrir(parent, app, modele_id):
 
     def enregistrer(facture, chemin=None):
         chemin = chemin or filedialog.asksaveasfilename(parent=fenetre, title='Enregistrer la facture Word',
-            initialfile=f"{facture['numero']}.docx", defaultextension='.docx',
+            initialfile=nom_fichier(modele_id, facture['numero']), defaultextension='.docx',
             filetypes=[('Document Word', '*.docx')], confirmoverwrite=True, **dossier_factures())
         if chemin:
             try:
@@ -160,7 +180,7 @@ def ouvrir(parent, app, modele_id):
                 if not confirme:
                     return
             chemin = filedialog.asksaveasfilename(parent=fenetre, title='Enregistrer la facture Word',
-                initialfile=f'Facture-modele-{modele_id}.docx', defaultextension='.docx',
+                initialfile=nom_fichier(modele_id, f'Facture-modele-{modele_id}'), defaultextension='.docx',
                 filetypes=[('Document Word', '*.docx')], confirmoverwrite=True, **dossier_factures())
             if not chemin or app.session_verrouillee:
                 return
@@ -238,7 +258,8 @@ class PageBibliothequeFactures(ttk.Frame):
             self.modeles = factures.lister_modeles()
             self.liste.delete(0, 'end')
             for g in self.modeles:
-                self.liste.insert('end', f"{g['nom']} — {'prêt' if g['pret'] else 'champs à configurer'} — {len(g['articles'])} article(s)")
+                self.liste.insert('end', f"{destinataire(g)}   ·   {g['nom']} — "
+                                  f"{'prêt' if g['pret'] else 'champs à configurer'} — {len(g['articles'])} article(s)")
             self.resume.set('Sélectionnez un modèle pour voir son analyse.')
         except Exception as exc:
             messagebox.showerror('Bibliothèque indisponible', str(exc), parent=self)
@@ -262,8 +283,8 @@ class PageBibliothequeFactures(ttk.Frame):
             self.resume.set(f'{len(self.liste.curselection())} modèles sélectionnés.')
             return
         g = self.modeles[self.liste.curselection()[0]]
-        self.resume.set(f"Fournisseur : {g['fournisseur'] or 'non repéré'}\n"
-            f"Destinataire : {g['destinataire'] or 'non repéré'}\n"
+        self.resume.set(f"Destinataire : {g['destinataire'] or 'non repéré'}\n"
+            f"Fournisseur : {g['fournisseur'] or 'non repéré'}\n"
             f"Prix unitaires : par {'kilogramme' if g['prix_base']=='kg' else 'colis'}\n"
             f"Plaque : {'zone prête au remplissage automatique' if g['plaque_prevue'] else 'zone non reconnue ; ajoutez {{PLAQUE}} dans le Word'}\n"
             'Articles : ' + (' ; '.join(g['articles']) or 'non repérés, à vérifier manuellement') +

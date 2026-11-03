@@ -1,4 +1,5 @@
 """Factures Word : modèles archivés et remplacement ciblé des champs OOXML."""
+import calendar
 from contextlib import contextmanager
 from datetime import datetime
 from io import BytesIO
@@ -234,6 +235,19 @@ def lister_modeles(base=None):
         return modeles
 
 
+# Une facture n'est jamais datée du jour de son émission : toujours au moins RECUL_MOIS mois avant.
+RECUL_MOIS = 3
+
+
+def date_facture(jour):
+    """Date imprimée sur la facture : RECUL_MOIS mois avant jour. Un jour absent du mois visé
+    (31 mai -> février) devient le dernier jour de ce mois, ce qui recule encore davantage."""
+    mois = jour.month - RECUL_MOIS
+    annee = jour.year + (mois - 1) // 12
+    mois = (mois - 1) % 12 + 1
+    return jour.replace(year=annee, month=mois, day=min(jour.day, calendar.monthrange(annee, mois)[1]))
+
+
 def generer(modele_id, gabarit_id, auteur, base=None, base_modeles=None, correspondance_confirmee=False):
     from asydec.declarations import modeles_generes
     modele = modeles_generes.detail(modele_id, base=base_modeles)
@@ -246,11 +260,13 @@ def generer(modele_id, gabarit_id, auteur, base=None, base_modeles=None, corresp
     resume = resultat['resume']
     maintenant = datetime.now(ZoneInfo('Africa/Lubumbashi'))
     valeurs = {
-        'DATE_FACTURE': maintenant.strftime('%d/%m/%Y'),
+        'DATE_FACTURE': date_facture(maintenant.date()).strftime('%d/%m/%Y'),
         'POIDS': nombre(resume['poids'], 2), 'FOB': nombre(resume['fob'], 2),
         'COLIS': nombre(sum(resultat.get('colis', resume.get('colis', [])))),
         'IMPORTATEUR': modele['importateur'], 'PLAQUE': modele['plaque'] or '',
         'MODELE_ID': str(modele_id),
+        # La facture commerciale est en FOB : fret et assurance toujours à zéro, total = FOB, sans calcul.
+        'FRET': nombre(0, 2), 'ASSURANCE': nombre(0, 2), 'CIF_USD': nombre(resume['fob'], 2),
     }
     from asydec.declarations.nombres_lettres import nombre as lettres
     valeurs.update(FOB_LETTRES=lettres(resume['fob'], monnaie=True), POIDS_LETTRES=lettres(resume['poids']))
@@ -293,15 +309,12 @@ def generer(modele_id, gabarit_id, auteur, base=None, base_modeles=None, corresp
                 valeurs.update({f'COLIS_{i}': nombre(quantite), f'FOB_{i}': nombre(article['fob'], 2),
                                 f'POIDS_{i}': nombre(article['poids'], 2),
                                 f'PRIX_UNITAIRE_{i}': nombre(article['fob']/(article['poids'] if gabarit['prix_base']=='kg' else quantite), 4)})
-            fret, assurance = resume.get('fret', 0), resume.get('assurance', 0)
-            valeurs.update(FRET=nombre(fret, 2), ASSURANCE=nombre(assurance, 2),
-                           CIF_USD=nombre(resume['fob'] + fret + assurance, 2))
         identifiant = db.execute('INSERT INTO factures(modele_id,gabarit_id,date,auteur) VALUES(?,?,?,?)',
             (modele_id, gabarit_id, maintenant.isoformat(), auteur)).lastrowid
         numero, manifeste = _reserver_numeros(base)
         # Mise à niveau en mémoire des modèles déjà importés, sans fichier intermédiaire.
-        from asydec.declarations.preparer_facture import preparer_manifeste
-        gabarit_contenu = preparer_manifeste(contenu_gabarit)
+        from asydec.declarations.preparer_facture import preparer_lettres, preparer_manifeste
+        gabarit_contenu = preparer_lettres(preparer_manifeste(contenu_gabarit))
         contenu = remplir(gabarit_contenu, dict(valeurs, NUMERO_FACTURE=numero, NUMERO_MANIFESTE=manifeste))
         db.execute('UPDATE factures SET numero=?,manifeste=?,contenu=? WHERE id=?', (numero, manifeste, contenu, identifiant))
     return {'id': identifiant, 'numero': numero, 'manifeste': manifeste, 'contenu': contenu}

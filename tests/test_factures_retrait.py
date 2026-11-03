@@ -77,6 +77,32 @@ class PageRetraitTest(TestCase):
         self.assertIn('2 facture(s) déjà émise(s)', boites.askyesno.call_args[0][1])
         self.assertEqual(page.liste.size(), 1)
 
+    def test_destinataire_affiche_en_premier(self):
+        from asydec.ui import factures as U
+        racine = tk.Tk()
+        racine.withdraw()
+        self.addCleanup(racine.destroy)
+        modeles = [dict(id=1, nom='UMBA TEXTILES', pret=True, articles=['a'] * 8, plaque_prevue=True, champs=[],
+                        fournisseur='UMBA TEXTILES FZC', destinataire='ETS FOURTEEN', prix_base='colis'),
+                   dict(id=2, nom='Autre', pret=False, articles=[], plaque_prevue=True, champs=[],
+                        fournisseur='', destinataire='', prix_base='colis')]
+        with patch.object(U.factures, 'lister_modeles', return_value=modeles):
+            page = U.PageBibliothequeFactures(racine, SimpleNamespace(session_verrouillee=False))
+            page.afficher()
+        self.assertTrue(page.liste.get(0).startswith('ETS FOURTEEN   ·   UMBA TEXTILES'))
+        self.assertTrue(page.liste.get(1).startswith('Destinataire non repéré'))
+        page.liste.selection_set(0)
+        page.analyser()
+        self.assertTrue(page.resume.get().startswith('Destinataire : ETS FOURTEEN'))
+
+    def test_facture_enregistree_au_nom_de_la_plaque(self):
+        from asydec.ui import factures as U
+        cas = {'T867DNM/T569DNE': 'T867DNM-T569DNE.docx', 'T546ECQ / T618ECT': 'T546ECQ-T618ECT.docx',
+               '../etc': 'etc.docx', '': 'CS-322-386.docx', None: 'CS-322-386.docx'}
+        for plaque, attendu in cas.items():
+            with patch('asydec.declarations.modeles_generes.detail', return_value={'plaque': plaque}):
+                self.assertEqual(U.nom_fichier(11, 'CS-322-386'), attendu)
+
     def test_annulation_ne_retire_rien(self):
         from asydec.ui import factures as U
         with patch.object(U.factures, 'factures_emises', return_value={1: 0}), \

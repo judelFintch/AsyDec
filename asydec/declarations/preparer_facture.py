@@ -10,6 +10,10 @@ from zipfile import ZipFile
 from asydec.declarations import factures as F
 
 
+# Montant en lettres : « AMT IN WORDS … UNITED STATES DOLLARS » ou « … US DOLLARS ».
+MONTANT_LETTRES = r'(?i)AMT IN WORDS\s+(.+?)(?=\s+(?:UNITED\s+STATES|U\.?\s?S\.?)\s+DOLLARS)'
+
+
 def paragraphes(doc):
     # Les paragraphes de dessins peuvent être imbriqués dans un paragraphe porteur.
     return [p for p in doc.getElementsByTagNameNS(F.W, 'p')
@@ -104,7 +108,7 @@ def preparer(contenu):
                 (r'(?i)TOTAL\s+AMOUNT\s*:\s*\$\s*(\d[\d ,.]*)', 'CIF_USD', 1),
                 (r'(?i)Insurrance\s*:\s*\$\s*(\d[\d ,.]*)', 'ASSURANCE', 1),
                 (r'(?i)Freight\s*:\s*\$\s*(\d[\d ,.]*)', 'FRET', 1),
-                (r'(?i)AMT IN WORDS\s+(.+?)(?=\s+UNITED STATES DOLLARS)', 'FOB_LETTRES', 1),
+                (MONTANT_LETTRES, 'FOB_LETTRES', 1),
                 (r'(?i)T\. WEIGHT IN WORDS\s+(.+?)(?=\s+KGS)', 'POIDS_LETTRES', 1),
             ]
             for motif, champ, groupe in motifs:
@@ -145,6 +149,30 @@ def preparer_manifeste(contenu):
                     change = True
             if s.strip():
                 precedent = s
+        if not change:
+            return contenu
+        sortie = BytesIO()
+        with ZipFile(sortie, 'w') as cible:
+            for info in archive.infolist():
+                cible.writestr(info, F.serialiser(doc) if info.filename == 'word/document.xml' else archive.read(info.filename))
+        return sortie.getvalue()
+    finally:
+        archive.close()
+
+
+def preparer_lettres(contenu):
+    """Balise le montant en lettres (FOB) resté en texte fixe, y compris dans les modèles déjà
+    importés : sinon la facture garderait le montant d'exemple du Word."""
+    archive, parties = F._parties(contenu)
+    try:
+        doc = parties['word/document.xml']
+        change = False
+        for p in paragraphes(doc):
+            s = texte(p)
+            for m in reversed(list(re.finditer(MONTANT_LETTRES, s))):
+                if m.group(1).strip() != '{{FOB_LETTRES}}':
+                    remplacer(p, m.start(1), m.end(1), '{{FOB_LETTRES}}')
+                    change = True
         if not change:
             return contenu
         sortie = BytesIO()
