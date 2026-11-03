@@ -13,6 +13,30 @@ AIDE = ('Les factures avec tableau commercial et liste de colisage reconnues son
         'en-têtes et pieds de page. Le modèle original reste intact.')
 
 
+def retirer(parent, gabarits):
+    """Demande confirmation puis retire ces modèles de facture de la bibliothèque. Renvoie True si fait."""
+    if not gabarits:
+        messagebox.showinfo('Aucun modèle', 'Sélectionnez le ou les modèles de facture à retirer.', parent=parent)
+        return False
+    try:
+        emises = factures.factures_emises([g['id'] for g in gabarits])
+    except Exception as exc:
+        messagebox.showerror('Retrait impossible', str(exc), parent=parent)
+        return False
+    lignes = [f"• {g['nom']} (n° {g['id']})" + (f" — {emises[g['id']]} facture(s) déjà émise(s)" if emises[g['id']] else '')
+              for g in gabarits]
+    if not messagebox.askyesno('Retirer de la bibliothèque', f'Retirer {len(gabarits)} modèle(s) de facture ?\n\n'
+            + '\n'.join(lignes) + '\n\nIls ne seront plus proposés. Les factures déjà émises restent archivées et '
+            'téléchargeables. Pour réutiliser un modèle, rechargez simplement son fichier Word.', parent=parent):
+        return False
+    try:
+        factures.retirer_modeles([g['id'] for g in gabarits])
+    except Exception as exc:
+        messagebox.showerror('Retrait impossible', str(exc), parent=parent)
+        return False
+    return True
+
+
 def ouvrir(parent, app, modele_id):
     if app.session_verrouillee:
         return
@@ -160,6 +184,16 @@ def ouvrir(parent, app, modele_id):
     boutons.pack(fill='x', pady=8)
     ttk.Button(boutons, text='Charger un modèle Word…', command=importer).pack(side='left')
     ttk.Button(boutons, text='Bibliothèque…', command=lambda: (fenetre.destroy(), app.montrer('factures'))).pack(side='left', padx=4)
+
+    def retirer_choisi():
+        if app.session_verrouillee or not 0 <= choix.current() < len(modeles):
+            return
+        if retirer(fenetre, [modeles[choix.current()]]):
+            choix.set('')
+            statut.set('Modèle de facture retiré de la bibliothèque.')
+            actualiser()
+
+    ttk.Button(boutons, text='Retirer ce modèle…', command=retirer_choisi).pack(side='left', padx=4)
     ttk.Button(boutons, text='Préparer mon modèle…', command=lambda: messagebox.showinfo(
         'Champs de la facture', AIDE, parent=fenetre)).pack(side='left', padx=8)
     ttk.Button(cadre, text='Créer ou télécharger la facture du modèle…', command=generer).pack(anchor='w', pady=8)
@@ -188,7 +222,9 @@ class PageBibliothequeFactures(ttk.Frame):
         ttk.Button(barre, text='Ajouter un modèle Word…', command=self.importer).pack(side='left')
         ttk.Button(barre, text='Actualiser', command=self.afficher).pack(side='left', padx=8)
         ttk.Button(barre, text='Configurer les champs…', command=self.configurer).pack(side='left')
-        self.liste = tk.Listbox(self, height=12, exportselection=False)
+        ttk.Button(barre, text='Retirer de la bibliothèque…', command=self.retirer).pack(side='left', padx=8)
+        ttk.Label(barre, text='⌘-clic ou ⇧-clic : plusieurs modèles').pack(side='left', padx=8)
+        self.liste = tk.Listbox(self, height=12, exportselection=False, selectmode='extended')
         self.liste.pack(fill='both', expand=True)
         self.liste.bind('<<ListboxSelect>>', lambda _e: self.analyser())
         self.resume = tk.StringVar(value='Sélectionnez un modèle pour voir son analyse.')
@@ -211,12 +247,24 @@ class PageBibliothequeFactures(ttk.Frame):
         if not self.app.session_verrouillee and self.liste.curselection():
             configurer(self, self.modeles[self.liste.curselection()[0]]['id'], self.afficher)
 
+    def retirer(self):
+        if self.app.session_verrouillee:
+            return
+        choisis = [self.modeles[i] for i in self.liste.curselection()]
+        if retirer(self, choisis):
+            self.afficher()
+            self.resume.set(f'{len(choisis)} modèle(s) retiré(s) de la bibliothèque. Les factures déjà émises restent archivées.')
+
     def analyser(self):
         if not self.liste.curselection():
+            return
+        if len(self.liste.curselection()) > 1:
+            self.resume.set(f'{len(self.liste.curselection())} modèles sélectionnés.')
             return
         g = self.modeles[self.liste.curselection()[0]]
         self.resume.set(f"Fournisseur : {g['fournisseur'] or 'non repéré'}\n"
             f"Destinataire : {g['destinataire'] or 'non repéré'}\n"
+            f"Prix unitaires : par {'kilogramme' if g['prix_base']=='kg' else 'colis'}\n"
             f"Plaque : {'zone prête au remplissage automatique' if g['plaque_prevue'] else 'zone non reconnue ; ajoutez {{PLAQUE}} dans le Word'}\n"
             'Articles : ' + (' ; '.join(g['articles']) or 'non repérés, à vérifier manuellement') +
             '\nChamps : ' + ', '.join(g['champs']))

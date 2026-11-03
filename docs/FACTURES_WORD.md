@@ -113,3 +113,17 @@ Les associations peuvent être complétées en plusieurs étapes. La génératio
 reste bloquée tant que les champs obligatoires ne sont pas prêts. Seuls les
 textes choisis changent ; les tableaux, images, styles et fichiers d’origine
 restent conservés. Aucun Word intermédiaire n’est créé.
+
+## Variantes de tableaux et prix au kilogramme
+
+L’import reconnaît aussi les colonnes DESCRIPTION, QTY/QUANTITE, UNIT PRICE,
+UNIT KGS PRICE, T. AMOUNT, MONTANT et T. WEIGHT lorsque les valeurs de la liste
+de colisage permettent d’identifier leur fonction. Les totaux BALES et les
+numéros INV N°/Invoice ainsi que les manifestes de formats différents sont
+préparés automatiquement dans les documents reconnus.
+
+Un prix explicitement libellé au kilogramme est calculé comme FOB / poids. Pour
+un en-tête générique, le système compare les prix d’exemple aux poids et colis
+pour repérer la base cohérente. La bibliothèque affiche cette base. Les textes
+AMT IN WORDS et T. WEIGHT IN WORDS repérés sont aussi recalculés en anglais.
+Le texte et la présentation des autres conditions commerciales restent intacts.

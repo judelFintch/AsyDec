@@ -19,7 +19,7 @@ from asydec.formats import nombre
 
 BASE = chemins.DONNEES / 'factures.db'
 W = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'
-CHAMPS = ('NUMERO_FACTURE', 'DATE_FACTURE', 'POIDS', 'COLIS', 'FOB', 'IMPORTATEUR', 'PLAQUE', 'MODELE_ID', 'FRET', 'ASSURANCE', 'CIF_USD', 'NUMERO_MANIFESTE')
+CHAMPS = ('NUMERO_FACTURE', 'DATE_FACTURE', 'POIDS', 'COLIS', 'FOB', 'IMPORTATEUR', 'PLAQUE', 'MODELE_ID', 'FRET', 'ASSURANCE', 'CIF_USD', 'NUMERO_MANIFESTE', 'FOB_LETTRES', 'POIDS_LETTRES')
 OBLIGATOIRES = {'NUMERO_FACTURE', 'POIDS', 'COLIS', 'FOB'}
 BALISE = re.compile(r'\{\{([A-Z_][A-Z_0-9]*)\}\}')
 
@@ -42,8 +42,13 @@ def connexion(base=None):
         ''')
         if 'articles_json' not in {r[1] for r in db.execute('PRAGMA table_info(gabarits)')}:
             db.execute("ALTER TABLE gabarits ADD COLUMN articles_json TEXT NOT NULL DEFAULT '[]'")
+        if 'prix_base' not in {r[1] for r in db.execute('PRAGMA table_info(gabarits)')}:
+            db.execute("ALTER TABLE gabarits ADD COLUMN prix_base TEXT NOT NULL DEFAULT 'colis'")
         if 'manifeste' not in {r[1] for r in db.execute('PRAGMA table_info(factures)')}:
             db.execute('ALTER TABLE factures ADD COLUMN manifeste TEXT')
+        if 'retire' not in {r[1] for r in db.execute('PRAGMA table_info(gabarits)')}:
+            # Date de retrait de la bibliothèque ; NULL = modèle proposé.
+            db.execute('ALTER TABLE gabarits ADD COLUMN retire TEXT')
         with db:
             yield db
     finally:
@@ -133,6 +138,9 @@ def inspecter(contenu, exiger=True):
             for p in doc.getElementsByTagNameNS(W, 'p'):
                 champs.update(BALISE.findall(''.join(_texte(t) for t in _textes(p))))
         manquants = OBLIGATOIRES - champs
+        for champ in ('FOB', 'POIDS', 'COLIS'):
+            if any(re.fullmatch(champ+r'_[1-9][0-9]*', c) for c in champs):
+                manquants.discard(champ)
         inconnus = {c for c in champs if c not in CHAMPS and not re.fullmatch(r'(COLIS|FOB|POIDS|PRIX_UNITAIRE)_[1-9][0-9]*', c)}
         if manquants and exiger:
             raise ValueError('Ajoutez dans votre modèle Word les champs : ' + ', '.join('{{'+c+'}}' for c in sorted(manquants)))
@@ -187,6 +195,8 @@ def importer(chemin, base=None):
     if chemin.suffix.lower() != '.docx':
         raise ValueError('Choisissez un modèle Word .docx.')
     contenu = chemin.read_bytes()
+    from asydec.declarations.preparer_facture import base_prix
+    prix_base = base_prix(contenu)
     descriptions = []
     try:
         inspecter(contenu)
@@ -204,21 +214,23 @@ def importer(chemin, base=None):
     with connexion(base) as db:
         existant = db.execute('SELECT id FROM gabarits WHERE contenu=?', (contenu,)).fetchone()
         if existant:
+            # Le même Word rechargé revient dans la bibliothèque s'il en avait été retiré.
+            db.execute('UPDATE gabarits SET retire=NULL WHERE id=?', (existant['id'],))
             return existant['id']
-        return db.execute('INSERT INTO gabarits(nom,contenu,articles_json) VALUES(?,?,?)',
-            (chemin.stem, contenu, json.dumps(descriptions))).lastrowid
+        return db.execute('INSERT INTO gabarits(nom,contenu,articles_json,prix_base) VALUES(?,?,?,?)',
+            (chemin.stem, contenu, json.dumps(descriptions), prix_base)).lastrowid
 
 
 def lister_modeles(base=None):
     with connexion(base) as db:
         modeles = []
-        for r in db.execute('SELECT id,nom,articles_json,contenu FROM gabarits ORDER BY id DESC'):
+        for r in db.execute('SELECT id,nom,articles_json,contenu,prix_base FROM gabarits WHERE retire IS NULL ORDER BY id DESC'):
             from asydec.declarations.preparer_facture import preparer_plaque
             contenu = preparer_plaque(r['contenu'])
             champs = inspecter(contenu, exiger=False)
             analyse = analyser_gabarit(contenu)
             modeles.append({'id': r['id'], 'nom': r['nom'], 'articles': json.loads(r['articles_json']) or analyse['articles'],
-                            'pret': OBLIGATOIRES.issubset(champs) and 'PLAQUE' in champs, 'champs': sorted(champs), 'plaque_prevue': 'PLAQUE' in champs, 'fournisseur': analyse['fournisseur'], 'destinataire': analyse['destinataire']})
+                            'prix_base': r['prix_base'], 'pret': champs_prets(champs), 'champs': sorted(champs), 'plaque_prevue': 'PLAQUE' in champs, 'fournisseur': analyse['fournisseur'], 'destinataire': analyse['destinataire']})
         return modeles
 
 
@@ -240,6 +252,8 @@ def generer(modele_id, gabarit_id, auteur, base=None, base_modeles=None, corresp
         'IMPORTATEUR': modele['importateur'], 'PLAQUE': modele['plaque'] or '',
         'MODELE_ID': str(modele_id),
     }
+    from asydec.declarations.nombres_lettres import nombre as lettres
+    valeurs.update(FOB_LETTRES=lettres(resume['fob'], monnaie=True), POIDS_LETTRES=lettres(resume['poids']))
     with connexion(base) as db:
         db.execute('BEGIN IMMEDIATE')
         existante = db.execute('SELECT id,numero,manifeste,contenu FROM factures WHERE modele_id=? AND contenu IS NOT NULL ORDER BY id DESC LIMIT 1', (modele_id,)).fetchone()
@@ -256,9 +270,11 @@ def generer(modele_id, gabarit_id, auteur, base=None, base_modeles=None, corresp
                            (manifeste, contenu, facture['id']))
                 facture.update(manifeste=manifeste, contenu=contenu)
             return facture
-        gabarit = db.execute('SELECT contenu,articles_json FROM gabarits WHERE id=?', (gabarit_id,)).fetchone()
+        gabarit = db.execute('SELECT contenu,articles_json,prix_base,retire FROM gabarits WHERE id=?', (gabarit_id,)).fetchone()
         if gabarit is None:
             raise ValueError('Modèle de facture introuvable.')
+        if gabarit['retire']:
+            raise ValueError('Ce modèle de facture a été retiré de la bibliothèque. Rechargez le Word pour l’utiliser à nouveau.')
         from asydec.declarations.preparer_facture import preparer_plaque
         contenu_gabarit = preparer_plaque(gabarit['contenu'])
         if 'PLAQUE' not in inspecter(contenu_gabarit):
@@ -276,7 +292,7 @@ def generer(modele_id, gabarit_id, auteur, base=None, base_modeles=None, corresp
                     raise ValueError('Chaque article doit avoir un nombre de colis positif.')
                 valeurs.update({f'COLIS_{i}': nombre(quantite), f'FOB_{i}': nombre(article['fob'], 2),
                                 f'POIDS_{i}': nombre(article['poids'], 2),
-                                f'PRIX_UNITAIRE_{i}': nombre(article['fob']/quantite, 4)})
+                                f'PRIX_UNITAIRE_{i}': nombre(article['fob']/(article['poids'] if gabarit['prix_base']=='kg' else quantite), 4)})
             fret, assurance = resume.get('fret', 0), resume.get('assurance', 0)
             valeurs.update(FRET=nombre(fret, 2), ASSURANCE=nombre(assurance, 2),
                            CIF_USD=nombre(resume['fob'] + fret + assurance, 2))
@@ -289,6 +305,33 @@ def generer(modele_id, gabarit_id, auteur, base=None, base_modeles=None, corresp
         contenu = remplir(gabarit_contenu, dict(valeurs, NUMERO_FACTURE=numero, NUMERO_MANIFESTE=manifeste))
         db.execute('UPDATE factures SET numero=?,manifeste=?,contenu=? WHERE id=?', (numero, manifeste, contenu, identifiant))
     return {'id': identifiant, 'numero': numero, 'manifeste': manifeste, 'contenu': contenu}
+
+
+def factures_emises(gabarit_ids, base=None):
+    """{identifiant de modèle de facture: nombre de factures déjà émises avec lui}."""
+    ids = [int(i) for i in gabarit_ids]
+    if not ids:
+        return {}
+    with connexion(base) as db:
+        lignes = db.execute(f"SELECT gabarit_id, COUNT(*) n FROM factures WHERE gabarit_id IN ({','.join('?' * len(ids))}) "
+                            'GROUP BY gabarit_id', ids).fetchall()
+    return {i: 0 for i in ids} | {r['gabarit_id']: r['n'] for r in lignes}
+
+
+def retirer_modeles(gabarit_ids, base=None):
+    """Retire des modèles de facture de la bibliothèque : ils ne sont plus proposés. Les factures déjà
+    émises restent archivées et téléchargeables ; recharger le même Word le remet en service.
+    Renvoie le nombre de modèles retirés."""
+    ids = [int(i) for i in gabarit_ids]
+    if not ids:
+        return 0
+    with connexion(base) as db:
+        connus = {r['id'] for r in db.execute(f"SELECT id FROM gabarits WHERE id IN ({','.join('?' * len(ids))})", ids)}
+        if connus != set(ids):
+            raise ValueError('Modèle de facture introuvable : ' + ', '.join(str(i) for i in sorted(set(ids) - connus)))
+        date = datetime.now(ZoneInfo('Africa/Lubumbashi')).isoformat()
+        return db.executemany('UPDATE gabarits SET retire=? WHERE id=? AND retire IS NULL',
+                              [(date, i) for i in ids]).rowcount
 
 
 def lister_factures(modele_id, base=None):
@@ -315,10 +358,10 @@ def analyser_gabarit(contenu):
         from asydec.declarations.preparer_facture import paragraphes, texte
         lignes = [texte(p).strip() for p in paragraphes(parties['word/document.xml']) if texte(p).strip()]
         destinataire = ''
-        for ligne in lignes:
-            match = re.search(r'(?i)Consignee\s*:\s*(.*?)(?:\s+INV\s+NO\s*:|$)', ligne)
+        for i, ligne in enumerate(lignes):
+            match = re.search(r'(?i)(?:Consignee|Consignée|Invoice to)\s*:\s*(.*?)(?:\s+INV\s+(?:NO|N°)\s*:|$)', ligne)
             if match:
-                destinataire = match[1].strip()
+                destinataire = match[1].strip() or (lignes[i+1] if i+1 < len(lignes) else '')
                 break
         articles = []
         for table in parties['word/document.xml'].getElementsByTagNameNS(W, 'tbl'):
@@ -331,7 +374,8 @@ def analyser_gabarit(contenu):
                     articles.append(texte(cells[1]).strip())
             if articles:
                 break
-        return {'fournisseur': lignes[0] if lignes else '', 'destinataire': destinataire, 'articles': articles}
+        fournisseur = next((s for s in lignes if re.search(r'(?i)TEXTILES|GARMENTS.*FZE', s) and not s.upper().startswith('FOR ')), lignes[0] if lignes else '')
+        return {'fournisseur': fournisseur, 'destinataire': destinataire, 'articles': articles}
     finally:
         archive.close()
 
@@ -361,8 +405,8 @@ def classer_gabarits(gabarits, modele):
             if len(fidelites) == nombre_articles and all(f >= .85 for f in fidelites):
                 note, propose = 3 + sum(fidelites)/len(fidelites), True
                 raison = 'Articles correspondants dans le même ordre'
-            destinataire = _normaliser(g.get('destinataire', ''))
-            importateur = _normaliser(modele.get('importateur', ''))
+            destinataire = nom_client(g.get('destinataire', ''))
+            importateur = nom_client(modele.get('importateur', ''))
             if destinataire and importateur and destinataire != importateur:
                 propose = False
                 note = 1
@@ -437,3 +481,14 @@ def configurer_zones(gabarit_id, zones, base=None):
             db.execute('UPDATE gabarits SET contenu=? WHERE id=?', (contenu,gabarit_id))
         finally:
             archive.close()
+
+
+def champs_prets(champs):
+    obligatoires = OBLIGATOIRES | {'PLAQUE'}
+    return all(c in champs or (c in ('FOB','POIDS','COLIS') and
+               any(re.fullmatch(c+r'_[1-9][0-9]*', v) for v in champs)) for c in obligatoires)
+
+
+def nom_client(nom):
+    mots = _normaliser(nom).split()
+    return ''.join(m for m in mots if m not in {'ETS','STE','SOCIETE','ETABLISSEMENT','ETABLISSEMENTS'})
