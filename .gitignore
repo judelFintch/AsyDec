@@ -28,3 +28,22 @@ build/
 dist/
 packaging/*.spec
 asydec/construction.json
+
+# Documents commerciaux, bases et archives privés : ne jamais publier
+*.[dD][oO][cC]
+*.[dD][oO][cC][xX]
+*.[dD][oO][tT][xX]
+*.[pP][dD][fF]
+*.[cC][sS][vV]
+*.[tT][sS][vV]
+*.[dD][bB]
+*.sqlite
+*.sqlite3
+*.db-wal
+*.db-shm
+*.db-journal
+*.zip
+*.p12
+*.pfx
+*.pem
+*.key

@@ -87,16 +87,47 @@ def ecrire_plaque(racine, plaque):
     return plaque
 
 
+def reference_dossier(plaque, date):
+    """Référence de la case 7 : année / 3 chiffres de la première plaque / mois / NCA (ex. 2026/570/11/NCA).
+    Renvoie None si la première plaque n'a pas 3 chiffres."""
+    import re
+    premiere = str(plaque or "").split("/")[0]
+    chiffres = re.search(r"\d{3}", premiere)
+    if not chiffres:
+        return None
+    return f"{date.year}/{chiffres.group()}/{date.month:02d}/NCA"
+
+
+def ecrire_reference(racine, reference):
+    """Inscrit la référence du déclarant (case 7)."""
+    if racine.find("Declarant/Reference/Number") is None:
+        raise ValueError("Le XML de base n'a pas de champ référence (Declarant/Reference/Number) : référence non inscrite.")
+    _ecrire(racine, "Declarant/Reference/Number", reference)
+
+
 def ecrire_importateur(racine, code, bloc):
-    """Inscrit l'importateur comme destinataire, et comme payeur s'il était aussi celui du XML."""
+    """Inscrit l'importateur comme destinataire (case 8) et comme payeur (case 9)."""
     if racine.find("Traders/Consignee/Consignee_code") is None or racine.find("Traders/Consignee/Consignee_name") is None:
         raise ValueError("Le XML de base n'a pas de champ importateur (Traders/Consignee) : importateur non inscrit.")
-    if racine.find("Traders/Financial") is not None and \
-            _txt(racine, "Traders/Financial/Financial_code") == _txt(racine, "Traders/Consignee/Consignee_code"):
-        _ecrire(racine, "Traders/Financial/Financial_code", code)
-        _ecrire(racine, "Traders/Financial/Financial_name", bloc)
     _ecrire(racine, "Traders/Consignee/Consignee_code", code)
     _ecrire(racine, "Traders/Consignee/Consignee_name", bloc)
+    aligner_payeur(racine)
+
+
+def aligner_payeur(racine):
+    """Recopie le NIF et le nom/adresse du destinataire (case 8) dans le payeur (case 9)."""
+    if racine is None or racine.find("Traders/Consignee/Consignee_code") is None:
+        return
+    traders = racine.find("Traders")
+    financier = traders.find("Financial")
+    if financier is None:
+        financier = ET.Element("Financial")
+        position = list(traders).index(traders.find("Consignee")) + 1
+        traders.insert(position, financier)
+    for champ in ("code", "name"):
+        if financier.find(f"Financial_{champ}") is None:
+            ET.SubElement(financier, f"Financial_{champ}")
+        _ecrire(financier, f"Financial_{champ}", racine.findtext(f"Traders/Consignee/Consignee_{champ}") or "")
 
 
 def ecrire_taux(racine, taux):

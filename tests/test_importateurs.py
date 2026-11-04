@@ -87,10 +87,24 @@ class EcritureImportateurTest(unittest.TestCase):
         self.assertEqual(racine.findtext('Traders/Financial/Financial_code'), 'B1')
         self.assertEqual(racine.findtext('Traders/Financial/Financial_name'), 'NOUVEAU\n ADRESSE')
 
-    def test_payeur_tiers_conserve(self):
+    def test_payeur_tiers_remplace_par_l_importateur(self):
         racine = self.racine('T9')
         moteur.ecrire_importateur(racine, 'B1', 'NOUVEAU')
-        self.assertEqual(racine.findtext('Traders/Financial/Financial_code'), 'T9')
+        self.assertEqual(racine.findtext('Traders/Financial/Financial_code'), 'B1')
+        self.assertEqual(racine.findtext('Traders/Financial/Financial_name'), 'NOUVEAU')
+
+    def test_payeur_aligne_sans_changer_d_importateur(self):
+        racine = self.racine('T9')
+        moteur.aligner_payeur(racine)
+        self.assertEqual(racine.findtext('Traders/Financial/Financial_code'), 'A1')
+        self.assertEqual(racine.findtext('Traders/Financial/Financial_name'), 'ANCIEN')
+
+    def test_payeur_absent_cree(self):
+        racine = ET.fromstring('<ASYCUDA><Traders><Consignee><Consignee_code>A1</Consignee_code>'
+                               '<Consignee_name>NOM</Consignee_name></Consignee></Traders></ASYCUDA>')
+        moteur.aligner_payeur(racine)
+        self.assertEqual(racine.findtext('Traders/Financial/Financial_code'), 'A1')
+        self.assertEqual(racine.findtext('Traders/Financial/Financial_name'), 'NOM')
 
     def test_champ_absent_refuse(self):
         with self.assertRaises(ValueError):
@@ -215,6 +229,22 @@ class ChoixDansApplicationTest(unittest.TestCase):
         self.var.set(I.libelle(CHOISI))
         self._ouvrir('ancien.xml')
         self.assertEqual(self.var.get(), IMPORTATEUR_XML)
+
+
+class ReferenceDossierTest(unittest.TestCase):
+    def test_annee_plaque_mois_nca(self):
+        import datetime
+        self.assertEqual(moteur.reference_dossier('T570EMG/T192ESB', datetime.date(2026, 11, 4)), '2026/570/11/NCA')
+        self.assertEqual(moteur.reference_dossier('T 839 ESD', datetime.date(2027, 3, 1)), '2027/839/03/NCA')
+
+    def test_plaque_sans_chiffres(self):
+        import datetime
+        self.assertIsNone(moteur.reference_dossier('ABC/T192ESB', datetime.date(2026, 11, 4)))
+
+    def test_ecriture(self):
+        racine = ET.fromstring('<ASYCUDA><Declarant><Reference><Number>570/10/NCA</Number></Reference></Declarant></ASYCUDA>')
+        moteur.ecrire_reference(racine, '2026/570/11/NCA')
+        self.assertEqual(racine.findtext('Declarant/Reference/Number'), '2026/570/11/NCA')
 
 
 if __name__ == '__main__':

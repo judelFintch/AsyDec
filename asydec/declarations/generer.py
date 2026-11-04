@@ -230,6 +230,14 @@ def produire(base, poids, ratios, table_imp, registre, mode="RATIOS", fob_total=
         info = moteur.infos_dossier(arbre.getroot())
         if plaque != ancienne:
             alertes.append(f"Plaque inscrite dans le XML : {plaque} (XML de base : {ancienne or 'aucune'}).")
+    if arbre.getroot() is not None:
+        # Case 7 : toujours recalculée d'après l'année, la plaque et le mois en cours.
+        reference = moteur.reference_dossier(info["camion"], datetime.date.today())
+        if reference is None:
+            alertes.append(f"Référence (case 7) non inscrite : la plaque {info['camion'] or '(aucune)'} n'a pas 3 chiffres.")
+        elif reference != info["reference"]:
+            moteur.ecrire_reference(arbre.getroot(), reference)
+            info = moteur.infos_dossier(arbre.getroot())
     if importateur and importateur["code"] != info["code"]:
         # Importateur choisi dans la base : il remplace celui du XML de base, qui n'est pas modifié.
         ancien = info["importateur"]
@@ -239,6 +247,7 @@ def produire(base, poids, ratios, table_imp, registre, mode="RATIOS", fob_total=
         alertes.append(f"Importateur inscrit dans le XML : {info['importateur']} (XML de base : {ancien or 'aucun'}).")
     else:
         importateur = None
+        moteur.aligner_payeur(arbre.getroot())
     taux_xml = info.get("taux")
     if taux is not None and float(taux) != taux_xml:
         # Taux saisi : il remplace celui du XML de base, qui n'est pas modifié.
