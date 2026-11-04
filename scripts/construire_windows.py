@@ -23,6 +23,7 @@ def main():
     subprocess.run([
         sys.executable, '-m', 'PyInstaller', '--noconfirm', '--clean', '--windowed',
         '--onedir', '--name', 'AsyDec', '--paths', str(RACINE), '--collect-all', 'sv_ttk',
+        '--collect-all', 'tzdata',
         '--add-data', f'{RACINE}/asydec/construction.json;asydec',
         '--distpath', str(RACINE/'dist'), '--workpath', str(RACINE/'build'),
         '--specpath', str(RACINE/'packaging'), str(RACINE/'packaging/lancer.py')
