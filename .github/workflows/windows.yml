@@ -7,7 +7,7 @@ permissions:
   contents: read
 concurrency:
   group: application-windows
-  cancel-in-progress: false
+  cancel-in-progress: true
 jobs:
   construire:
     runs-on: windows-2022
@@ -30,6 +30,7 @@ jobs:
       - name: Construire le setup
         run: python scripts/construire_windows.py
       - name: Vérifier l’installation et le démarrage
+        timeout-minutes: 3
         shell: pwsh
         run: |
           $destination = Join-Path $env:RUNNER_TEMP 'AsyDec-installation'
@@ -37,8 +38,10 @@ jobs:
           if ($setup.ExitCode -ne 0) { throw "Installation échouée : $($setup.ExitCode)" }
           $env:ASYDEC_HOME = Join-Path $env:RUNNER_TEMP 'asydec-diagnostic'
           $diagnostic = Start-Process -FilePath "$destination/AsyDec.exe" -ArgumentList '--diagnostic' -Wait -PassThru
+          Get-Content (Join-Path $env:ASYDEC_HOME 'diagnostic.log')
           if ($diagnostic.ExitCode -ne 0) { throw 'Diagnostic échoué' }
           $interface = Start-Process -FilePath "$destination/AsyDec.exe" -ArgumentList '--test-interface' -Wait -PassThru
+          Get-Content (Join-Path $env:ASYDEC_HOME 'diagnostic.log')
           if ($interface.ExitCode -ne 0) { throw 'Initialisation interface échouée' }
       - uses: actions/upload-artifact@v4
         with:
