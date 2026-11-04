@@ -18,8 +18,15 @@ jobs:
           python-version: '3.12'
           architecture: x64
       - run: python -m pip install -r requirements.txt 'pyinstaller==6.22.3'
-      - name: Installer Inno Setup
-        run: choco install innosetup --version=6.4.3 --yes --no-progress
+      - name: Vérifier Inno Setup
+        shell: pwsh
+        run: |
+          $compilateur = "${env:ProgramFiles(x86)}/Inno Setup 6/ISCC.exe"
+          if (-not (Test-Path $compilateur)) {
+            choco install innosetup --yes --no-progress
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+          if (-not (Test-Path $compilateur)) { throw 'Compilateur Inno Setup 6 introuvable' }
       - name: Construire le setup
         run: python scripts/construire_windows.py
       - name: Vérifier l’installation et le démarrage
