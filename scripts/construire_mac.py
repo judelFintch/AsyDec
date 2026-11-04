@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 import platform
 import plistlib
+import shutil
 import subprocess
 import sys
 
@@ -38,6 +39,16 @@ def main():
     with plist.open('wb') as f:
         plistlib.dump(info,f)
     subprocess.run(['/usr/bin/codesign','--force','--deep','--sign',os.environ.get('ASYDEC_CODESIGN_IDENTITY','-'),str(app)],check=True)
+    # Image d’installation : glisser AsyDec vers Applications.
+    contenu = RACINE/'build/dmg'
+    if contenu.exists():
+        shutil.rmtree(contenu)
+    contenu.mkdir(parents=True)
+    subprocess.run(['/usr/bin/ditto', str(app), str(contenu/'AsyDec.app')], check=True)
+    (contenu/'Applications').symlink_to('/Applications')
+    dmg = RACINE/f'dist/AsyDec-macos-{arch}.dmg'
+    subprocess.run(['/usr/bin/hdiutil', 'create', '-ov', '-volname', 'AsyDec',
+                    '-srcfolder', str(contenu), '-format', 'UDZO', str(dmg)], check=True)
     archive=RACINE/f'dist/AsyDec-macos-{arch}.zip'
     subprocess.run(['/usr/bin/ditto','-c','-k','--sequesterRsrc','--keepParent',str(app),str(archive)],check=True)
     with archive.open('rb') as f:

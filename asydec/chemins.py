@@ -11,7 +11,9 @@ CODE = Path(__file__).resolve().parent.parent
 COMPILE = bool(getattr(sys, 'frozen', False))
 # L’application peut être remplacée ; les données ne vivent jamais dans le .app.
 RACINE = (Path(os.environ['ASYDEC_HOME']).expanduser() if os.environ.get('ASYDEC_HOME') else
-          Path.home() / 'Library' / 'Application Support' / 'AsyDec' if COMPILE else CODE)
+          (Path(os.environ.get('LOCALAPPDATA', str(Path.home() / 'AppData' / 'Local'))) / 'AsyDec'
+           if sys.platform == 'win32' else Path.home() / 'Library' / 'Application Support' / 'AsyDec')
+          if COMPILE else CODE)
 DEC_FRIPERIE = RACINE.parent
 
 DONNEES = RACINE / 'DONNEES'

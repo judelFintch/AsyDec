@@ -1,0 +1,59 @@
+name: Installateur Windows
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: application-windows
+  cancel-in-progress: false
+jobs:
+  construire:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          architecture: x64
+      - run: python -m pip install -r requirements.txt 'pyinstaller==6.22.3'
+      - name: Installer Inno Setup
+        run: choco install innosetup --version=6.4.3 --yes --no-progress
+      - name: Construire le setup
+        run: python scripts/construire_windows.py
+      - name: Vérifier l’installation et le démarrage
+        shell: pwsh
+        run: |
+          $destination = Join-Path $env:RUNNER_TEMP 'AsyDec-installation'
+          $setup = Start-Process -FilePath 'dist/AsyDec-Setup-windows-x64.exe' -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', "/DIR=`"$destination`"") -Wait -PassThru
+          if ($setup.ExitCode -ne 0) { throw "Installation échouée : $($setup.ExitCode)" }
+          $env:ASYDEC_HOME = Join-Path $env:RUNNER_TEMP 'asydec-diagnostic'
+          $diagnostic = Start-Process -FilePath "$destination/AsyDec.exe" -ArgumentList '--diagnostic' -Wait -PassThru
+          if ($diagnostic.ExitCode -ne 0) { throw 'Diagnostic échoué' }
+          $interface = Start-Process -FilePath "$destination/AsyDec.exe" -ArgumentList '--test-interface' -Wait -PassThru
+          if ($interface.ExitCode -ne 0) { throw 'Initialisation interface échouée' }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-x64
+          path: |
+            dist/AsyDec-Setup-windows-x64.exe
+            dist/AsyDec-windows-x64.json
+  publier:
+    needs: construire
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: windows-x64
+          path: distribution
+      - name: Publier le setup vérifié
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          REVISION: ${{ github.sha }}
+          CONSTRUCTION: ${{ github.run_number }}
+        run: |
+          gh release create "windows-${CONSTRUCTION}" distribution/* --target "$REVISION" --title "AsyDec Windows 1.0.${CONSTRUCTION}" --notes "Installateur Windows x64. Installation et démarrage vérifiés. Révision : ${REVISION}." --latest=false

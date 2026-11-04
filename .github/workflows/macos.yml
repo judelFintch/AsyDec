@@ -36,6 +36,7 @@ jobs:
         with:
           name: macos-${{ matrix.arch }}
           path: |
+            dist/AsyDec-macos-${{ matrix.arch }}.dmg
             dist/AsyDec-macos-${{ matrix.arch }}.zip
             dist/AsyDec-macos-${{ matrix.arch }}.json
   publier:
