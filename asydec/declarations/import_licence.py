@@ -8,10 +8,10 @@ def extraire_champs(texte):
     """Ne propose que les valeurs associées à un libellé ; ambiguïté = saisie manuelle."""
     texte = ''.join(c for c in unicodedata.normalize('NFD', texte) if not unicodedata.combining(c))
     motifs = {
-        'numero_dec': r'(?:n[°ºo]?\s*(?:de\s*)?dec|numero\s*(?:de\s*)?dec|\bdec)\s*[:#=\-]?\s*([A-Z0-9][A-Z0-9/._-]*)',
+        'numero_dec': r'(?:\bn[°ºo]?\s*(?:de\s*)?dec|\bnumero\s*(?:de\s*)?dec|\bdec)\b\s*[:#=\-]?\s*([A-Z0-9][A-Z0-9/._-]*)',
         'numero_validation': r'(?:n[°ºo]?\s*(?:de\s*)?validation|numero\s*(?:de\s*)?validation)(?:\s*(?:de\s*)?(?:la\s*)?licence)?\s*[:#=\-]?\s*([A-Z0-9][A-Z0-9/._-]*)',
-        'date_validation': r'date\s*(?:de\s*)?validation(?:\s*(?:de\s*)?(?:la\s*)?licence)?\s*[:=\-]?\s*(\d{1,2}[/.-]\d{1,2}[/.-]\d{4})',
-        'montant_fob': r'(?<![A-Z])(?:montant\s*)?f\.?o\.?b\.?\s*[:=]?\s*(?:(?:USD|EUR|CDF|\$)\s*)?([0-9][0-9 \u00a0\u202f.,]*)',
+        'date_validation': r'date\s*(?:de\s*)?validation(?:\s*(?:de\s*)?(?:la\s*)?licence)?\s*[:=\-]?\s*(\d{1,2}[/.-]\d{1,2}[/.-]\d{4}|\d{1,2}\s+(?:janvier|fevrier|mars|avril|mai|juin|juillet|aout|septembre|octobre|novembre|decembre)\s+\d{4})',
+        'montant_fob': r'(?<![A-Z])(?:montant\s*)?f\.?o\.?b\.?(?:[ \t]*total[ \t]+a[ \t]+payer(?:[ \t]*/[ \t]*CIF[ \t]+total[ \t]+a[ \t]+payer)?)?\s*[:=]?\s*(?:(?:USD|EUR|CDF|\$)\s*)?([0-9][0-9 \u00a0\u202f.,]*)',
     }
     resultat = {}
     for cle, motif in motifs.items():
@@ -20,7 +20,13 @@ def extraire_champs(texte):
             continue
         valeur = valeurs.pop()
         if cle == 'date_validation':
-            valeur = valeur.replace('-', '/').replace('.', '/')
+            mois = ('janvier', 'fevrier', 'mars', 'avril', 'mai', 'juin',
+                    'juillet', 'aout', 'septembre', 'octobre', 'novembre', 'decembre')
+            parties = valeur.lower().split()
+            if len(parties) == 3 and parties[1] in mois:
+                valeur = f'{int(parties[0]):02d}/{mois.index(parties[1]) + 1:02d}/{parties[2]}'
+            else:
+                valeur = valeur.replace('-', '/').replace('.', '/')
         elif cle == 'montant_fob':
             valeur = re.sub(r'\s', '', valeur)
             if ',' in valeur and '.' in valeur:
@@ -30,6 +36,12 @@ def extraire_champs(texte):
                 # Un séparateur unique peut désigner des milliers ou des décimales.
                 continue
         resultat[cle] = valeur
+    # Modèle IB : le numéro DEC est inclus dans la référence de validation.
+    # Garder la référence complète dans son propre champ.
+    validation = resultat.get('numero_validation', '')
+    dec = re.fullmatch(r'(DEC[0-9]+)-ADD[0-9]+-IB', validation, re.I)
+    if 'numero_dec' not in resultat and dec:
+        resultat['numero_dec'] = dec.group(1)
     return resultat
 
 
