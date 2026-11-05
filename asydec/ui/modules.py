@@ -2,6 +2,7 @@
 from tkinter import ttk
 
 from asydec.ui import theme
+from asydec.ui.documents_finaux import PageDocumentsFinaux
 
 # Les écrans métier existants appartiennent au module Friperie.
 MODULES = (
@@ -9,6 +10,8 @@ MODULES = (
      'Déclarations de friperie, articles, modèles, répartitions et références XML.', 'Ouvrir Friperie'),
     ('divers', 'Divers',
      'Déclarations de marchandises diverses, modèles dynamiques et positions tarifaires reprises du XML.', 'Ouvrir Divers'),
+    ('documents_finaux', 'Documents finaux',
+     'Espace dédié aux documents finaux.', 'Ouvrir Documents finaux'),
 )
 
 

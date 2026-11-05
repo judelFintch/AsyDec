@@ -3,3 +3,7 @@ sv-ttk>=2.6  # facultatif : thème moderne
 certifi>=2024.2
 
 tzdata>=2025.2; sys_platform == "win32"
+
+# Lecture locale des licences PDF et photos (OCR)
+pymupdf>=1.24,<2
+rapidocr-onnxruntime>=1.4,<2

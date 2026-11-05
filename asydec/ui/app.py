@@ -19,7 +19,7 @@ from asydec.systeme import espace_travail
 from asydec.systeme import journal
 from asydec.systeme import rechargement
 from asydec.ui import theme
-from asydec.ui.modules import PageAccueil, PageDivers
+from asydec.ui.modules import PageAccueil, PageDivers, PageDocumentsFinaux
 from asydec.ui.connexion import demander_connexion
 from asydec.ui.etapes import PageArticles, PageDossier, PageVerifier
 from asydec.ui.importateurs import IMPORTATEUR_XML
@@ -101,7 +101,7 @@ class AsyDec(tk.Tk):
         self._base_refs = None  # connexion SQLite des références, ouverte au premier besoin
         self.var_importateur = tk.StringVar(value=IMPORTATEUR_XML)
         self._importateurs = {}
-        for cle, classe in [("accueil", PageAccueil), ("divers", PageDivers), ("dossier", PageDossier), ("articles", PageArticles), ("verifier", PageVerifier),
+        for cle, classe in [("accueil", PageAccueil), ("documents_finaux", PageDocumentsFinaux), ("divers", PageDivers), ("dossier", PageDossier), ("articles", PageArticles), ("verifier", PageVerifier),
                             ("modeles_generes", PageModelesGeneres), ("factures", PageBibliothequeFactures), ("mises_a_jour", PageMisesAJour), ("rapport_comparaisons", PageRapportComparaisons),
                             ("mediatheque", PageMediatheque), ("references", PageReferences),
                             ("repartitions", PageRepartitions), ("ratios", PageRatios), ("etude", PageEtude),
@@ -188,6 +188,9 @@ class AsyDec(tk.Tk):
     def ouvrir_module(self, cle):
         if self.session_verrouillee:
             return
+        if cle == 'documents_finaux':
+            self.montrer(cle)
+            return
         if cle not in ('friperie', 'divers'):
             raise ValueError(f'Module inconnu : {cle}')
         if cle != self.module_travail:
@@ -214,11 +217,14 @@ class AsyDec(tk.Tk):
             cle = "dossier"
         if cle == 'accueil':
             self.module_actif = None
+        elif cle == 'documents_finaux':
+            self.module_actif = 'documents_finaux'
         elif cle == 'divers':
             self.module_actif = 'divers'
         elif cle not in ('parametres', 'factures', 'mises_a_jour'):
             self.module_actif = getattr(self, 'module_travail', 'friperie')
-        self.var_module.set({'friperie': 'Friperie', 'divers': 'Divers'}.get(self.module_actif, 'Modules'))
+        self.var_module.set({'friperie': 'Friperie', 'divers': 'Divers',
+                             'documents_finaux': 'Documents finaux'}.get(self.module_actif, 'Modules'))
         if self.module_actif in ('friperie', 'divers'):
             self.navigation_friperie.pack(fill='both', expand=True)
         else:

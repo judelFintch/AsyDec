@@ -505,3 +505,18 @@ Contrôles effectués, article par article (même code, même désignation, mêm
 - article sans aucune référence → information.
 
 **Important :** c'est une aide à la vigilance, pas une prédiction. Aucune référence n'est encore marquée « acceptée » ou « rejetée » : l'analyse compare donc aux dossiers connus, vérifiés ou non. Elle devient plus juste quand vous marquez les références acceptées (Bibliothèque des références) et quand vous rejetez localement les mauvais modèles en indiquant le motif.
+
+### Documents finaux — licence d’importation
+
+Le formulaire accepte la saisie manuelle ou l’import local d’une licence PDF,
+PNG, JPEG, TIFF ou BMP. Installer les dépendances avec
+`.venv/bin/pip install -r requirements.txt` avant de lancer l’application.
+Les scans et photos passent par une reconnaissance de texte locale, sans envoi
+à un service externe. Après import, compléter les champs non détectés et cocher
+la vérification avec la licence avant de valider. Les valeurs ambiguës restent
+à saisir. Le texte extrait est affiché pour contrôle.
+
+La date du BL est le premier lundi à vendredi entre trois et cinq jours
+calendaires après la date de validation ; les jours fériés ne sont pas exclus.
+Cette première étape ne crée pas encore de numéro de BL et conserve le formulaire
+uniquement pendant la session de l’application.

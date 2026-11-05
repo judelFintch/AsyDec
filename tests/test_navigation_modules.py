@@ -8,7 +8,7 @@ from asydec.ui.app import AsyDec
 
 class NavigationModulesTest(unittest.TestCase):
     def app(self):
-        pages = {cle: Mock() for cle in ('accueil', 'divers', 'dossier', 'repartitions', 'parametres', 'factures')}
+        pages = {cle: Mock() for cle in ('accueil', 'divers', 'documents_finaux', 'dossier', 'repartitions', 'parametres', 'factures')}
         pages['repartitions'].liste.get_children.return_value = ()
         pages['repartitions'].detail.get_children.return_value = ()
         return SimpleNamespace(session_verrouillee=False, base=None, liens={}, pages=pages,
@@ -60,6 +60,18 @@ class NavigationModulesTest(unittest.TestCase):
         AsyDec.ouvrir_module(app, 'divers')
         app.montrer.assert_called_once_with('dossier')
         self.assertEqual(app.module_travail, 'divers')
+
+    def test_documents_finaux_conserve_le_dossier_et_masque_les_outils_metier(self):
+        app = self.app()
+        app.base = '/dossier.xml'
+        app.montrer = lambda cle: AsyDec.montrer(app, cle)
+        AsyDec.ouvrir_module(app, 'documents_finaux')
+        self.assertEqual(app.module_actif, 'documents_finaux')
+        self.assertEqual(app.module_travail, 'friperie')
+        self.assertEqual(app.base, '/dossier.xml')
+        app.var_module.set.assert_called_once_with('Documents finaux')
+        app.navigation_friperie.pack_forget.assert_called_once()
+        app.pages['documents_finaux'].tkraise.assert_called_once()
 
     def test_annulation_changement_module_conserve_le_travail(self):
         app = self.app()

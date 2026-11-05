@@ -25,6 +25,7 @@ def main():
     commande=[sys.executable,'-m','PyInstaller','--noconfirm','--clean','--windowed','--onedir',
         '--name','AsyDec','--osx-bundle-identifier','com.asydec.desktop','--paths',str(RACINE),
         '--collect-all','sv_ttk','--add-data',f'{RACINE}/asydec/construction.json:asydec',
+        '--collect-all','rapidocr_onnxruntime','--collect-all','onnxruntime',
         '--distpath',str(RACINE/'dist'),'--workpath',str(RACINE/'build'),
         '--specpath',str(RACINE/'packaging'),str(RACINE/'packaging/lancer.py')]
     if os.environ.get('ASYDEC_CODESIGN_IDENTITY'):
