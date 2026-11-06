@@ -255,7 +255,7 @@ OUTILS/
 │   ├── calcul/              règles de calcul, sans fichiers ni interface
 │   ├── declarations/        production, étude, comparaison et export des déclarations
 │   ├── references/          base SQLite des XML de référence et catalogue partagé
-│   ├── systeme/             compte local, préférences, remise à zéro, rechargement, journal
+│   ├── systeme/             compte local, préférences, remise à zéro, journal
 │   └── ui/                  interface Tkinter
 ├── tests/                   tests unitaires, un fichier par fonctionnalité
 ├── docs/                    rapports et notes de suivi du projet
@@ -286,7 +286,6 @@ Les données restent à la racine d'`OUTILS` : leurs chemins sont tous définis 
 | `references/import_fond.py` | Import en tâche de fond |
 | `references/catalogue_xml.py` | Médiathèques XML, une par type de dossier |
 | `systeme/gestion_locale.py` | Compte administrateur, préférences, remise à zéro |
-| `systeme/rechargement.py` | Détection d'une nouvelle version du code (bouton « Recharger ») |
 | `systeme/journal.py` | Journal des erreurs ignorées (`DONNEES/asydec.log`) |
 | `systeme/espace_travail.py` | Dossier de travail : organisation, emplacements, copies rangées |
 | `declarations/rangement_existants.py` | Rangement (copie) des fichiers de l'ancienne organisation |
@@ -405,9 +404,9 @@ Dans **Outils → Modèles générés** (liste ou fiche) ou dans **Historique**,
 - **Déjà comparé ?** La colonne **Comparé** indique le nombre de comparaisons et la date de la dernière. La fiche et le PDF du modèle les rappellent, et l'historique nomme chaque fichier comparé avec l'écart du total de la déclaration. La trace est aussi enregistrée quand la comparaison est lancée depuis **Vérifier et générer**, si le XML exporté correspond exactement à un modèle conservé. Le fichier comparé n'est ni copié ni modifié.
 - **Détails des taxes.** Dans la fenêtre de comparaison, **Détails des taxes…** montre chaque ligne de taxe, article par article : base, taux et montant **estimés** (XML généré) et **comparés** (fichier fourni), écart et pourcentage. Suivent un total par code de taxe et les taxes globales. Un taux différent ou une ligne absente d'un côté est signalé ; un total auquel il manque une ligne reste vide plutôt que faux. Le PDF de comparaison contient le même détail.
 
-### Recharger après une mise à jour
+### Mises à jour
 
-Le bandeau du haut contient un bouton **Recharger**. Toutes les 5 secondes, AsyDec vérifie si les fichiers du programme ont changé sur l'ordinateur ; si c'est le cas, « Nouvelle version disponible → » s'affiche à côté du bouton. Après confirmation, AsyDec se ferme proprement (préférences enregistrées, import arrêté, base fermée) puis redémarre sur la nouvelle version ; la connexion est redemandée. Les saisies non enregistrées sont perdues, les XML, modèles et références sont conservés. Pendant un import de références, le rechargement est refusé.
+Les mises à jour viennent **uniquement de GitHub** : seules les versions publiées sur le dépôt sont détectées. Une modification des fichiers sur l'ordinateur n'est jamais signalée comme une nouvelle version. Dans l'application Mac, AsyDec vérifie GitHub au lancement ; « Mise à jour GitHub disponible » s'affiche alors dans le bandeau, et **Mises à jour Mac → Télécharger et installer…** installe la version publiée.
 
 ### Revoir le détail d'un dossier
 
@@ -517,6 +516,88 @@ la vérification avec la licence avant de valider. Les valeurs ambiguës restent
 à saisir. Le texte extrait est affiché pour contrôle.
 
 La date du BL est le premier lundi à vendredi entre trois et cinq jours
-calendaires après la date de validation ; les jours fériés ne sont pas exclus.
-Cette première étape ne crée pas encore de numéro de BL et conserve le formulaire
-uniquement pendant la session de l’application.
+calendaires après la date de validation ; les jours fériés légaux RDC sont exclus.
+Cette première étape ne crée pas encore de numéro de BL. La validation enregistre
+le dossier localement et ramène automatiquement à la liste. Le module s’ouvre
+sur **Licences ouvertes**, qui permet de rechercher puis
+de rouvrir une licence avec ses coordonnées et ses articles, même après un
+redémarrage. Valider de nouveau la même licence met à jour le dossier existant.
+Le bouton **Nouvelle licence** prépare un formulaire vide.
+
+Dans la liste, **Générer XML…** prépare un XML ASYCUDA depuis une licence
+validée et un modèle XML choisi pour sa structure. Les données de l’ancien dossier
+sont vidées. L’export reprend l’importateur, le fournisseur, les numéros licence
+et DEC, les dates, le FOB et tous les articles. Les quantités multipliées par les
+prix unitaires doivent correspondre au FOB. Le fichier est un **XML à compléter** :
+les poids, colis, codes pays/unités, transport, frais, taux, régimes et taxes ne
+sont pas déduits ni calculés à partir de données absentes de la licence. Le calcul
+habituel ne peut être effectué qu’une fois ces informations disponibles.
+
+Dans **Traitement licence → Répartition**, le FOB est divisé en un minimum de
+parts de **120 000 USD maximum** (plafond inclus). Les montants sont égaux à un
+centime près, et leur somme reste exactement celle de la licence. Après calcul,
+un poids identique de **23 000 kg par part** est proposé, modifiable entre
+**22 000 et 24 000 kg** avant confirmation. Il s’agit d’une proposition par part,
+indépendante des prix et sans ratio par article. Le poids total proposé est
+visible avant enregistrement. La répartition est conservée avec la licence ;
+une modification du FOB impose de la recalculer.
+
+Le parcours de traitement suit quatre étapes : **Informations licence**,
+**Répartition et poids**, **Informations déclaration**, puis **Génération XML**.
+L’étape Informations déclaration conserve la référence, la date, le bureau
+douanier, le transport, le manifeste, le BL et les observations. L’accès à cette
+étape nécessite une répartition validée ; la génération XML devient accessible
+après enregistrement de ces informations et reste la dernière étape.
+
+La **date d’enregistrement** est proposée automatiquement depuis la date du BL :
+le dernier jour ouvrable autorisé entre 2 et 3 mois après le BL, sans dépasser
+aujourd’hui ; 1 mois après uniquement en dernier recours, ajusté au prochain
+jour ouvrable. Si même un mois après le BL est
+encore dans le futur, l’enregistrement est bloqué avec une explication. Les mois
+sont calendaires, avec ajustement au dernier jour du mois si nécessaire. La date
+est affichée en lecture seule et recalculée lors de l’enregistrement.
+
+Dans Documents finaux, les dates calculées sont du lundi au vendredi. Les dates
+saisies de validation de licence et de déclaration sont contrôlées : un samedi
+ou un dimanche est refusé, sans modification silencieuse de la date source.
+Le même contrôle est appliqué avant l’export XML. Les jours fériés légaux RDC sont exclus.
+
+
+Dans **Informations déclaration → Numéros et dates**, chaque numéro saisi
+manuellement est placé à côté de sa date automatique : **E / enregistrement**,
+**liquidation / date liquidation**, **Q / quittance**. Les dates de liquidation
+et quittance sont tirées parmi E, E+2 et E+3 jours calendaires, en conservant
+E ≤ liquidation ≤ quittance ≤ aujourd’hui. Les propositions enregistrées ne sont
+pas retirées au hasard à chaque réouverture ; le bouton Reproposer permet un
+nouveau tirage avant validation.
+
+Le calendrier RDC se fonde sur l’ordonnance 23/042 du 30 mars 2023
+(https://droitcongolais.info/files/143.03.23_Ordonnance-du-30-mars-2023_jours-feries.pdf),
+avec report au jour précédent des fériés tombant un dimanche. Le report
+exceptionnel du 19 janvier 2026 est également inclus
+(https://acp.cd/nation/rdc-les-journees-de-vendredi-16-et-lundi-19-janvier-declarees-chomees-et-payees/).
+Les nouvelles fermetures exceptionnelles nécessitent une mise à jour du calendrier.
+
+Chaque part reçoit automatiquement une **paire de plaques proposée**, au format
+`T171EAK/T196EAK`. Les propositions sont distinctes dans la licence, y compris
+pour chaque camion et remorque pris séparément. Elles figurent dans l’aperçu de
+répartition et dans **Répartitions réalisées**, où la recherche accepte aussi
+une plaque. L’enregistrement conserve les propositions ; changer le poids ou
+rouvrir le dossier ne les régénère pas. Les anciennes répartitions sont complétées
+lors de leur consultation.
+
+Les informations de déclaration saisies correspondent à la **première part**.
+Le numéro DEC est commun à la licence. Pour chaque part suivante, les numéros E
+et liquidation augmentent chacun d’un tirage indépendant de **+1 à +6** par
+rapport à la part précédente. Les préfixes, suffixes et zéros initiaux sont
+conservés. Les cinq premières parts partagent le Q saisi ; au-delà, un second
+numéro Q proposé est commun à toutes les parts restantes (deux Q au maximum).
+La liste des répartitions affiche les numéros et leurs dates côte à côte.
+Les numéros dérivés enregistrés restent stables aux réouvertures et à la
+revalidation des mêmes informations initiales.
+
+Avant l’export, l’étape **4 · Mise à jour des répartitions** applique les
+informations saisies à toutes les parts et ouvre la liste de contrôle. Les
+numéros **E, liquidation et Q sont obligatoires**. La génération XML est désormais
+l’étape **5**, accessible uniquement après cette validation. Tout changement des
+données rend la validation précédente caduque jusqu’à une nouvelle mise à jour.

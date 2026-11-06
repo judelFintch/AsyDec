@@ -3,6 +3,8 @@ from pathlib import Path
 import re
 import unicodedata
 
+from asydec.declarations.details_licence import extraire_details
+
 
 def extraire_champs(texte):
     """Ne propose que les valeurs associées à un libellé ; ambiguïté = saisie manuelle."""
@@ -11,6 +13,9 @@ def extraire_champs(texte):
         'numero_dec': r'(?:\bn[°ºo]?\s*(?:de\s*)?dec|\bnumero\s*(?:de\s*)?dec|\bdec)\b\s*[:#=\-]?\s*([A-Z0-9][A-Z0-9/._-]*)',
         'numero_validation': r'(?:n[°ºo]?\s*(?:de\s*)?validation|numero\s*(?:de\s*)?validation)(?:\s*(?:de\s*)?(?:la\s*)?licence)?\s*[:#=\-]?\s*([A-Z0-9][A-Z0-9/._-]*)',
         'date_validation': r'date\s*(?:de\s*)?validation(?:\s*(?:de\s*)?(?:la\s*)?licence)?\s*[:=\-]?\s*(\d{1,2}[/.-]\d{1,2}[/.-]\d{4}|\d{1,2}\s+(?:janvier|fevrier|mars|avril|mai|juin|juillet|aout|septembre|octobre|novembre|decembre)\s+\d{4})',
+        # Rubrique 10.2 du modèle IB : « N° Facture ORD0000013709 » puis « Date Facture 16 Juin 2025 ».
+        'numero_facture': r'\bn[°ºo]?\s*(?:de\s*(?:la\s*)?)?facture\s*[:#=\-]?\s*([A-Z0-9][A-Z0-9/._-]*)',
+        'date_facture': r'date\s*(?:de\s*(?:la\s*)?)?facture\s*[:=\-]?\s*(\d{1,2}[/.-]\d{1,2}[/.-]\d{4}|\d{1,2}\s+(?:janvier|fevrier|mars|avril|mai|juin|juillet|aout|septembre|octobre|novembre|decembre)\s+\d{4})',
         'montant_fob': r'(?<![A-Z])(?:montant\s*)?f\.?o\.?b\.?(?:[ \t]*total[ \t]+a[ \t]+payer(?:[ \t]*/[ \t]*CIF[ \t]+total[ \t]+a[ \t]+payer)?)?\s*[:=]?\s*(?:(?:USD|EUR|CDF|\$)\s*)?([0-9][0-9 \u00a0\u202f.,]*)',
     }
     resultat = {}
@@ -19,7 +24,7 @@ def extraire_champs(texte):
         if len(valeurs) != 1:
             continue
         valeur = valeurs.pop()
-        if cle == 'date_validation':
+        if cle in ('date_validation', 'date_facture'):
             mois = ('janvier', 'fevrier', 'mars', 'avril', 'mai', 'juin',
                     'juillet', 'aout', 'septembre', 'octobre', 'novembre', 'decembre')
             parties = valeur.lower().split()
@@ -51,6 +56,7 @@ def lire_licence(chemin):
     if chemin.suffix.lower() not in ('.pdf', '.png', '.jpg', '.jpeg', '.tif', '.tiff', '.bmp'):
         raise ValueError('Choisissez un PDF ou une photo PNG, JPEG, TIFF ou BMP.')
     moteur = None
+    tableaux = []
 
     def ocr(image):
         nonlocal moteur
@@ -69,6 +75,7 @@ def lire_licence(chemin):
             textes = []
             for page in doc:
                 texte = page.get_text(sort=True)
+                tableaux.extend(t.extract() for t in page.find_tables().tables)
                 # Compléter par OCR si les libellés de la licence ne sont pas exploitables.
                 if len(extraire_champs(texte)) < 4:
                     texte_ocr = ocr(page.get_pixmap(dpi=160, alpha=False).tobytes('png'))
@@ -79,4 +86,6 @@ def lire_licence(chemin):
         texte = ocr(str(chemin))
     if not texte.strip():
         raise ValueError('Aucun texte lisible détecté. Essayez une photo plus nette ou la saisie manuelle.')
-    return extraire_champs(texte), texte
+    valeurs = extraire_champs(texte)
+    valeurs.update(extraire_details(texte, tableaux))
+    return valeurs, texte

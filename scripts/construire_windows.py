@@ -24,6 +24,10 @@ def main():
         sys.executable, '-m', 'PyInstaller', '--noconfirm', '--clean', '--windowed',
         '--onedir', '--name', 'AsyDec', '--paths', str(RACINE), '--collect-all', 'sv_ttk',
         '--collect-all', 'tzdata',
+        *(['--add-data', str(RACINE/'ressources/cvi/CVI-modele.docx')+';ressources/cvi']
+          if (RACINE/'ressources/cvi/CVI-modele.docx').is_file() else []),
+        *(['--add-data', str(RACINE/'ressources/declaration/Declaration-modele.docx')+';ressources/declaration']
+          if (RACINE/'ressources/declaration/Declaration-modele.docx').is_file() else []),
         '--collect-all', 'rapidocr_onnxruntime', '--collect-all', 'onnxruntime',
         '--add-data', f'{RACINE}/asydec/construction.json;asydec',
         '--distpath', str(RACINE/'dist'), '--workpath', str(RACINE/'build'),

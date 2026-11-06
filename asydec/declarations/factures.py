@@ -308,7 +308,8 @@ def generer(modele_id, gabarit_id, auteur, base=None, base_modeles=None, corresp
                     raise ValueError('Chaque article doit avoir un nombre de colis positif.')
                 valeurs.update({f'COLIS_{i}': nombre(quantite), f'FOB_{i}': nombre(article['fob'], 2),
                                 f'POIDS_{i}': nombre(article['poids'], 2),
-                                f'PRIX_UNITAIRE_{i}': nombre(article['fob']/(article['poids'] if gabarit['prix_base']=='kg' else quantite), 4)})
+                                # Prix unitaire = ratio de l'article (FOB ÷ poids en kg), celui du modèle généré.
+                                f'PRIX_UNITAIRE_{i}': nombre(article['fob'] / article['poids'], 4) if article['poids'] else '0'})
         identifiant = db.execute('INSERT INTO factures(modele_id,gabarit_id,date,auteur) VALUES(?,?,?,?)',
             (modele_id, gabarit_id, maintenant.isoformat(), auteur)).lastrowid
         numero, manifeste = _reserver_numeros(base)

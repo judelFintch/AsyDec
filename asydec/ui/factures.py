@@ -72,6 +72,9 @@ def ouvrir(parent, app, modele_id):
     modeles = []
     archives = []
     statut = tk.StringVar()
+    from asydec.systeme import conversion_pdf
+    # Le PDF est fait par Word lui-même (mise en page identique) ; décochée d'office si Word est absent.
+    avec_pdf = tk.BooleanVar(value=conversion_pdf.disponible())
     contexte = tk.StringVar()
     ttk.Label(cadre, textvariable=contexte, wraplength=660).pack(fill='x', pady=4)
     recommandation = tk.StringVar()
@@ -149,6 +152,20 @@ def ouvrir(parent, app, modele_id):
             except OSError as exc:
                 messagebox.showerror('Enregistrement impossible',
                     f'{exc}\nLa facture reste disponible dans les archives ci-dessous.', parent=fenetre)
+                return
+            if avec_pdf.get():
+                # Deuxième temps : la même facture en PDF, convertie par Word, à côté du Word.
+                statut.set('Création du PDF par Microsoft Word…')
+                fenetre.config(cursor='watch')
+                fenetre.update_idletasks()
+                try:
+                    pdf = conversion_pdf.docx_vers_pdf(chemin)
+                    statut.set(f"Facture enregistrée : {chemin}\nPDF : {pdf}")
+                except conversion_pdf.ConversionImpossible as exc:
+                    statut.set(f"Facture enregistrée : {chemin} (sans PDF)")
+                    messagebox.showwarning('PDF non créé', f'{exc}\n\nLa facture Word est bien enregistrée.', parent=fenetre)
+                finally:
+                    fenetre.config(cursor='')
 
     def generer():
         if app.session_verrouillee:
@@ -217,6 +234,10 @@ def ouvrir(parent, app, modele_id):
     ttk.Button(boutons, text='Préparer mon modèle…', command=lambda: messagebox.showinfo(
         'Champs de la facture', AIDE, parent=fenetre)).pack(side='left', padx=8)
     ttk.Button(cadre, text='Créer ou télécharger la facture du modèle…', command=generer).pack(anchor='w', pady=8)
+    ttk.Checkbutton(cadre, variable=avec_pdf,
+                    text='Créer aussi le PDF (même mise en page, converti par Microsoft Word)'
+                    if conversion_pdf.disponible() else 'Créer aussi le PDF (Microsoft Word absent sur ce poste)',
+                    state='normal' if conversion_pdf.disponible() else 'disabled').pack(anchor='w')
     ttk.Label(cadre, text='Factures archivées pour ce modèle').pack(anchor='w', pady=(12, 4))
     liste = tk.Listbox(cadre, height=8, exportselection=False)
     liste.pack(fill='both', expand=True)
@@ -285,7 +306,7 @@ class PageBibliothequeFactures(ttk.Frame):
         g = self.modeles[self.liste.curselection()[0]]
         self.resume.set(f"Destinataire : {g['destinataire'] or 'non repéré'}\n"
             f"Fournisseur : {g['fournisseur'] or 'non repéré'}\n"
-            f"Prix unitaires : par {'kilogramme' if g['prix_base']=='kg' else 'colis'}\n"
+            "Prix unitaires : ratio de chaque article (FOB ÷ poids en kg)\n"
             f"Plaque : {'zone prête au remplissage automatique' if g['plaque_prevue'] else 'zone non reconnue ; ajoutez {{PLAQUE}} dans le Word'}\n"
             'Articles : ' + (' ; '.join(g['articles']) or 'non repérés, à vérifier manuellement') +
             '\nChamps : ' + ', '.join(g['champs']))

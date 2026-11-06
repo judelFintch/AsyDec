@@ -88,6 +88,7 @@ class AsyDec(tk.Tk):
         self._catalogue_articles = None
         self.module_actif = None
         self.module_travail = "friperie"
+        espace_travail.definir_module("friperie")
 
         self._bandeau()
         corps = tk.Frame(self, bg=theme.FOND)
@@ -122,12 +123,25 @@ class AsyDec(tk.Tk):
         self.bind_all('<ButtonPress>', self._activite, add='+')
         self.bind_all('<Motion>', self._activite, add='+')
         self._minuteur_session = self.after(1000, self._surveiller_session)
-        self._minuteur_code = self.after(5000, self._surveiller_code)
+        if not chemins.COMPILE:  # sources : surveiller les modifications locales du code
+            self._minuteur_code = self.after(5000, self._surveiller_code)
         if chemins.COMPILE:
             self.after(3000, lambda: self.pages['mises_a_jour'].verifier(discret=True))
         if erreur_reglages:
             self.after_idle(lambda: messagebox.showwarning('Paramètres à vérifier', erreur_reglages, parent=self))
-        elif espace_travail.racine() is None:
+        elif espace_travail.racine() is not None:
+            # Organisation par module : migre l'ancienne arborescence et crée les dossiers manquants.
+            try:
+                migration = espace_travail.migrer(espace_travail.racine())
+                espace_travail.preparer(espace_travail.racine())
+            except (OSError, ValueError) as exc:
+                self.after_idle(lambda e=exc: messagebox.showwarning('Dossier de travail', f'Organisation des dossiers incomplète : {e}', parent=self))
+            else:
+                if migration['conflits']:
+                    noms = '\n'.join(espace_travail.relatif(c) for c in migration['conflits'][:10])
+                    self.after_idle(lambda: messagebox.showwarning('Dossier de travail',
+                        'Ces éléments existaient déjà dans les nouveaux dossiers et sont restés à leur place :\n\n' + noms, parent=self))
+        if not erreur_reglages and espace_travail.racine() is None:
             # Premier lancement : où ranger les fichiers produits ? (reposée tant qu'aucun dossier n'est choisi)
             self.after(400, self.choisir_espace_travail)
 
@@ -138,8 +152,12 @@ class AsyDec(tk.Tk):
         tk.Label(bandeau, text="AsyDec", font=(theme.POLICE, 17, "bold"), fg="white",
                  bg=theme.TEXTE).pack(side="left")
         theme.bouton(bandeau, 'Verrouiller', self.verrouiller).pack(side='right', padx=4)
-        self.recharger_bouton = theme.bouton(bandeau, 'Recharger', self.recharger)
-        self.recharger_bouton.pack(side='right', padx=4)
+        if not chemins.COMPILE:  # l'application compilée se met à jour uniquement depuis GitHub
+            self.recharger_bouton = theme.bouton(bandeau, 'Recharger', self.recharger)
+            self.recharger_bouton.pack(side='right', padx=4)
+        if chemins.DEV:
+            tk.Label(bandeau, text='MODE DEV', font=(theme.POLICE, 11, 'bold'), fg='#F87171',
+                     bg=theme.TEXTE).pack(side='left', padx=12)
         self.var_version = tk.StringVar(value='')
         tk.Label(bandeau, textvariable=self.var_version, font=(theme.POLICE, 12, 'bold'), fg='#FBBF24',
                  bg=theme.TEXTE).pack(side='right', padx=8)
@@ -197,6 +215,7 @@ class AsyDec(tk.Tk):
             if self.base and not self.fermer_dossier():
                 return
             self.module_travail = cle
+            espace_travail.definir_module(cle)
             repartitions = self.pages['repartitions']
             repartitions.propositions, repartitions.deja_vues = [], {}
             repartitions.liste.delete(*repartitions.liste.get_children())
@@ -629,7 +648,7 @@ class AsyDec(tk.Tk):
 
     def _surveiller_session(self):
         self._minuteur_session = None
-        minutes = self.reglages['verrouillage_minutes']
+        minutes = 0 if chemins.DEV else self.reglages['verrouillage_minutes']
         if not self.session_verrouillee and minutes and time.monotonic()-self.derniere_activite >= minutes*60:
             self.verrouiller()
         if not self._fermeture:
@@ -639,7 +658,7 @@ class AsyDec(tk.Tk):
         """Toutes les 5 s, dans le fil Tkinter : signale qu'une nouvelle version est sur le disque."""
         self._minuteur_code = None
         if rechargement.empreinte() != self._empreinte_code:
-            self.var_version.set('Nouvelle version disponible →')
+            self.var_version.set('Nouvelle version locale →')
         if not self._fermeture:
             self._minuteur_code = self.after(5000, self._surveiller_code)
 
@@ -647,7 +666,7 @@ class AsyDec(tk.Tk):
         """Ferme proprement (préférences, import, base) puis main() relance le programme."""
         if self.session_verrouillee:
             return
-        if not messagebox.askyesno('Recharger AsyDec',
+        if not chemins.DEV and not messagebox.askyesno('Recharger AsyDec',
                 'Recharger la version du programme présente sur cet ordinateur ?\n\n'
                 'Les saisies et simulations non enregistrées seront perdues. Les XML, modèles '
                 'et références déjà enregistrés sont conservés. La connexion sera redemandée.', parent=self):
@@ -690,7 +709,10 @@ def main():
         proposer()
     journal.activer()
     while True:
-        utilisateur = demander_connexion()
+        if chemins.DEV and local.compte_existe():
+            utilisateur = local.identifiant_compte()  # mode dev : session ouverte sans mot de passe
+        else:
+            utilisateur = demander_connexion()
         if utilisateur is None:
             return
         app = AsyDec(utilisateur)
@@ -698,7 +720,7 @@ def main():
         if getattr(app, 'rechargement', False) is True:  # booléen strict : jamais de relance implicite
             # Nouveau processus : tous les modules sont relus depuis le disque.
             commande = rechargement.commande()
-            os.chdir(chemins.RACINE)
+            os.chdir(chemins.CODE)
             os.execv(commande[0], commande)
         if not app.reconnexion:
             return

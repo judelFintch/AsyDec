@@ -1,9 +1,9 @@
-"""Détection d'une nouvelle version du code sur le disque, pour le bouton « Recharger »."""
+"""Détection d'une nouvelle version du code sur le disque, pour le bouton « Recharger » (sources uniquement)."""
 import sys
 
 from asydec import chemins
 
-PAQUET = chemins.RACINE / 'asydec'
+PAQUET = chemins.CODE / 'asydec'
 
 
 def empreinte(racine=PAQUET):
@@ -23,5 +23,5 @@ def empreinte(racine=PAQUET):
 
 
 def commande():
-    """Arguments de relance : même interpréteur, paquet principal (à lancer depuis chemins.RACINE)."""
+    """Arguments de relance : même interpréteur, paquet principal (à lancer depuis chemins.CODE)."""
     return [sys.executable] if getattr(sys, 'frozen', False) else [sys.executable, '-m', 'asydec']

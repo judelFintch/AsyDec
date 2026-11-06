@@ -9,6 +9,8 @@ import sys
 
 CODE = Path(__file__).resolve().parent.parent
 COMPILE = bool(getattr(sys, 'frozen', False))
+# Mode développeur (sources seulement, ASYDEC_DEV=1) : pas de mot de passe ni de verrouillage auto.
+DEV = not COMPILE and os.environ.get('ASYDEC_DEV') == '1'
 # L’application peut être remplacée ; les données ne vivent jamais dans le .app.
 RACINE = (Path(os.environ['ASYDEC_HOME']).expanduser() if os.environ.get('ASYDEC_HOME') else
           (Path(os.environ.get('LOCALAPPDATA', str(Path.home() / 'AppData' / 'Local'))) / 'AsyDec'
@@ -20,6 +22,9 @@ DONNEES = RACINE / 'DONNEES'
 CONFIG_LOCAL = RACINE / 'CONFIG_LOCAL'
 SAUVEGARDES = RACINE / 'SAUVEGARDES'
 MODELES_XML = RACINE / 'MODELES_XML'
+# Vraies déclarations de licence (SYDONIA) servant de base aux XML complets des licences ; séparées de la
+# bibliothèque friperie pour ne jamais être tirées dans les variantes friperie.
+XML_LICENCES = RACINE / 'XML_LICENCES'
 ETUDES_XML = RACINE / 'ETUDES_XML'
 SIMULATIONS = RACINE / 'SIMULATIONS'
 SAISIE = RACINE / 'SAISIE.xlsx'

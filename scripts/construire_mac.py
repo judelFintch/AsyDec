@@ -25,6 +25,10 @@ def main():
     commande=[sys.executable,'-m','PyInstaller','--noconfirm','--clean','--windowed','--onedir',
         '--name','AsyDec','--osx-bundle-identifier','com.asydec.desktop','--paths',str(RACINE),
         '--collect-all','sv_ttk','--add-data',f'{RACINE}/asydec/construction.json:asydec',
+        *(['--add-data', str(RACINE/'ressources/cvi/CVI-modele.docx')+':ressources/cvi']
+          if (RACINE/'ressources/cvi/CVI-modele.docx').is_file() else []),
+        *(['--add-data', str(RACINE/'ressources/declaration/Declaration-modele.docx')+':ressources/declaration']
+          if (RACINE/'ressources/declaration/Declaration-modele.docx').is_file() else []),
         '--collect-all','rapidocr_onnxruntime','--collect-all','onnxruntime',
         '--distpath',str(RACINE/'dist'),'--workpath',str(RACINE/'build'),
         '--specpath',str(RACINE/'packaging'),str(RACINE/'packaging/lancer.py')]
@@ -36,7 +40,10 @@ def main():
     plist=app/'Contents/Info.plist'
     with plist.open('rb') as f:
         info=plistlib.load(f)
-    info.update(CFBundleShortVersionString=meta['version'],CFBundleVersion=meta['version'])
+    info.update(CFBundleShortVersionString=meta['version'],CFBundleVersion=meta['version'],
+                # Sans cette phrase, macOS refuse sans rien demander le pilotage de Word (PDF des factures).
+                NSAppleEventsUsageDescription='AsyDec utilise Microsoft Word pour créer le PDF de vos factures '
+                                              'et documents, avec la même mise en page que le Word.')
     with plist.open('wb') as f:
         plistlib.dump(info,f)
     subprocess.run(['/usr/bin/codesign','--force','--deep','--sign',os.environ.get('ASYDEC_CODESIGN_IDENTITY','-'),str(app)],check=True)

@@ -498,11 +498,12 @@ class PageHistorique(ttk.Frame):
         resultats = []
         modules = modeles_generes.modules_exports()
         module = getattr(self.app, 'module_travail', 'friperie')
-        # Dossier de travail (1 - IMPORTATEURS/<IMP>/2 - DECLARATIONS GENEREES), puis ancienne organisation.
+        # Dossier de travail (1 - FRIPERIE et 2 - DIVERS /<IMP>/2 - DECLARATIONS GENEREES), puis ancienne organisation.
         emplacements = []
         racine = espace_travail.racine()
         if racine is not None:
-            emplacements.append((racine / espace_travail.IMPORTATEURS, espace_travail.RANGEMENT["historique"]))
+            for dossier_module in (espace_travail.FRIPERIE, espace_travail.DIVERS):
+                emplacements.append((racine / dossier_module, espace_travail.RANGEMENT["historique"]))
         emplacements.append((Path(generer.DEC), espace_travail.ANCIEN_RANGEMENT["historique"]))
         vus = set()
         for parent, sous_dossier in emplacements:

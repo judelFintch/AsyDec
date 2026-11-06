@@ -18,6 +18,7 @@ import tempfile
 import xml.etree.ElementTree as ET
 
 from asydec import chemins
+from asydec.systeme import espace_travail
 from asydec.calcul import moteur
 from asydec.calcul import variantes
 from asydec.declarations import comparaison_prediction
@@ -420,7 +421,7 @@ def declarations_comparees(base=None, module=None):
             continue
         try:
             infos = json.loads(t['detail'])
-            chemin, attendu = Path(infos['fichier']), infos['sha256']
+            chemin, attendu = Path(espace_travail.chemin_actuel(infos['fichier'])), infos['sha256']
             if attendu in vus or _sha(chemin.read_bytes()) != attendu:
                 continue
         except (ValueError, KeyError, TypeError, OSError):
@@ -439,7 +440,7 @@ def observations_reelles(base=None, module=None, connues=()):
         if d['sha256'] in connues:
             continue
         try:
-            donnees = extraire(Path(d['chemin']).read_bytes())
+            donnees = extraire(Path(espace_travail.chemin_actuel(d['chemin'])).read_bytes())
         except (ValueError, OSError):
             continue
         devise = donnees['document']['devise'] or 'NON RENSEIGNEE'
@@ -476,13 +477,14 @@ def declarations_reelles(base=None, module=None):
     for l in lignes:
         if l['sha256'] in vus or (module is not None and l['module'] != module):
             continue
+        chemin = espace_travail.chemin_actuel(l['chemin'])
         try:
-            if _sha(Path(l['chemin']).read_bytes()) != l['sha256']:
+            if _sha(Path(chemin).read_bytes()) != l['sha256']:
                 continue
         except OSError:
             continue
         vus.add(l['sha256'])
-        sortie.append({'chemin': l['chemin'], 'nom': l['nom'], 'sha256': l['sha256'], 'modele': None,
+        sortie.append({'chemin': chemin, 'nom': l['nom'], 'sha256': l['sha256'], 'modele': None,
                        'date_utc': l['date_utc']})
     return sortie
 
@@ -512,7 +514,7 @@ def taux_taxes_globales(base=None, module=None):
     observations = []
     for d in declarations_reelles(base=base, module=module):
         try:
-            v = extraire(Path(d['chemin']).read_bytes())['valorisation']
+            v = extraire(Path(espace_travail.chemin_actuel(d['chemin'])).read_bytes())['valorisation']
             cif, globales = Decimal(v['cif_total']), Decimal(v['taxes_globales'])
         except (ValueError, OSError, TypeError, ArithmeticError):
             continue
@@ -665,7 +667,7 @@ class ErreurSuiviExport(OSError):
 
 def _chemin_export(detail_):
     try:
-        return json.loads(detail_)['chemin'] if detail_ else ''
+        return espace_travail.chemin_actuel(json.loads(detail_)['chemin']) if detail_ else ''
     except (ValueError, KeyError, TypeError):
         return ''
 
@@ -918,7 +920,7 @@ def detail_taxes_modele(d, base=None):
     if enregistre.get('taxes_detail'):
         return enregistre['taxes_detail'], f'Estimé face au XML comparé {nom} (détail enregistré lors de la comparaison).'
     try:
-        octets = Path(infos['fichier']).read_bytes()
+        octets = Path(espace_travail.chemin_actuel(infos['fichier'])).read_bytes()
     except OSError:
         return estime_seul(f'Estimé seul : le XML comparé {nom} est introuvable (déplacé ou supprimé).')
     if _sha(octets) != infos['sha256']:

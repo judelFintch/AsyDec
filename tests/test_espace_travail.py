@@ -42,11 +42,55 @@ class ChoixTest(EspaceTest):
     def test_definir_cree_l_arborescence(self):
         racine = E.definir(self.travail)
         self.assertEqual(E.racine(), racine)
-        for nom in (E.IMPORTATEURS, E.RAPPORTS, E.A_TRIER, E.SAUVEGARDES, 'LISEZMOI.txt'):
+        for nom in E.DOSSIERS + ('LISEZMOI.txt',):
             self.assertTrue((racine / nom).exists(), nom)
         E.definir(self.travail)  # à nouveau : rien n'est effacé ni dupliqué
-        self.assertEqual(sorted(p.name for p in racine.iterdir()),
-                         sorted([E.IMPORTATEURS, E.RAPPORTS, E.A_TRIER, E.SAUVEGARDES, 'LISEZMOI.txt']))
+        self.assertEqual(sorted(p.name for p in racine.iterdir()), sorted(E.DOSSIERS + ('LISEZMOI.txt',)))
+
+    def test_migration_de_l_ancienne_organisation(self):
+        ancien = self.travail / '1 - IMPORTATEURS' / 'KDMETA' / '3 - XML VALIDES'
+        ancien.mkdir(parents=True)
+        (ancien / 'a.xml').write_text('<ASYCUDA/>')
+        (self.travail / '2 - RAPPORTS' / '2026-11').mkdir(parents=True)
+        (self.travail / '4 - SAUVEGARDES').mkdir()
+        (self.travail / 'LISEZMOI.txt').write_text('AsyDec — dossier de travail\nancien', encoding='utf-8')
+        ancien_chemin = str(ancien / 'a.xml')
+        racine = E.definir(self.travail)
+        nouveau = racine / E.FRIPERIE / 'KDMETA' / '3 - XML VALIDES' / 'a.xml'
+        self.assertTrue(nouveau.is_file())
+        self.assertFalse((racine / '1 - IMPORTATEURS').exists())
+        self.assertTrue((racine / E.RAPPORTS / '2026-11').is_dir())
+        self.assertEqual(sorted(p.name for p in racine.iterdir()), sorted(E.DOSSIERS + ('LISEZMOI.txt',)))
+        self.assertIn('3 - DOCUMENTS FINAUX', (racine / 'LISEZMOI.txt').read_text(encoding='utf-8'))
+        # Chemin enregistré avant la migration : retrouvé au nouvel emplacement.
+        self.assertEqual(Path(E.chemin_actuel(ancien_chemin)).resolve(), nouveau.resolve())
+        self.assertEqual(E.chemin_actuel('/nulle/part/1 - IMPORTATEURS/x.xml'), '/nulle/part/1 - IMPORTATEURS/x.xml')
+
+    def test_migration_sans_ecraser_en_cas_de_conflit(self):
+        (self.travail / '1 - IMPORTATEURS' / 'KDMETA').mkdir(parents=True)
+        (self.travail / '1 - IMPORTATEURS' / 'AUTRE').mkdir()
+        (self.travail / E.FRIPERIE / 'KDMETA').mkdir(parents=True)
+        resultat = E.migrer(self.travail)
+        self.assertEqual([c.name for c in resultat['conflits']], ['KDMETA'])
+        self.assertTrue((self.travail / E.FRIPERIE / 'AUTRE').is_dir())
+        self.assertTrue((self.travail / '1 - IMPORTATEURS' / 'KDMETA').is_dir())
+
+    def test_rangement_par_module_et_dossier_dec(self):
+        racine = E.definir(self.travail)
+        self.addCleanup(E.definir_module, 'friperie')
+        E.definir_module('divers')
+        self.assertEqual(Path(generer.dossier_rangement('SOCIETE K.D.META', 'pdf')), racine / E.DIVERS / 'KDMETA' / '5 - PDF')
+        E.definir_module('friperie')
+        self.assertEqual(Path(generer.dossier_rangement('SOCIETE K.D.META', 'pdf')), racine / E.FRIPERIE / 'KDMETA' / '5 - PDF')
+        dossier = E.dossier_dec('DEC1710304')
+        self.assertEqual(dossier, racine / E.DOCUMENTS_FINAUX / 'DEC1710304')
+        self.assertEqual(sorted(p.name for p in dossier.iterdir()), sorted(E.RANGEMENT_DEC.values()))
+        source = self.temp / 'licence.pdf'
+        source.write_bytes(b'%PDF')
+        range = E.ranger_dans_dec(source, 'DEC1710304', 'licence')
+        self.assertEqual(range, dossier / '1 - LICENCE' / 'licence.pdf')
+        self.assertEqual(E.ranger_dans_dec(source, 'DEC1710304', 'licence'), range)  # pas de doublon
+        self.assertRaises(ValueError, E.dossier_dec, '  ')
 
     def test_dossier_du_logiciel_refuse(self):
         self.assertRaisesRegex(ValueError, 'en dehors du logiciel', E.definir, chemins.RACINE / 'travail')
@@ -178,3 +222,21 @@ class FenetresTest(EspaceTest):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class ArchiveDecTest(EspaceTest):
+    def test_dossier_dec_deplace_jamais_efface(self):
+        self.assertIsNone(E.archiver_dossier_dec('DEC1'))   # pas de dossier de travail
+        E.definir(self.travail)
+        self.assertIsNone(E.archiver_dossier_dec('DEC1'))   # pas encore de dossier DEC
+        (E.dossier_dec('DEC1', 'licence') / 'licence.pdf').write_bytes(b'pdf')
+        (E.dossier_dec('DEC1', 'xml_sydonia') / 'reel.xml').write_text('<ASYCUDA/>')
+        archive = E.archiver_dossier_dec('DEC1', garder=('licence',))
+        self.assertEqual(archive.parent, E.racine() / E.SAUVEGARDES / E.LICENCES_SUPPRIMEES)
+        self.assertTrue((archive / '3 - XML SYDONIA' / 'reel.xml').is_file())     # rien n'est perdu
+        # Nouveau dossier DEC : propre, avec seulement la licence recopiée.
+        self.assertTrue((E.dossier_dec('DEC1', 'licence') / 'licence.pdf').is_file())
+        self.assertEqual(list(E.dossier_dec('DEC1', 'xml_sydonia').iterdir()), [])
+        # Deuxième suppression la même minute : nom distinct.
+        self.assertNotEqual(E.archiver_dossier_dec('DEC1'), archive)
+        self.assertFalse(E.dossier_dec('DEC1', creer=False).exists())

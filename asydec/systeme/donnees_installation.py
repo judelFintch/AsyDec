@@ -6,7 +6,7 @@ import shutil
 import sqlite3
 import tempfile
 
-ELEMENTS = ('DONNEES','CONFIG_LOCAL','SAUVEGARDES','MODELES_XML','ETUDES_XML','SIMULATIONS','SAISIE.xlsx','registre.json')
+ELEMENTS = ('DONNEES','CONFIG_LOCAL','SAUVEGARDES','MODELES_XML','XML_LICENCES','ETUDES_XML','SIMULATIONS','SAISIE.xlsx','registre.json')
 
 
 def importer(source, destination):

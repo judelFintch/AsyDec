@@ -3,17 +3,25 @@ from datetime import date, timedelta
 from decimal import Decimal
 
 from asydec.declarations.documents_finaux import preparer_licence
+from asydec.declarations.dates_documents import est_ouvrable
 
 
 class LicenceTest(unittest.TestCase):
     def test_fenetre_sur_toute_une_annee(self):
         for jour in range(366):
             depart = date(2028, 1, 1) + timedelta(days=jour)
+            if not est_ouvrable(depart):
+                continue
+            candidats = [depart + timedelta(days=d) for d in (3,4,5)]
+            if not any(est_ouvrable(c) for c in candidats):
+                with self.assertRaisesRegex(ValueError, 'Aucune date BL'):
+                    preparer_licence('DEC', '100', 'VAL', depart.strftime('%d/%m/%Y'))
+                continue
             resultat = preparer_licence(' DEC-1 ', '12 345,67', ' VAL-9 ', depart.strftime('%d/%m/%Y'))
             self.assertIn(resultat['delai'], (3, 4, 5))
-            self.assertLess(resultat['date_bl'].weekday(), 5)
+            self.assertTrue(est_ouvrable(resultat['date_bl']))
             for delai in range(3, resultat['delai']):
-                self.assertGreaterEqual((depart + timedelta(days=delai)).weekday(), 5)
+                self.assertFalse(est_ouvrable(depart + timedelta(days=delai)))
             self.assertEqual(resultat['montant_fob'], Decimal('12345.67'))
 
     def test_samedi_reporte_au_lundi_annee_suivante(self):
@@ -29,3 +37,8 @@ class LicenceTest(unittest.TestCase):
             valeurs.update(modifications)
             with self.subTest(modifications=modifications), self.assertRaises(ValueError):
                 preparer_licence(**valeurs)
+
+    def test_date_licence_weekend_refusee_sans_modification(self):
+        for jour in ('07/11/2026', '08/11/2026'):
+            with self.assertRaisesRegex(ValueError, 'jour ouvrable'):
+                preparer_licence('DEC', '100', 'VAL', jour)

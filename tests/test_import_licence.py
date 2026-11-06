@@ -11,7 +11,8 @@ class ExtractionTest(unittest.TestCase):
 
     def test_ambiguite_non_inventee(self):
         resultat = extraire_champs('DEC : ABC\nDEC : DEF\nFOB : 1,234\nDate facture : 05/11/2026')
-        self.assertEqual(resultat, {})
+        # La date de facture n'est jamais prise pour la date de validation.
+        self.assertEqual(resultat, {'date_facture': '05/11/2026'})
 
     def test_fob_francais_et_libelle_suivi_sur_autre_ligne(self):
         self.assertEqual(extraire_champs('FOB : 12.345,67\nNuméro de validation\nVAL/42'),
@@ -29,7 +30,7 @@ Date extrême de validité 12 Mars 2027 00h00
 V 2.1 Edité le : 12 Oct. 2026 10H38:09'''
         self.assertEqual(extraire_champs(texte), dict(numero_dec='DEC1234567',
                          numero_validation='DEC1234567-ADD0-IB', montant_fob='168430.00',
-                         date_validation='17/03/2026'))
+                         date_validation='17/03/2026', date_facture='16/03/2026'))
 
     def test_mois_francais_et_dec_explicitement_saisi(self):
         resultat = extraire_champs('DEC : AUTRE/42\nN° Validation DEC1234567-ADD0-IB\n'

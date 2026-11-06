@@ -100,7 +100,8 @@ def preparer(contenu):
         for p in paragraphes(doc):
             s = texte(p)
             motifs = [
-                (r'(?i)\b(?:INV\s*(?:NO\.?|N[°º])|INVOICE)\s*:\s*([^\s]+)', 'NUMERO_FACTURE', 1),
+                # « INV NO : », « INV N° : », « INVOICE : » et aussi « Invoice no : », « Invoice N° : », « Invoice number : ».
+                (r'(?i)\b(?:INV(?:OICE)?\s*(?:NO\.?|N[°º]|NUMBER)|INVOICE)\s*:\s*([^\s]+)', 'NUMERO_FACTURE', 1),
                 (r'(?i)DATE\s*:\s*(\d{2}[–/-]\d{2}[–/-]\d{4})', 'DATE_FACTURE', 1),
                 (r'(?i)\b(\d[\d ]*)(?=\s+(?:PKG|BALES)\b)', 'COLIS', 1),
                 (r'(?i)Total Weight\s+(\d[\d ,.]*)\s+Kgs', 'POIDS', 1),

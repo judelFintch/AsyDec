@@ -65,7 +65,8 @@ class PreparationTest(TestCase):
                     xml=z.read('word/document.xml').decode()
                     self.assertNotIn('{{',xml)
                     self.assertIn('200,00',xml)
-                    self.assertIn('4,0000',xml)
+                    self.assertIn('$0,4000',xml)  # prix = ratio de l'article : 80 USD ÷ 200 kg
+                    self.assertNotIn('4,0000',xml.replace('0,4000',''))  # plus FOB ÷ colis (80 ÷ 20)
                     self.assertIn('20 PKG',xml)
                     self.assertNotIn('0499-ML1757', xml)
                     self.assertEqual(xml.count(f['manifeste']), 2)
