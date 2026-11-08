@@ -100,7 +100,9 @@ def construire(parent, licence):
     globales = quantites_globales(produits)
     textes_quantites = [f'{quantite(v)} {u}' for u, v in sorted(globales.items(), key=lambda e: -e[1])]
     fobs_parts = sorted({decimal(p['fob']) for p in parts}, reverse=True)
-    poids_part = repartition.get('poids_par_part_kg')
+    poids_parts = sorted({p['poids_kg'] for p in parts if p.get('poids_kg')})
+    texte_poids = (f'{nombre(poids_parts[0])} kg' if len(poids_parts) == 1
+                   else f'{nombre(poids_parts[0])} à {nombre(poids_parts[-1])} kg' if poids_parts else '—')
     indicateurs = (
         ('FOB total (USD)', nombre(fob, 2) if fob is not None else '—', f'{len(produits)} article(s)'),
         ('Quantité globale', textes_quantites[0] if textes_quantites else '—', ' · '.join(textes_quantites[1:])),
@@ -108,9 +110,9 @@ def construire(parent, licence):
          ('Choisi' if repartition.get('nombre_parts_choisi') else 'Automatique') + ' · '
          + ('plafond 120 000 USD par part' if repartition.get('plafond_actif', True) else 'sans plafond')),
         ('FOB par part (USD)', ' / '.join(nombre(v, 2) for v in fobs_parts) if fobs_parts else '—', 'Parts identiques'),
-        ('Poids par part', f'{nombre(poids_part)} kg' if poids_part else '—', 'Entre 22 000 et 24 000 kg'),
+        ('Poids par part', texte_poids, 'Entre 22 000 et 24 000 kg'),
         ('Poids global', f"{nombre(repartition.get('poids_total_kg'))} kg" if parts else '—',
-         f'{len(parts)} × {nombre(poids_part)} kg' if parts else 'Répartition à faire'),
+         (f'{len(parts)} × {texte_poids}' if len(poids_parts) == 1 else f'{len(parts)} parts') if parts else 'Répartition à faire'),
     )
     grille = ttk.Frame(cadre)
     grille.pack(fill='x', pady=(0, 12))

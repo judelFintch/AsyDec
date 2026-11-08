@@ -36,6 +36,33 @@ class RepartitionTest(unittest.TestCase):
             with self.subTest(poids=poids),self.assertRaises(ValueError):
                 calcul.preparer('100',poids)
 
+    def test_poids_aleatoires_par_part(self):
+        poids=calcul.proposer_poids(50)
+        self.assertEqual(len(poids),50)
+        self.assertTrue(all(22000<=p<=24000 for p in poids))
+        self.assertGreater(len(set(poids)),1)
+        # Poids valides conservés, invalides ou manquants remplacés.
+        conserves=calcul.proposer_poids(4,[22500,'abc',30000])
+        self.assertEqual(conserves[0],22500)
+        self.assertTrue(all(22000<=p<=24000 for p in conserves))
+        r=calcul.preparer('300000',[22100,23900,22500])
+        self.assertEqual([p['poids_kg'] for p in r['parts']],[22100,23900,22500])
+        self.assertEqual(r['poids_total_kg'],68500)
+        self.assertIsNone(r['poids_par_part_kg'])
+        self.assertEqual(len(calcul.preparer('300000',[22100])['parts']),3)
+        with self.assertRaises(ValueError):
+            calcul.preparer('300000',[22100,25000,22500])
+
+    def test_poids_par_part_enregistres(self):
+        with tempfile.TemporaryDirectory() as dossier:
+            fichier=Path(dossier)/'licences.sqlite'
+            licence=preparer_licence('DEC9','300000','DEC9-ADD0-IB','17/03/2026')
+            registre.enregistrer(licence,fichier)
+            registre.enregistrer_repartition(licence['numero_validation'],'300000',[22001,23456,23999],fichier)
+            relu=registre.charger(licence['numero_validation'],fichier)['repartition']
+            self.assertEqual([p['poids_kg'] for p in relu['parts']],[22001,23456,23999])
+            self.assertEqual(relu['poids_total_kg'],69456)
+
     def test_fob_invalides(self):
         for fob in ('NaN','Infinity','0','-1','1.001','abc'):
             with self.subTest(fob=fob),self.assertRaises(ValueError):

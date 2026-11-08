@@ -1,7 +1,45 @@
 """Première étape des documents finaux : licence et date du BL."""
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from decimal import Decimal, InvalidOperation
+import random
 from asydec.declarations.dates_documents import exiger_ouvrable, est_ouvrable
+
+# Date de facture proposée : jour ouvrable tiré entre ECART_FACTURE_MIN et ECART_FACTURE_MAX jours avant la
+# validation. La facture portée par une licence importée fait foi, même un jour avant la licence ;
+# seule une facture postérieure à la licence est refusée.
+ECART_FACTURE_MIN = 30
+ECART_FACTURE_MAX = 45
+
+
+def _jour(valeur):
+    if isinstance(valeur, datetime):
+        return valeur.date()
+    if isinstance(valeur, date):
+        return valeur
+    texte = str(valeur or '').strip()
+    for format_ in ('%d/%m/%Y', '%Y-%m-%d'):
+        try:
+            return datetime.strptime(texte, format_).date()
+        except ValueError:
+            pass
+    raise ValueError(f'Date invalide : {texte or "vide"}.')
+
+
+def proposer_date_facture(date_validation, tirage=None):
+    """JJ/MM/AAAA : jour ouvrable tiré entre ECART_FACTURE_MIN et ECART_FACTURE_MAX jours avant la licence."""
+    validation = _jour(date_validation)
+    candidats = [validation - timedelta(days=d) for d in range(ECART_FACTURE_MIN, ECART_FACTURE_MAX + 1)]
+    candidats = [j for j in candidats if est_ouvrable(j)]
+    return (tirage or random.SystemRandom()).choice(candidats).strftime('%d/%m/%Y')
+
+
+def controler_date_facture(date_facture, date_validation):
+    """ValueError si la facture est datée après la licence (impossible)."""
+    if not str(date_facture or '').strip() or not str(date_validation or '').strip():
+        return
+    facture, validation = _jour(date_facture), _jour(date_validation)
+    if facture > validation:
+        raise ValueError(f'La date de facture ({facture:%d/%m/%Y}) ne peut pas suivre la licence ({validation:%d/%m/%Y}).')
 
 
 def references_facture(numero_facture='', date_facture='', obligatoire=False):
@@ -41,6 +79,7 @@ def preparer_licence(numero_dec, montant_fob, numero_validation, date_validation
     if date_bl is None:
         raise ValueError('Aucune date BL ouvrable entre J+3 et J+5 avec le calendrier RDC.')
     numero_facture, date_facture = references_facture(numero_facture, date_facture)
+    controler_date_facture(date_facture, validation)
     return dict(numero_dec=numero_dec, montant_fob=fob,
                 numero_validation=numero_validation, date_validation=validation,
                 date_bl=date_bl, delai=(date_bl - validation).days,

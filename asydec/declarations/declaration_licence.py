@@ -12,6 +12,7 @@ n'a pas de déclaration.
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 from io import BytesIO
+import math
 from pathlib import Path
 import re
 import sys
@@ -25,8 +26,128 @@ W = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'
 BALISE = re.compile(r'\{\{([A-Z_0-9]+)\}\}')
 # Champs sur plusieurs lignes : le paragraphe balisé est répété pour chaque ligne.
 LISTES = ('PAYEUR', 'DESTINATAIRE', 'EXPORTATEUR', 'DECLARANT', 'TAXE_CODE', 'TAXE_TAUX', 'TAXE_BASE', 'TAXE_MONTANT')
-# Lignes que peut contenir chaque case d'adresse sur le formulaire fourni (au-delà, la case déborderait).
-LIGNES_MAX = {'PAYEUR': 5, 'DESTINATAIRE': 4, 'EXPORTATEUR': 2, 'DECLARANT': 3}
+# Case 47 : comme la déclaration originale, les TAXES_PREVUES premières taxes du XML, dans l'ordre du XML
+# et la police du modèle ; les suivantes ne sont pas affichées.
+TAXES = ('TAXE_CODE', 'TAXE_TAUX', 'TAXE_BASE', 'TAXE_MONTANT')
+TAXES_PREVUES = 8
+# Lignes que peut contenir chaque case sur le formulaire fourni (au-delà, la case déborderait).
+LIGNES_MAX = {'PAYEUR': 5, 'DESTINATAIRE': 4, 'EXPORTATEUR': 2, 'DECLARANT': 3, **dict.fromkeys(TAXES, TAXES_PREVUES)}
+
+
+def _enfant(parent, nom, avant):
+    """Enfant w:nom de parent, créé au bon rang du schéma (avant le premier des éléments `avant`)."""
+    noeud = next((n for n in parent.childNodes if n.nodeType == 1 and n.localName == nom), None)
+    if noeud is None:
+        noeud = parent.ownerDocument.createElementNS(W, 'w:' + nom)
+        suivant = next((n for n in parent.childNodes if n.nodeType == 1 and n.localName in avant), None)
+        parent.insertBefore(noeud, suivant)
+    return noeud
+
+
+APRES_SPACING = ('ind', 'contextualSpacing', 'mirrorIndents', 'suppressOverlap', 'jc', 'textDirection',
+                 'textAlignment', 'textboxTightWrap', 'outlineLvl', 'divId', 'cnfStyle', 'rPr', 'sectPr', 'pPrChange')
+APRES_SZ = ('szCs', 'highlight', 'u', 'effect', 'bdr', 'shd', 'fitText', 'vertAlign', 'rtl', 'cs', 'em', 'lang',
+            'eastAsianLayout', 'specVanish', 'oMath')
+
+
+# Zone de texte d'une seule ligne (hauteur en EMU) : un texte trop long y passerait à la ligne et
+# recouvrirait la case voisine. Sa police est alors réduite (jusqu'à TAILLE_MIN demi-points) pour tenir.
+HAUTEUR_UNE_LIGNE = 400000
+TAILLE_MIN = 10
+EMU_PAR_POINT = 12700
+# Word replie et déborde un peu avant les dimensions calculées, et une zone de texte du modèle descend
+# parfois sous le trait de sa case : on ne compte que cette part de la largeur et de la hauteur.
+MARGE_LARGEUR = 0.92
+MARGE_HAUTEUR = 0.90
+
+
+def _zone(paragraphe):
+    """(largeur utile, hauteur) en EMU de la zone de texte qui contient le paragraphe, sinon None."""
+    noeud = paragraphe.parentNode
+    while noeud is not None and not (noeud.nodeType == 1 and noeud.localName == 'wsp'):
+        noeud = noeud.parentNode
+    if noeud is None:
+        return None
+    ext = noeud.getElementsByTagNameNS('http://schemas.openxmlformats.org/drawingml/2006/main', 'ext')
+    corps = [n for n in noeud.childNodes if n.nodeType == 1 and n.localName == 'bodyPr']
+    if not ext or not corps:
+        return None
+    marges = sum(int(corps[0].getAttribute(m) or 91440) for m in ('lIns', 'rIns'))
+    return int(ext[0].getAttribute('cx')) - marges, int(ext[0].getAttribute('cy'))
+
+
+def largeur_texte(contenu, demi_points):
+    """Largeur en points du texte en Arial (chasses Helvetica, identiques)."""
+    try:
+        import pymupdf
+        return pymupdf.get_text_length(contenu, fontname='helv', fontsize=demi_points / 2)
+    except Exception:  # noqa: BLE001 - sans pymupdf : estimation moyenne d'Arial
+        return len(contenu) * 0.55 * demi_points / 2
+
+
+def ajuster_liste(paragraphe, lignes):
+    """Case d'adresse : resserre ses lignes (lignes longues repliées comprises) si elles dépassent sa zone."""
+    zone = _zone(paragraphe)
+    if not zone:
+        return
+    noeud = paragraphe.parentNode
+    while noeud.localName != 'wsp':
+        noeud = noeud.parentNode
+    corps = [n for n in noeud.childNodes if n.nodeType == 1 and n.localName == 'bodyPr'][0]
+    hauteur = (zone[1] - sum(int(corps.getAttribute(m) or 45720) for m in ('tIns', 'bIns'))) / EMU_PAR_POINT * MARGE_HAUTEUR
+    largeur = zone[0] / EMU_PAR_POINT * MARGE_LARGEUR
+    tailles = [int(n.getAttribute('w:val')) for n in paragraphe.getElementsByTagNameNS(W, 'sz')
+               if n.getAttribute('w:val').isdigit()]
+    taille = max(tailles or [16])
+    apres = [int(n.getAttribute('w:after') or 0) for n in paragraphe.getElementsByTagNameNS(W, 'spacing')]
+    pas = taille / 2 * 1.15 + (apres[0] if apres else 0) / 20
+    visuelles = sum(max(1, math.ceil(largeur_texte(l.strip(), taille) / largeur)) for l in lignes)
+    if visuelles * pas > hauteur:
+        resserrer(paragraphe, visuelles, hauteur)
+
+
+def ajuster_a_la_zone(paragraphe):
+    """Réduit la police d'un paragraphe trop long pour sa zone de texte d'une ligne (jamais l'inverse)."""
+    zone = _zone(paragraphe)
+    contenu = texte(paragraphe).strip()
+    if not zone or not contenu or zone[1] > HAUTEUR_UNE_LIGNE or paragraphe.getElementsByTagNameNS(W, 'tab'):
+        return
+    largeur = zone[0] / EMU_PAR_POINT * MARGE_LARGEUR
+    runs = paragraphe.getElementsByTagNameNS(W, 'r')
+    tailles = [int(n.getAttribute('w:val')) for n in paragraphe.getElementsByTagNameNS(W, 'sz')
+               if n.parentNode.parentNode.localName == 'r' and n.getAttribute('w:val').isdigit()]
+    taille = max(tailles or [16])
+    if largeur_texte(contenu, taille) <= largeur:
+        return
+    while taille > TAILLE_MIN and largeur_texte(contenu, taille) > largeur:
+        taille -= 1
+    for run in runs:
+        rpr = next((n for n in run.childNodes if n.nodeType == 1 and n.localName == 'rPr'), None)
+        if rpr is None:
+            rpr = run.ownerDocument.createElementNS(W, 'w:rPr')
+            run.insertBefore(rpr, run.firstChild)
+        _enfant(rpr, 'sz', APRES_SZ).setAttributeNS(W, 'w:val', str(taille))
+        _enfant(rpr, 'szCs', APRES_SZ[1:]).setAttributeNS(W, 'w:val', str(taille))
+
+
+def resserrer(paragraphe, lignes, hauteur):
+    """Interligne exact et police réduite pour que `lignes` lignes tiennent dans `hauteur` points."""
+    pas = hauteur / lignes                            # points par ligne
+    taille = max(8, min(16, int(pas * 2 / 1.2)))      # demi-points ; la police reste lisible
+    ppr = next((n for n in paragraphe.childNodes if n.nodeType == 1 and n.localName == 'pPr'), None)
+    if ppr is None:
+        ppr = paragraphe.ownerDocument.createElementNS(W, 'w:pPr')
+        paragraphe.insertBefore(ppr, paragraphe.firstChild)
+    espacement = _enfant(ppr, 'spacing', APRES_SPACING)
+    for nom, valeur in (('before', '0'), ('after', '0'), ('line', str(int(pas * 20))), ('lineRule', 'exact')):
+        espacement.setAttributeNS(W, 'w:' + nom, valeur)
+    for run in paragraphe.getElementsByTagNameNS(W, 'r'):
+        rpr = next((n for n in run.childNodes if n.nodeType == 1 and n.localName == 'rPr'), None)
+        if rpr is None:
+            rpr = run.ownerDocument.createElementNS(W, 'w:rPr')
+            run.insertBefore(rpr, run.firstChild)
+        _enfant(rpr, 'sz', APRES_SZ).setAttributeNS(W, 'w:val', str(taille))
+        _enfant(rpr, 'szCs', APRES_SZ[1:]).setAttributeNS(W, 'w:val', str(taille))
 
 
 def modele_defaut():
@@ -75,6 +196,11 @@ def _lignes(element, chemin):
     return [' '.join(l.split()) for l in noeud.text.splitlines() if l.strip()]
 
 
+def nom_banque(nom):
+    """Case 28 : le nom de la banque seul, dans la police du modèle ; ce qui suit « / » (ville, agence…) est retiré."""
+    return nom.split('/')[0].strip()
+
+
 def valeurs(contenu_xml):
     """Valeurs des balises depuis un XML ASYCUDA (texte). Le formulaire porte le premier article."""
     r = ET.fromstring(contenu_xml.encode('utf-8') if isinstance(contenu_xml, str) else contenu_xml)
@@ -120,7 +246,7 @@ def valeurs(contenu_xml):
         'CODE_BUREAU_FRONTIERE': _t(r, 'Transport/Border_office/Code'),
         'NOM_BUREAU_FRONTIERE': _t(r, 'Transport/Border_office/Name'),
         'LIEU_MARCHANDISES': _t(r, 'Transport/Location_of_goods'),
-        'CODE_BANQUE': _t(r, 'Financial/Bank/Code'), 'NOM_BANQUE': _t(r, 'Financial/Bank/Name'),
+        'CODE_BANQUE': _t(r, 'Financial/Bank/Code'), 'NOM_BANQUE': nom_banque(_t(r, 'Financial/Bank/Name')),
         'AGENCE_BANQUE': _t(r, 'Financial/Bank/Branch'),
         'CODE_TERMES': _t(r, 'Financial/Terms/Code'), 'LIBELLE_TERMES': _t(r, 'Financial/Terms/Description'),
         'MODE_PAIEMENT': _t(r, 'Financial/Mode_of_payment'),
@@ -185,6 +311,9 @@ def remplir(modele, donnees):
             liste = next((m.group(1) for m in balises if m.group(1) in LISTES), None)
             if liste:
                 lignes = [str(x) for x in donnees.get(liste) or []][:LIGNES_MAX.get(liste)] or ['']
+                # Avant la copie : chaque ligne hérite du resserrement. Case 47 : police du modèle, jamais resserrée.
+                if liste not in TAXES:
+                    ajuster_liste(p, lignes)
                 # Ordre conservé : les copies sont insérées après le paragraphe d'origine, dans l'ordre.
                 suivant = p.nextSibling
                 for ligne in lignes[1:]:
@@ -200,6 +329,7 @@ def remplir(modele, donnees):
                     raise ValueError(f'Champ de déclaration inconnu dans le modèle : {cle}.')
                 trouvees.add(cle)
                 remplacer(p, m.start(), m.end(), str(donnees.get(cle) or ''))
+            ajuster_a_la_zone(p)
         if not {'NUMERO_E', 'DESIGNATION', 'TOTAL_FACTURE'} <= trouvees:
             raise ValueError('Modèle de déclaration non préparé : balises {{NUMERO_E}}, {{DESIGNATION}}, {{TOTAL_FACTURE}} absentes.')
         sortie = BytesIO()
@@ -253,6 +383,24 @@ def _rempli(valeur):
 # Cases qui ne viennent jamais du XML : elles sont prises dans le projet (étape 3 · informations de la part).
 CHAMPS_PROJET = ('NUMERO_E', 'DATE_E', 'NUMERO_L', 'DATE_L', 'NUMERO_Q', 'DATE_Q', 'MANIFESTE',
                  'PLAQUE_ARRIVEE', 'PLAQUE_FRONTIERE')
+# Position tarifaire (case 33) et désignation (case 31) : celles de l'article du dossier ouvert dans AsyDec
+# (premier article de la part, son produit sur la licence), pas celles du XML. Gardées du XML si le dossier n'en a pas.
+CHAMPS_ARTICLE = ('CODE_SH', 'DESIGNATION')
+
+
+def article_part(licence, part):
+    """{'CODE_SH', 'DESIGNATION'} du premier article de la part, d'après le dossier AsyDec ; valeurs vides omises."""
+    produits = licence.get('produits') or []
+    article = next(iter(part.get('articles') or []), None) or {}
+    try:
+        indice = int(article.get('article') or 1) - 1
+    except (TypeError, ValueError):
+        indice = 0
+    produit = produits[indice] if 0 <= indice < len(produits) else {}
+    designation = article.get('designation') or produit.get('designation') or ''
+    valeurs = {'CODE_SH': ''.join(str(produit.get('tarif_douanier') or '').split()),
+               'DESIGNATION': ' '.join(str(designation).split())}
+    return {c: v for c, v in valeurs.items() if v}
 
 
 def projet_part(licence, numero):
@@ -265,13 +413,15 @@ def projet_part(licence, numero):
     return {'NUMERO_E': infos.get('numero_e', ''), 'DATE_E': date_dcu(infos.get('date_enregistrement', '')),
             'NUMERO_L': infos.get('numero_liquidation', ''), 'DATE_L': date_dcu(infos.get('date_liquidation', '')),
             'NUMERO_Q': infos.get('numero_quittance', ''), 'DATE_Q': date_dcu(infos.get('date_quittance', '')),
-            'MANIFESTE': infos.get('manifeste', ''), 'PLAQUE_ARRIVEE': plaque, 'PLAQUE_FRONTIERE': plaque}
+            'MANIFESTE': infos.get('manifeste', ''), 'PLAQUE_ARRIVEE': plaque, 'PLAQUE_FRONTIERE': plaque,
+            **article_part(licence, part)}
 
 
 def completer(sydonia, reference=None, projet=None):
     """Valeurs de la déclaration.
 
-    projet (projet_part) : E, L, Q, dates, manifeste et plaques, toujours pris de l'étape 3, jamais du XML.
+    projet (projet_part) : E, L, Q, dates, manifeste et plaques, toujours pris de l'étape 3, jamais du XML ;
+    position tarifaire et désignation de l'article du dossier AsyDec quand il en a.
     Le reste vient du XML SYDONIA ; une case vide y est complétée depuis le XML attendu de la part.
     Renvoie (valeurs, contrôle) ; contrôle = dict(presentes, total, projet, completees, manquantes)
     en libellés des ESSENTIELS."""
@@ -282,11 +432,13 @@ def completer(sydonia, reference=None, projet=None):
     for cle in CHAMPS:
         if cle in CHAMPS_PROJET and projet:
             donnees[cle] = projet.get(cle, '')
+        elif cle in CHAMPS_ARTICLE and _rempli(projet.get(cle)):
+            donnees[cle] = projet[cle]
         elif not _rempli(donnees.get(cle)) and _rempli(complement.get(cle)):
             donnees[cle] = complement[cle]
             completees.append(cle)
     libelles = dict(ESSENTIELS)
-    du_projet = [c for c, _ in ESSENTIELS if c in CHAMPS_PROJET and projet]
+    du_projet = [c for c, _ in ESSENTIELS if (c in CHAMPS_PROJET and projet) or (c in CHAMPS_ARTICLE and _rempli(projet.get(c)))]
     controle = dict(presentes=sum(1 for c, _ in ESSENTIELS if c not in completees and c not in du_projet
                                   and _rempli(donnees.get(c))),
                     total=len(ESSENTIELS),
@@ -304,28 +456,54 @@ def texte_controle(controle):
     else:
         etat = '✓ prêt pour la déclaration'
     if controle.get('projet'):
-        etat += ' · E, L, Q, dates, manifeste et plaques repris de l’étape 3'
+        etat += ' · repris du dossier AsyDec : ' + ', '.join(controle['projet'])
     if controle['completees']:
         etat += ' · complété depuis AsyDec : ' + ', '.join(controle['completees'])
     return etat
 
 
+def _groupes(licence):
+    """{n° de part: [n° des parts de même montant]} : les parts qui partagent un XML à l'étape 7."""
+    from asydec.declarations import xml_licence
+    try:
+        return {n: g['numeros'] for g in xml_licence.groupes_parts(licence) for n in g['numeros']}
+    except (KeyError, TypeError, ValueError):
+        return {}
+
+
+def _couverture(licence):
+    """{n° de part: (import SYDONIA, n° de la part importée)}. Une part sans XML SYDONIA à elle reprend
+    celui d'une part de même montant (même XML à l'étape 7) : seuls E, L, Q, plaques et poids changent."""
+    imports = (licence.get('recuperation_simulation') or {}).get('imports') or []
+    couverture = {}
+    for i in imports:  # XML SYDONIA propres à la part (ou au groupe quand la référence couvre plusieurs parts)
+        parts = i.get('parts') or []
+        for n in parts:
+            if n is not None and n not in couverture:
+                couverture[n] = (i, parts[0])
+    for n, groupe in _groupes(licence).items():
+        if n not in couverture:
+            source = next((couverture[m] for m in groupe if m in couverture), None)
+            if source:
+                couverture[n] = source
+    return couverture
+
+
 def sources(licence):
-    """[dict(part, contenu, reference, origine)] : un XML SYDONIA importé à l'étape 8 par part.
-    L'étape 9 passe toujours par l'étape 8 : une part sans XML SYDONIA n'a pas de déclaration."""
+    """[dict(part, contenu, reference, projet, origine, partage)] : un XML SYDONIA importé à l'étape 8 par part.
+    L'étape 9 passe toujours par l'étape 8 ; une part sans XML SYDONIA à elle reprend celui d'une part
+    de même montant (partage = n° de cette part)."""
     from asydec.declarations import licences_ouvertes
     imports = (licence.get('recuperation_simulation') or {}).get('imports') or []
     if not imports:
         raise ValueError('Importez d’abord les XML SYDONIA à l’étape 8 : la déclaration est remplie depuis eux.')
     references = {r['parts'][0]: r['contenu'] for r in licences_ouvertes.references_xml(licence) if len(r['parts']) == 1}
-    resultat, vues = [], set()
-    for i in imports:
-        n = (i.get('parts') or [None])[0]
-        if n is None or n in vues or len(i.get('parts') or []) != 1:
-            continue
-        vues.add(n)
+    resultat = []
+    for n, (i, importee) in _couverture(licence).items():
+        partage = importee if importee != n else None
+        origine = 'XML SYDONIA ' + Path(i['fichier']).name + (f' (part {importee}, même montant)' if partage else '')
         resultat.append(dict(part=n, contenu=i['contenu'], reference=references.get(n), projet=projet_part(licence, n),
-                             origine='XML SYDONIA ' + Path(i['fichier']).name))
+                             origine=origine, partage=partage))
     if not resultat:
         raise ValueError('Aucun XML SYDONIA associé à une part : importez-les à nouveau à l’étape 8.')
     return sorted(resultat, key=lambda s: s['part'])
@@ -333,19 +511,36 @@ def sources(licence):
 
 def parts_sans_sydonia(licence):
     parts = [p['numero'] for p in (licence.get('repartition') or {}).get('parts') or []]
-    importees = {(i.get('parts') or [None])[0] for i in (licence.get('recuperation_simulation') or {}).get('imports') or []}
-    return [n for n in parts if n not in importees]
+    couvertes = _couverture(licence)
+    return [n for n in parts if n not in couvertes]
+
+
+def propre_a_la_part(sydonia_modele, reference_modele, reference_part):
+    """Cases du XML SYDONIA d'une autre part (le modèle) remplacées par celles de la répartition :
+    toute case qui diffère entre le XML attendu de la part modèle et celui de cette part (référence
+    déclarant, poids, colis…) est propre à la répartition et vient de son XML attendu."""
+    if not reference_part:
+        return {}
+    propres = valeurs(reference_part)
+    modele = valeurs(reference_modele) if reference_modele else {}
+    return {c: v for c, v in propres.items()
+            if c not in CHAMPS_PROJET and c not in CHAMPS_ARTICLE and (not reference_modele or v != modele.get(c)) and _rempli(v)
+            and (reference_modele or c in ('POIDS_BRUT', 'POIDS_NET', 'REF_ANNEE', 'REF_SUITE'))}
 
 
 def generer(licence, modele):
-    """[dict(part, contenu (octets .docx), origine, articles, controle)] pour les parts qui ont un XML SYDONIA,
-    tous préparés avant tout enregistrement."""
+    """[dict(part, contenu (octets .docx), origine, articles, controle)] pour chaque répartition couverte par
+    un XML SYDONIA (le sien, ou celui d'une part de même montant pris comme modèle), tous préparés avant
+    tout enregistrement."""
+    references = {s['part']: s['reference'] for s in sources(licence)}
     resultat = []
     for source in sources(licence):
         donnees, controle = completer(source['contenu'], source['reference'], source['projet'])
+        if source.get('partage'):
+            donnees.update(propre_a_la_part(source['contenu'], references.get(source['partage']), source['reference']))
         resultat.append(dict(part=source['part'], origine=source['origine'], numero_e=donnees.get('NUMERO_E', ''),
                              articles=int(_decimal(donnees.get('NOMBRE_ARTICLES')) or 1), controle=controle,
-                             contenu=remplir(modele, donnees)))
+                             contenu=remplir(modele, donnees), donnees=donnees))
     return resultat
 
 

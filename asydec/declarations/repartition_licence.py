@@ -1,4 +1,4 @@
-"""Division exacte du FOB et poids proposé par part, sans ratio par article.
+"""Division exacte du FOB et poids proposé par part (aléatoire entre 22 000 et 24 000 kg).
 
 Par défaut : nombre de parts calculé automatiquement, parts égales de 120 000 USD maximum.
 Options : nombre de parts choisi par l'utilisateur et/ou plafond de 120 000 USD retiré ;
@@ -8,6 +8,7 @@ from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 
 PLAFOND = Decimal('120000.00')
 POIDS_PROPOSE = 23000
+POIDS_MIN, POIDS_MAX = 22000, 24000
 MAX_PARTS = 99
 
 
@@ -177,14 +178,40 @@ def repartir_articles(produits, nombre, ecart=Decimal(0)):
     return parts
 
 
-def preparer(fob, poids=POIDS_PROPOSE, produits=None, nombre=None, plafond=True):
-    """nombre : parts choisies (None = automatique) ; plafond=False retire la limite de 120 000 USD."""
+def poids_part(poids):
+    """Poids entier entre 22 000 et 24 000 kg."""
     try:
-        valeur = Decimal(str(poids).replace(' ', '').replace(',', '.'))
+        valeur = Decimal(str(poids).replace(' ', '').replace('\u00a0', '').replace('\u202f', '').replace(',', '.'))
     except InvalidOperation:
         raise ValueError('Indiquez un poids entier entre 22 000 et 24 000 kg.') from None
-    if not valeur.is_finite() or valeur != valeur.to_integral_value() or not 22000 <= valeur <= 24000:
+    if not valeur.is_finite() or valeur != valeur.to_integral_value() or not POIDS_MIN <= valeur <= POIDS_MAX:
         raise ValueError('Indiquez un poids entier entre 22 000 et 24 000 kg.')
+    return int(valeur)
+
+
+def proposer_poids(nombre, existants=()):
+    """Un poids aléatoire (22 000 à 24 000 kg) par part ; les poids valides déjà proposés sont conservés."""
+    import secrets
+    resultat = []
+    for poids in list(existants)[:nombre]:
+        try:
+            resultat.append(poids_part(poids))
+        except ValueError:
+            resultat.append(None)
+    resultat += [None] * (nombre - len(resultat))
+    return [p if p is not None else POIDS_MIN + secrets.randbelow(POIDS_MAX - POIDS_MIN + 1) for p in resultat]
+
+
+def preparer(fob, poids=POIDS_PROPOSE, produits=None, nombre=None, plafond=True):
+    """poids : un poids commun à toutes les parts, ou une liste (un poids par part ; les parts
+    manquantes reçoivent un poids aléatoire). nombre : parts choisies (None = automatique) ;
+    plafond=False retire la limite de 120 000 USD."""
+    if isinstance(poids, (list, tuple)):
+        poids_liste = [poids_part(p) for p in poids]
+        commun = None
+    else:
+        commun = poids_part(poids)
+        poids_liste = None
     total = montant(fob)
     nombre_choisi = nombre_parts(nombre)
     plafond = bool(plafond)
@@ -205,10 +232,12 @@ def preparer(fob, poids=POIDS_PROPOSE, produits=None, nombre=None, plafond=True)
                 raise ValueError(f'Avec {nombre_choisi} parts, une part dépasse 120 000 USD une fois les articles divisés. '
                                  'Augmentez le nombre de parts ou retirez le plafond.')
             nombre += 1
+    poids_parts = [commun] * len(montants) if commun is not None else proposer_poids(len(montants), poids_liste)
+    identiques = len(set(poids_parts)) == 1
     resultat = dict(fob_total=format(total, '.2f'), plafond_usd=str(PLAFOND) if plafond else None,
                     plafond_actif=plafond, nombre_parts_choisi=nombre_choisi,
-                    poids_par_part_kg=int(valeur), poids_total_kg=int(valeur) * len(montants),
-                    parts=[dict(numero=i + 1, fob=format(part, '.2f'), poids_kg=int(valeur))
+                    poids_par_part_kg=poids_parts[0] if identiques else None, poids_total_kg=sum(poids_parts),
+                    parts=[dict(numero=i + 1, fob=format(part, '.2f'), poids_kg=poids_parts[i])
                            for i, part in enumerate(montants)])
     if articles:
         for part, lignes in zip(resultat['parts'], articles):

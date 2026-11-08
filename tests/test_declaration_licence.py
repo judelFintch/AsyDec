@@ -46,8 +46,10 @@ class DeclarationTest(unittest.TestCase):
         rempli = D.remplir(modele, v)
         x = document(rempli)
         self.assertEqual(re.findall(r'\{\{[A-Z_]+\}\}', x), [])
-        for valeur in ('10632', '20/10/2026', '7,500.00', 'FirstBank DRC SA / LUBUMBASHI', 'RII', '641,367'):
+        for valeur in ('10632', '20/10/2026', '7,500.00', 'FirstBank DRC SA', '>TVF<', '22,804'):
             self.assertIn(valeur, x)
+        for valeur in ('>RCC<', '>RII<', '641,367'):  # au-delà des 8 premières taxes : non affichées
+            self.assertNotIn(valeur, x)
         for ancien in ('9797', 'DEC1500886', 'RAWBANK', 'T443FFV', '135,703,015'):
             self.assertNotIn(ancien, x)
         # Forme conservée : mêmes fichiers (image de fond, styles), même nombre de zones de texte.
@@ -95,12 +97,96 @@ class DeclarationTest(unittest.TestCase):
         licence['repartition']['parts'][0]['informations_declaration']['manifeste'] = ''
         self.assertIn('manifeste (case 40) (étape 3)', D.completer(sydonia, None, D.projet_part(licence, 1))[1]['manquantes'])
 
+    def test_position_tarifaire_et_designation_de_l_article_du_dossier(self):
+        sydonia = BASE.read_text(encoding='utf-8')  # XML : 8714100000
+        v = D.valeurs(sydonia)
+        self.assertEqual(v['CODE_SH'], '8714100000')
+        licence = {'produits': [{'tarif_douanier': '8711 100000', 'designation': "Motocycles à moteur à\npiston"},
+                                {'tarif_douanier': '8714109000', 'designation': 'Pièces détachées'}],
+                   'repartition': {'parts': [
+                       {'numero': 1, 'articles': [{'article': 1, 'designation': "Motocycles à moteur à piston, 50 cm3"}]},
+                       {'numero': 2, 'articles': [{'article': 2}]},
+                       {'numero': 3, 'articles': []}]}}
+        donnees, controle = D.completer(sydonia, None, D.projet_part(licence, 1))
+        self.assertEqual((donnees['CODE_SH'], donnees['DESIGNATION']), ('8711100000', 'Motocycles à moteur à piston, 50 cm3'))
+        self.assertEqual(donnees['TAUX'], v['TAUX'])  # le reste reste celui du XML
+        self.assertEqual(donnees['TAXE_MONTANT'], v['TAXE_MONTANT'])
+        self.assertIn('code SH (case 33)', controle['projet'])
+        donnees, _ = D.completer(sydonia, None, D.projet_part(licence, 2))
+        self.assertEqual((donnees['CODE_SH'], donnees['DESIGNATION']), ('8714109000', 'Pièces détachées'))
+        licence['produits'] = []
+        donnees, _ = D.completer(sydonia, None, D.projet_part(licence, 3))  # dossier sans article : XML gardé
+        self.assertEqual((donnees['CODE_SH'], donnees['DESIGNATION']), (v['CODE_SH'], v['DESIGNATION']))
+        x = textes(D.remplir(MODELE.read_bytes(), D.completer(sydonia, None, D.projet_part(
+            {'produits': [{'tarif_douanier': '8711100000'}], 'repartition': {'parts': [
+                {'numero': 1, 'articles': [{'article': 1, 'designation': 'MOTOS NEUVES'}]}]}}, 1))[0]))
+        self.assertIn('MOTOS NEUVES', x)
+        self.assertIn('8711100000', x.replace(' ', ''))
+
     def test_etape_9_passe_par_l_etape_8(self):
         licence = dict(xml_genere={'contenu': '<ASYCUDA/>'}, repartition={'parts': [{'numero': 1}, {'numero': 2}]})
         with self.assertRaisesRegex(ValueError, 'étape 8'):
             D.sources(licence)
         licence['recuperation_simulation'] = dict(imports=[dict(parts=[2], fichier='s2.xml', contenu='<ASYCUDA/>')])
         self.assertEqual(D.parts_sans_sydonia(licence), [1])
+
+    def test_parts_de_meme_montant_reprennent_le_xml_sydonia_du_groupe(self):
+        article = dict(quantite=10, valeur=100)
+        parts = [dict(numero=n, fob=100, articles=[article]) for n in (1, 2, 3)]
+        parts.append(dict(numero=4, fob=200, articles=[dict(quantite=20, valeur=200)]))
+        licence = dict(xml_genere={'contenu': '<ASYCUDA/>'}, repartition={'parts': parts},
+                       recuperation_simulation=dict(imports=[dict(parts=[1], fichier='s1.xml', contenu='<ASYCUDA/>')]))
+        self.assertEqual(D.parts_sans_sydonia(licence), [4])
+        sources = {s['part']: s for s in D.sources(licence)}
+        self.assertEqual(sorted(sources), [1, 2, 3])
+        self.assertIsNone(sources[1]['partage'])
+        self.assertEqual((sources[2]['partage'], sources[3]['partage']), (1, 1))
+        self.assertIn('part 1, même montant', sources[3]['origine'])
+
+    def test_xml_sydonia_modele_et_cases_propres_a_la_repartition(self):
+        base = BASE.read_text(encoding='utf-8')
+        reference = D.valeurs(base)['REF_SUITE']
+        autre = base.replace(reference, '347/05/NCA')  # XML attendu d'une autre part du groupe
+        propres = D.propre_a_la_part(base, base, autre)
+        self.assertEqual(propres.get('REF_SUITE'), '347/05/NCA')
+        self.assertNotIn('TOTAL_TAXES', propres)  # identique : reste celle du XML SYDONIA modèle
+        self.assertEqual(D.propre_a_la_part(base, base, None), {})
+
+    def test_case_47_huit_premieres_taxes_police_du_modele(self):
+        v = D.valeurs(BASE.read_text(encoding='utf-8'))
+        codes = [f'T{i:02d}' for i in range(11)]
+        for cle in D.TAXES:
+            v[cle] = codes if cle == 'TAXE_CODE' else ['1'] * 11
+        x = document(D.remplir(MODELE.read_bytes(), v))
+        for code in codes[:8]:
+            self.assertIn('>' + code + '<', x)  # les 8 premières taxes du XML, comme l'original
+        for code in codes[8:]:
+            self.assertNotIn('>' + code + '<', x)
+        def ligne(code):
+            return x[x.rfind('<w:p ', 0, x.index('>' + code + '<')):x.index('>' + code + '<')]
+        self.assertNotIn('w:lineRule="exact"', ligne('T07'))  # police et interligne du modèle
+        v.update({cle: (codes[:3] if cle == 'TAXE_CODE' else ['1'] * 3) for cle in D.TAXES})
+        x = document(D.remplir(MODELE.read_bytes(), v))
+        self.assertNotIn('T03', x)
+        self.assertNotIn('w:lineRule="exact"', ligne('T02'))
+
+    def test_texte_trop_long_reduit_pour_tenir_dans_sa_case(self):
+        import re
+        v = D.valeurs(BASE.read_text(encoding='utf-8'))
+        self.assertEqual(D.nom_banque('FirstBank DRC SA / LUBUMBASHI'), 'FirstBank DRC SA')
+        v['NOM_BANQUE'] = D.nom_banque('FirstBank DRC SA / LUBUMBASHI')
+        v['PAYEUR'] = ['KATANGA TVS SARL', 'AV/LUMUMBA Q/KATAKI C/LUBUMBASHI', '--', 'KATANGA']
+        x = document(D.remplir(MODELE.read_bytes(), v))
+        banque = x[x.rfind('<w:r>', 0, x.index('FirstBank')):x.index('FirstBank')]
+        self.assertEqual(re.findall(r'<w:sz w:val="(\d+)"', banque)[-1], '16')  # nom seul, police du modèle
+        self.assertNotIn('LUBUMBASHI', x[x.index('FirstBank'):x.index('FirstBank') + 40])
+        self.assertIn('>KATANGA<', x)  # toutes les lignes du XML, resserrées dans la case 9
+        payeur = x[x.rfind('<w:p ', 0, x.index('>KATANGA<')):x.index('>KATANGA<')]
+        self.assertIn('w:lineRule="exact"', payeur)
+        v['NOM_BANQUE'] = 'RAWBANK'
+        x = document(D.remplir(MODELE.read_bytes(), v))
+        banque = x[x.rfind('<w:r>', 0, x.index('RAWBANK')):x.index('RAWBANK')]
+        self.assertEqual(re.findall(r'<w:sz w:val="(\d+)"', banque)[-1], '16')  # texte court : modèle inchangé
 
     def test_modele_non_prepare_refuse(self):
         with self.assertRaises(ValueError):

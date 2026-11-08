@@ -4,6 +4,7 @@ from copy import deepcopy
 from datetime import date, datetime, timezone
 from decimal import Decimal
 import json
+import re
 from pathlib import Path
 import sqlite3
 import xml.etree.ElementTree as ET
@@ -185,7 +186,7 @@ def _completer_articles(licence):
             _articles_coherents(licence) or licence.get('factures_parts') or licence.get('xml_genere')):
         return False
     try:
-        nouvelle = repartition_licence.preparer(licence['montant_fob'], repartition['poids_par_part_kg'], licence.get('produits'),
+        nouvelle = repartition_licence.preparer(licence['montant_fob'], [p['poids_kg'] for p in repartition['parts']], licence.get('produits'),
                                                 **options_repartition(repartition))
     except ValueError:
         return False
@@ -363,12 +364,38 @@ def enregistrer_factures(numero, fiche, fichier=None):
     _modifier(numero, fichier, action)
 
 
+PREFIXE_FACTURE = 'INV'
+PREMIER_NUMERO_FACTURE = 'INV1001'
+
+
+def proposer_numero_facture(fichier=None):
+    """Numéro de facture suivant (INV + plus grand numéro INV déjà utilisé + 1), licences supprimées
+    comprises : un numéro n'est jamais réutilisé."""
+    motif = re.compile(rf'{PREFIXE_FACTURE}(\d+)', re.I)
+    with connexion(fichier) as conn:
+        contenus = [r['contenu'] for table in ('licences', 'licences_supprimees')
+                    for r in conn.execute(f'SELECT contenu FROM {table}').fetchall()]
+    numeros = []
+    for contenu in contenus:
+        try:
+            m = motif.fullmatch(''.join(str(json.loads(contenu).get('numero_facture') or '').split()))
+        except (ValueError, AttributeError):
+            continue
+        if m:
+            numeros.append(m[1])
+    if not numeros:
+        return PREMIER_NUMERO_FACTURE
+    plus_grand = max(numeros, key=int)
+    return PREFIXE_FACTURE + str(int(plus_grand) + 1).zfill(len(plus_grand))
+
+
 def enregistrer_references_facture(numero, numero_facture, date_facture, fichier=None):
     """Complète le numéro et la date de facture d'une licence déjà enregistrée, sans toucher aux étapes suivantes."""
-    from asydec.declarations.documents_finaux import references_facture
+    from asydec.declarations.documents_finaux import references_facture, controler_date_facture
 
     def action(licence):
         numero_ok, date_ok = references_facture(numero_facture, date_facture, obligatoire=True)
+        controler_date_facture(date_ok, licence.get('date_validation'))
         licence['numero_facture'], licence['date_facture'] = numero_ok, date_ok
     _modifier(numero, fichier, action)
 

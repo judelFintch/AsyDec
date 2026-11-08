@@ -2,7 +2,7 @@
 import sqlite3
 from decimal import Decimal
 import tkinter as tk
-from tkinter import ttk
+from tkinter import simpledialog, ttk
 
 from asydec.declarations import conteneurs, licences_ouvertes, repartition_licence as calcul
 from asydec.formats import nombre
@@ -18,6 +18,7 @@ class FenetreRepartition(tk.Toplevel):
         self.plaques = [p.get('plaque') for p in licence.get('repartition', {}).get('parts', [])]
         self.conteneurs = [dict(conteneur=p.get('conteneur'), scelle=p.get('scelle'))
                            for p in licence.get('repartition', {}).get('parts', [])]
+        self.poids = [p.get('poids_kg') for p in licence.get('repartition', {}).get('parts', [])]
         self.title('Répartition de la licence')
         self.geometry('1080x780')
         self.minsize(700, 600)
@@ -57,14 +58,16 @@ class FenetreRepartition(tk.Toplevel):
         theme.bouton(cadre, 'Calculer la répartition', self.repartir, principal=True).pack(anchor='w', pady=(0, 12))
         self.etape_poids = ttk.Frame(cadre, padding=14, relief='solid', borderwidth=1)
         ttk.Label(self.etape_poids, text='2 · Confirmer le poids de chaque part', style='Section.TLabel').pack(anchor='w')
-        ttk.Label(self.etape_poids, text='Même poids pour toutes les parts, entre 22 000 et 24 000 kg. Proposition : 23 000 kg.',
-                  style='Doux.TLabel', wraplength=700).pack(anchor='w', pady=6)
+        ttk.Label(self.etape_poids, text='Un poids aléatoire entre 22 000 et 24 000 kg est proposé pour chaque part. '
+                  'Double-cliquez sur un poids du tableau pour le modifier.',
+                  style='Doux.TLabel', wraplength=900).pack(anchor='w', pady=6)
         ligne = ttk.Frame(self.etape_poids)
         ligne.pack(fill='x')
-        ttk.Label(ligne, text='Poids par part (kg)').pack(side='left', padx=(0, 12))
-        self.poids = tk.StringVar(value=str(licence.get('repartition', {}).get('poids_par_part_kg', calcul.POIDS_PROPOSE)))
-        ttk.Entry(ligne, textvariable=self.poids, width=12).pack(side='left')
-        self.poids.trace_add('write', self.actualiser)
+        theme.bouton(ligne, 'Nouveaux poids aléatoires', self.tirer_poids).pack(side='left', padx=(0, 24))
+        ttk.Label(ligne, text='Même poids pour toutes les parts (kg)').pack(side='left', padx=(0, 8))
+        self.poids_commun = tk.StringVar(value=str(calcul.POIDS_PROPOSE))
+        ttk.Entry(ligne, textvariable=self.poids_commun, width=10).pack(side='left')
+        theme.bouton(ligne, 'Appliquer', self.appliquer_poids_commun).pack(side='left', padx=(8, 0))
         self.zone_table = ttk.Frame(cadre)
         self.zone_table.pack(fill='both', expand=True, pady=12)
         self.table = ttk.Treeview(self.zone_table, columns=('part', 'fob', 'poids', 'plaque', 'conteneur', 'scelle'), show='headings', height=4)
@@ -77,6 +80,7 @@ class FenetreRepartition(tk.Toplevel):
         defilement.pack(side='right', fill='y')
         self.table.configure(yscrollcommand=defilement.set)
         self.table.pack(fill='both', expand=True)
+        self.table.bind('<Double-1>', self.modifier_poids)
         ttk.Label(cadre, text='Articles par part · quantités divisées à l’identique', style='Section.TLabel').pack(anchor='w', pady=(4, 6))
         zone_articles, self.articles = theme.tableau(cadre, [
             ('numero', 'N°', 40, 'center'), ('designation', 'Désignation', 300, 'w'), ('unite', 'Unité', 70, 'w'),
@@ -122,6 +126,7 @@ class FenetreRepartition(tk.Toplevel):
             self.resume.set('Corrigez le nombre de parts ou le plafond pour recalculer.')
             return
         self.plaques = calcul.proposer_plaques(len(self.parts), self.plaques)
+        self.poids = calcul.proposer_poids(len(self.parts), self.poids)
         self.conteneurs = conteneurs.proposer(len(self.parts), self.conteneurs)
         self.etape_poids.pack(fill='x', before=self.zone_table)
         self.actualiser()
@@ -131,22 +136,55 @@ class FenetreRepartition(tk.Toplevel):
             return
         self.table.delete(*self.table.get_children())
         try:
-            proposition = calcul.preparer(self.fob, self.poids.get(), self.licence.get('produits'), **self.options())
+            proposition = calcul.preparer(self.fob, self.poids, self.licence.get('produits'), **self.options())
         except ValueError as exc:
             self.erreur.set(str(exc))
             self.valider_bouton.configure(state='disabled')
             for i, fob in enumerate(self.parts, 1):
                 c = self.conteneurs[i-1]
-                self.table.insert('', 'end', values=(i, nombre(fob, 2), 'À corriger', self.plaques[i-1], c['conteneur'], c['scelle']))
+                self.table.insert('', 'end', iid=str(i), values=(i, nombre(fob, 2), 'À corriger', self.plaques[i-1], c['conteneur'], c['scelle']))
             return
         self.erreur.set('')
         self.valider_bouton.configure(state='normal')
         for part, fob in zip(proposition['parts'], self.parts):
             c = self.conteneurs[part['numero']-1]
-            self.table.insert('', 'end', values=(part['numero'], nombre(fob, 2), nombre(part['poids_kg']), self.plaques[part['numero']-1],
+            self.table.insert('', 'end', iid=str(part['numero']), values=(part['numero'], nombre(fob, 2), nombre(part['poids_kg']), self.plaques[part['numero']-1],
                                                  c['conteneur'], c['scelle']))
         self.afficher_articles(proposition['parts'])
         self.resume.set(f"{len(self.parts)} part(s) · Total FOB : {nombre(sum(self.parts), 2)} USD · Poids total proposé : {nombre(proposition['poids_total_kg'])} kg")
+
+    def tirer_poids(self):
+        if self.parts is None:
+            return
+        self.poids = calcul.proposer_poids(len(self.parts))
+        self.actualiser()
+
+    def appliquer_poids_commun(self):
+        if self.parts is None:
+            return
+        try:
+            poids = calcul.poids_part(self.poids_commun.get())
+        except ValueError as exc:
+            self.erreur.set(str(exc))
+            return
+        self.poids = [poids] * len(self.parts)
+        self.actualiser()
+
+    def modifier_poids(self, evenement):
+        ligne = self.table.identify_row(evenement.y)
+        if self.parts is None or not ligne:
+            return
+        indice = int(ligne) - 1
+        valeur = simpledialog.askstring('Poids de la part', f'Poids de la part {indice + 1} (22 000 à 24 000 kg) :',
+                                        initialvalue=str(self.poids[indice]), parent=self)
+        if valeur is None:
+            return
+        try:
+            self.poids[indice] = calcul.poids_part(valeur)
+        except ValueError as exc:
+            self.erreur.set(str(exc))
+            return
+        self.actualiser()
 
     def afficher_articles(self, parts):
         self.articles.delete(*self.articles.get_children())
@@ -167,7 +205,7 @@ class FenetreRepartition(tk.Toplevel):
         if self.app.session_verrouillee or self.parts is None:
             return
         try:
-            licences_ouvertes.enregistrer_repartition(self.licence['numero_validation'], self.fob, self.poids.get(), plaques=self.plaques,
+            licences_ouvertes.enregistrer_repartition(self.licence['numero_validation'], self.fob, self.poids, plaques=self.plaques,
                                                     paires_conteneurs=self.conteneurs,
                                                     nombre_parts=self.options()['nombre'], plafond=self.options()['plafond'])
         except (ValueError, OSError, sqlite3.Error) as exc:

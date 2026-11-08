@@ -10,7 +10,7 @@ import xml.etree.ElementTree as ET
 from asydec.declarations import licences_ouvertes, xml_licence, mise_a_jour_repartitions, recuperation_simulation, facture_licence, cvi
 from asydec.declarations import declaration_licence
 
-from asydec.declarations.documents_finaux import preparer_licence
+from asydec.declarations.documents_finaux import preparer_licence, proposer_date_facture, ECART_FACTURE_MIN, ECART_FACTURE_MAX
 from asydec.ui import theme, synthese_licence
 from asydec.systeme import espace_travail
 from asydec.ui.details_licence import DetailsLicence
@@ -98,6 +98,12 @@ class PageDocumentsFinaux(ttk.Frame):
             self.champs[cle] = variable
             ttk.Entry(cellule, textvariable=variable).pack(fill='x')
             variable.trace_add('write', self._modifier)
+        proposition = ttk.Frame(page_licence)
+        proposition.pack(fill='x', pady=(0, 12))
+        ttk.Button(proposition, text='Proposer n° et date de facture',
+                   command=self.proposer_facture).pack(side='left')
+        ttk.Label(proposition, text=f'Si la licence n’en porte pas : facture datée de {ECART_FACTURE_MIN} à {ECART_FACTURE_MAX} '
+                  'jours avant la licence, jour ouvrable ; numéro INV suivant.', style='Doux.TLabel', wraplength=520).pack(side='left', padx=12)
         calcul = ttk.Frame(page_licence, padding=16, relief='solid', borderwidth=1)
         calcul.pack(fill='x', pady=(6, 0))
         ttk.Label(calcul, text='Date du BL · Calcul automatique', style='Section.TLabel').pack(anchor='w')
@@ -146,6 +152,23 @@ class PageDocumentsFinaux(ttk.Frame):
                 raise ValueError(f"Liste des produits incomplète : {len(details['produits'])}/{attendu} articles. Vérifiez l’onglet Produits.")
             licence.update(details)
         return licence
+
+    def proposer_facture(self):
+        """Remplit le numéro (INV suivant) et la date de facture (au moins un mois avant la licence)."""
+        validation = self.champs['date_validation'].get().strip()
+        try:
+            date_facture = proposer_date_facture(validation)
+            numero_facture = licences_ouvertes.proposer_numero_facture()
+        except (ValueError, OSError, sqlite3.Error):
+            messagebox.showerror('Facture', 'Saisissez d’abord une date de validation valide (JJ/MM/AAAA).', parent=self)
+            return
+        actuels = [self.champs[c].get().strip() for c in ('numero_facture', 'date_facture')]
+        if any(actuels) and not messagebox.askyesno(
+                'Facture', f"Remplacer {' du '.join(v for v in actuels if v)} par {numero_facture} du {date_facture} ?",
+                parent=self):
+            return
+        self.champs['numero_facture'].set(numero_facture)
+        self.champs['date_facture'].set(date_facture)
 
     def _modifier(self, *_):
         self.modifie = True
@@ -587,6 +610,12 @@ class PageDocumentsFinaux(ttk.Frame):
                         break
         except Exception:
             trouves = {}  # lecture facultative : la saisie reste possible
+        if not (trouves.get('numero_facture') or licence.get('numero_facture')):
+            try:  # rien sur la licence : proposition, modifiable dans la fenêtre de saisie
+                trouves = dict(numero_facture=licences_ouvertes.proposer_numero_facture(),
+                               date_facture=licence.get('date_facture') or proposer_date_facture(licence.get('date_validation')))
+            except (ValueError, OSError, sqlite3.Error):
+                pass
         from tkinter import simpledialog
         numero_facture = simpledialog.askstring(
             'Numéro de facture', 'Numéro de facture de la licence (rubrique « N° Facture ») :',
@@ -1044,7 +1073,10 @@ class PageDocumentsFinaux(ttk.Frame):
         a_jour = mise_a_jour_repartitions.est_a_jour(licence)
         if repartition:
             nb = len(repartition['parts'])
-            texte_repartition = (f"{nb} part(s) · {repartition['poids_par_part_kg']:,} kg par part · "
+            poids_parts = sorted({p['poids_kg'] for p in repartition['parts']})
+            texte_poids = (f"{poids_parts[0]:,} kg par part" if len(poids_parts) == 1
+                           else f"{poids_parts[0]:,} à {poids_parts[-1]:,} kg par part")
+            texte_repartition = (f"{nb} part(s) · {texte_poids} · "
                                  f"{repartition['poids_total_kg']:,} kg au total".replace(',', ' '))
             if repartition.get('nombre_parts_choisi') or not repartition.get('plafond_actif', True):
                 texte_repartition += (' · ' + ('nombre de parts choisi' if repartition.get('nombre_parts_choisi') else 'nombre automatique')
