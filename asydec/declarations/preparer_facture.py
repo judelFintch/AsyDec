@@ -1,7 +1,9 @@
 """Reconnaissance des factures commerciales avec tableau et packing list.
 
-Seuls les textes variables sont remplacés ; aucun paragraphe, dessin ou style
-n'est ajouté ni retiré. Les deux représentations des zones de texte sont traitées.
+Seuls les textes variables sont remplacés ; aucun dessin ni style n'est ajouté ou retiré. Deux
+exceptions, sans toucher police, taille ni interligne : la date absente reçoit sa ligne vide prévue
+(preparer_date), et un paragraphe vide portant un saut de section est retiré (retirer_page_vide).
+Les deux représentations des zones de texte sont traitées.
 """
 from io import BytesIO
 import re
@@ -12,6 +14,100 @@ from asydec.declarations import factures as F
 
 # Montant en lettres : « AMT IN WORDS … UNITED STATES DOLLARS » ou « … US DOLLARS ».
 MONTANT_LETTRES = r'(?i)AMT IN WORDS\s+(.+?)(?=\s+(?:UNITED\s+STATES|U\.?\s?S\.?)\s+DOLLARS)'
+
+
+def libelles_anglais(contenu):
+    """Traduit les libellés fixes, sans toucher aux données ni aux styles du Word."""
+    archive, parties = F._parties(contenu)
+    modifies = {}
+    try:
+        for nom, doc in parties.items():
+            change = False
+            for table in doc.getElementsByTagNameNS(F.W, 'tbl'):
+                rows = [n for n in table.childNodes if n.localName == 'tr']
+                if not rows:
+                    continue
+                cells = [n for n in rows[0].childNodes if n.localName == 'tc']
+                if len(cells) != 5 or 'DESCRIPTION' not in texte(cells[1]).upper():
+                    continue
+                packing = bool(re.search(r'(?i)\bKGS?\b|\{\{POIDS', ''.join(texte(r) for r in rows[1:])))
+                traductions = {'QUANTITE': 'QUANTITY', 'QUANTITÉ': 'QUANTITY',
+                               'PRIX UNITAIRE': 'UNIT WEIGHT' if packing else 'UNIT PRICE',
+                               'MONTANT': 'TOTAL WEIGHT' if packing else 'TOTAL AMOUNT'}
+                for cell in cells:
+                    for p in paragraphes(cell):
+                        s = texte(p)
+                        anglais = traductions.get(s.strip().upper())
+                        if anglais:
+                            debut = len(s) - len(s.lstrip())
+                            remplacer(p, debut, len(s.rstrip()), anglais)
+                            change = True
+            for p in paragraphes(doc):
+                for m in reversed(list(re.finditer(r'\bConsignée\b', texte(p), re.I))):
+                    remplacer(p, m.start(), m.end(), 'Consignee')
+                    change = True
+            if change:
+                modifies[nom] = F.serialiser(doc)
+        if not modifies:
+            return contenu
+        sortie = BytesIO()
+        with ZipFile(sortie, 'w') as cible:
+            for info in archive.infolist():
+                cible.writestr(info, modifies.get(info.filename, archive.read(info.filename)))
+        return sortie.getvalue()
+    finally:
+        archive.close()
+
+
+def cadrer_immatriculation(contenu):
+    """Réserve à la plaque sa place entre REGISTRATION NO’S et TRAILER (1).
+
+    Corrige les deux représentations du même dessin Word (DrawingML et VML).
+    """
+    archive, parties = F._parties(contenu)
+    modifies = {}
+    try:
+        for nom, doc in parties.items():
+            if 'REGISTRATION NO’S' not in texte(doc):
+                continue
+            noms = set()
+            for shape in doc.getElementsByTagName('v:shape'):
+                style = shape.getAttribute('style')
+                if not (re.search(r'margin-left:53[.,]1pt(?:;|$)', style)
+                        and re.search(r'width:166[.,]15pt(?:;|$)', style)):
+                    continue
+                noms.add(shape.getAttribute('id'))
+                for cle, valeur in [('margin-left', '104pt'), ('width', '70pt'), ('height', '12pt')]:
+                    style = re.sub(r'(?<![\w-])' + cle + r':[^;]+', cle + ':' + valeur, style)
+                shape.setAttribute('style', style)
+                for box in shape.getElementsByTagName('v:textbox'):
+                    box.setAttribute('inset', '0,0,0,0')
+            for anchor in doc.getElementsByTagName('wp:anchor'):
+                if not any(n.getAttribute('name') in noms for n in anchor.getElementsByTagName('wp:docPr')):
+                    continue
+                horizontal = anchor.getElementsByTagName('wp:positionH')[0]
+                F._ecrire(horizontal.getElementsByTagName('wp:posOffset')[0], str(104 * 12700))
+                extent = anchor.getElementsByTagName('wp:extent')[0]
+                extent.setAttribute('cx', str(70 * 12700))
+                extent.setAttribute('cy', str(12 * 12700))
+                for ext in anchor.getElementsByTagName('a:ext'):
+                    if ext.hasAttribute('cx'):
+                        ext.setAttribute('cx', str(70 * 12700))
+                        ext.setAttribute('cy', str(12 * 12700))
+                for body in anchor.getElementsByTagName('wps:bodyPr'):
+                    for cote in ('lIns', 'rIns', 'tIns', 'bIns'):
+                        body.setAttribute(cote, '0')
+            if noms:
+                modifies[nom] = F.serialiser(doc)
+        if not modifies:
+            return contenu
+        sortie = BytesIO()
+        with ZipFile(sortie, 'w') as cible:
+            for info in archive.infolist():
+                cible.writestr(info, modifies.get(info.filename, archive.read(info.filename)))
+        return sortie.getvalue()
+    finally:
+        archive.close()
 
 
 def paragraphes(doc):
@@ -281,5 +377,125 @@ def base_prix(contenu):
                     if quantite and abs(prix*quantite-fob)/fob < .08:
                         votes[base] += 1
         return 'kg' if votes['kg'] > votes['colis'] else 'colis'
+    finally:
+        archive.close()
+
+
+def _reecrire(archive, doc):
+    sortie = BytesIO()
+    with ZipFile(sortie, 'w') as cible:
+        for info in archive.infolist():
+            cible.writestr(info, F.serialiser(doc) if info.filename == 'word/document.xml' else archive.read(info.filename))
+    return sortie.getvalue()
+
+
+def _enfants(noeud, nom):
+    return [n for n in noeud.childNodes if n.nodeType == n.ELEMENT_NODE and n.namespaceURI == F.W and n.localName == nom]
+
+
+def preparer_date(contenu):
+    """Modèle sans {{DATE_FACTURE}} : la ligne vide juste au-dessus de « INV N° », dans la même zone
+    de texte, reçoit « Date: {{DATE_FACTURE}} » avec la police et la taille de la ligne « INV N° »
+    (disposition des autres modèles du même fournisseur). Aucun paragraphe n'est ajouté."""
+    if 'DATE_FACTURE' in inspecter_champs(contenu):
+        return contenu
+    archive, parties = F._parties(contenu)
+    try:
+        doc = parties['word/document.xml']
+        change = False
+        for p in paragraphes(doc):
+            if not texte(p).strip().upper().startswith('INV N'):
+                continue
+            avant = p.previousSibling
+            while avant is not None and avant.nodeType != avant.ELEMENT_NODE:
+                avant = avant.previousSibling
+            if (avant is None or avant.namespaceURI != F.W or avant.localName != 'p' or texte(avant).strip()
+                    or avant.getElementsByTagNameNS(F.W, 'drawing') or avant.getElementsByTagNameNS(F.W, 'pict')):
+                continue
+            modele = next((r for r in _enfants(p, 'r') if r.getElementsByTagNameNS(F.W, 't')), None)
+            if modele is None:
+                continue
+            run = modele.cloneNode(True)
+            for enfant in list(run.childNodes):
+                if not (enfant.nodeType == enfant.ELEMENT_NODE and enfant.localName == 'rPr'):
+                    run.removeChild(enfant)
+            t = doc.createElementNS(F.W, 'w:t')
+            run.appendChild(t)
+            F._ecrire(t, 'Date: {{DATE_FACTURE}}')
+            avant.appendChild(run)
+            change = True
+        return _reecrire(archive, doc) if change else contenu
+    finally:
+        archive.close()
+
+
+def inspecter_champs(contenu):
+    return F.inspecter(contenu, exiger=False)
+
+
+def _vide(p):
+    """Paragraphe sans texte visible ni dessin : seulement tabulations, retours ou espaces."""
+    return not texte(p).strip() and not any(p.getElementsByTagNameNS(F.W, n) for n in ('drawing', 'pict', 'object'))
+
+
+def retirer_page_vide(contenu):
+    """Un saut de section porté par un paragraphe vide ajoute une ligne en bas de page : quand la page
+    est pleine (packing list), Word crée une page blanche avant la section suivante (manifeste).
+    Le saut de section passe dans le paragraphe précédent et le paragraphe vide est retiré ;
+    police, taille, interligne et position des dessins ne changent pas."""
+    archive, parties = F._parties(contenu)
+    try:
+        doc = parties['word/document.xml']
+        corps = doc.getElementsByTagNameNS(F.W, 'body')[0]
+        change = False
+        for p in _enfants(corps, 'p'):
+            ppr = next(iter(_enfants(p, 'pPr')), None)
+            section = next(iter(_enfants(ppr, 'sectPr')), None) if ppr is not None else None
+            # Certains modèles portent le tampon flottant sur le paragraphe du
+            # saut de section : cette ligne vide déborde seule sur une page.
+            tampon = (section is not None and not texte(p).strip()
+                      and bool(p.getElementsByTagNameNS(F.W, 'drawing'))
+                      and not p.getElementsByTagName('wp:inline')
+                      and all(a.getElementsByTagName('wp:wrapNone')
+                              for a in p.getElementsByTagName('wp:anchor')))
+            if section is None or (not _vide(p) and not tampon):
+                continue
+            if any(t.getAttributeNS(F.W, 'val') == 'continuous' for t in _enfants(section, 'type')):
+                continue
+            avant = p.previousSibling
+            while avant is not None and avant.nodeType != avant.ELEMENT_NODE:
+                avant = avant.previousSibling
+            if avant is None or avant.namespaceURI != F.W or avant.localName != 'p':
+                continue
+            ppr_avant = next(iter(_enfants(avant, 'pPr')), None)
+            if ppr_avant is not None and _enfants(ppr_avant, 'sectPr'):
+                continue
+            if ppr_avant is None:
+                ppr_avant = doc.createElementNS(F.W, 'w:pPr')
+                avant.insertBefore(ppr_avant, avant.firstChild)
+            if tampon:
+                # Conserver les images dans une ligne d'ancrage minimale ;
+                # aucun contenu commercial ou tampon n'est supprimé.
+                if not _vide(avant):
+                    continue
+                for run in list(_enfants(p, 'r')):
+                    if run.getElementsByTagNameNS(F.W, 'drawing'):
+                        p.removeChild(run)
+                        avant.appendChild(run)
+                for br in list(avant.getElementsByTagNameNS(F.W, 'br')):
+                    if not br.getAttributeNS(F.W, 'type'):
+                        br.parentNode.removeChild(br)
+                spacing = next(iter(_enfants(ppr_avant, 'spacing')), None)
+                if spacing is None:
+                    spacing = doc.createElementNS(F.W, 'w:spacing')
+                    ppr_avant.appendChild(spacing)
+                for cle, valeur in [('before', '0'), ('after', '0'), ('line', '20'), ('lineRule', 'exact')]:
+                    spacing.setAttribute('w:' + cle, valeur)
+            suivi = next(iter(_enfants(ppr_avant, 'pPrChange')), None)
+            ppr.removeChild(section)
+            ppr_avant.insertBefore(section, suivi)
+            corps.removeChild(p)
+            change = True
+        return _reecrire(archive, doc) if change else contenu
     finally:
         archive.close()

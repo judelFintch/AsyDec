@@ -1,7 +1,7 @@
 """Factures Word : modèles archivés et remplacement ciblé des champs OOXML."""
 import calendar
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import datetime, timedelta
 from io import BytesIO
 from pathlib import Path
 import re
@@ -47,6 +47,9 @@ def connexion(base=None):
             db.execute("ALTER TABLE gabarits ADD COLUMN prix_base TEXT NOT NULL DEFAULT 'colis'")
         if 'manifeste' not in {r[1] for r in db.execute('PRAGMA table_info(factures)')}:
             db.execute('ALTER TABLE factures ADD COLUMN manifeste TEXT')
+        if 'date_facture' not in {r[1] for r in db.execute('PRAGMA table_info(factures)')}:
+            # Date imprimée, fixée une seule fois par dossier (voir date_retenue).
+            db.execute('ALTER TABLE factures ADD COLUMN date_facture TEXT')
         if 'retire' not in {r[1] for r in db.execute('PRAGMA table_info(gabarits)')}:
             # Date de retrait de la bibliothèque ; NULL = modèle proposé.
             db.execute('ALTER TABLE gabarits ADD COLUMN retire TEXT')
@@ -248,6 +251,64 @@ def date_facture(jour):
     return jour.replace(year=annee, month=mois, day=min(jour.day, calendar.monthrange(annee, mois)[1]))
 
 
+# Un même dossier (même plaque et même importateur) refacturé dans ce délai garde sa première date.
+DELAI_MEME_DOSSIER = 45
+
+
+def _date_stockee(ligne):
+    """Date imprimée d'une facture déjà émise ; les anciennes la déduisent de leur date d'émission."""
+    if ligne['date_facture']:
+        return ligne['date_facture']
+    return date_facture(datetime.fromisoformat(ligne['date']).date()).strftime('%d/%m/%Y')
+
+
+def _cle_dossier(modele):
+    plaque = re.sub(r'[^A-Z0-9]', '', (modele.get('plaque') or '').upper())
+    return plaque, (modele.get('importateur') or '').strip().upper()
+
+
+def date_retenue(db, modele, maintenant, base_modeles=None):
+    """Date de facture du dossier, fixée à la première facture : RECUL_MOIS mois avant l'émission.
+    Une correction (« Corriger le dossier… ») ou une reprise du même camion pour le même importateur
+    garde la date déjà retenue, même si la répartition a changé."""
+    from asydec.declarations import modeles_generes
+    lies, courant, vus = [], modele, set()
+    while (courant.get('resultat') or {}).get('correction', {}).get('modele_initial') not in (None, *vus):
+        initial = courant['resultat']['correction']['modele_initial']
+        vus.add(initial)
+        lies.append(initial)
+        try:
+            courant = modeles_generes.detail(initial, base=base_modeles)
+        except Exception:  # noqa: BLE001 - modèle d'origine supprimé : on s'arrête là
+            break
+    cle = _cle_dossier(modele)
+    limite = maintenant - timedelta(days=DELAI_MEME_DOSSIER)
+    for ligne in db.execute('SELECT modele_id,date,date_facture FROM factures WHERE contenu IS NOT NULL ORDER BY id'):
+        if ligne['modele_id'] in lies:
+            return _date_stockee(ligne)
+        if cle[0] and datetime.fromisoformat(ligne['date']) >= limite:
+            try:
+                autre = modeles_generes.detail(ligne['modele_id'], base=base_modeles)
+            except Exception:  # noqa: BLE001
+                continue
+            if _cle_dossier(autre) == cle:
+                return _date_stockee(ligne)
+    return date_facture(maintenant.date()).strftime('%d/%m/%Y')
+
+
+def _mettre_a_niveau(db, facture, date):
+    """Facture déjà émise : date ajoutée si son modèle Word n'en prévoyait pas, page blanche retirée.
+    Numéros, montants et date déjà imprimée sont conservés."""
+    from asydec.declarations.preparer_facture import preparer_date, retirer_page_vide, libelles_anglais, cadrer_immatriculation
+    contenu = cadrer_immatriculation(libelles_anglais(retirer_page_vide(preparer_date(facture['contenu']))))
+    if 'DATE_FACTURE' in inspecter(contenu, exiger=False):
+        contenu = remplir(contenu, {'DATE_FACTURE': date}, verifier=False)
+    if contenu != facture['contenu'] or not facture.get('date_facture'):
+        db.execute('UPDATE factures SET contenu=?,date_facture=? WHERE id=?', (contenu, date, facture['id']))
+        facture.update(contenu=contenu, date_facture=date)
+    return facture
+
+
 def generer(modele_id, gabarit_id, auteur, base=None, base_modeles=None, correspondance_confirmee=False):
     from asydec.declarations import modeles_generes
     modele = modeles_generes.detail(modele_id, base=base_modeles)
@@ -260,7 +321,6 @@ def generer(modele_id, gabarit_id, auteur, base=None, base_modeles=None, corresp
     resume = resultat['resume']
     maintenant = datetime.now(ZoneInfo('Africa/Lubumbashi'))
     valeurs = {
-        'DATE_FACTURE': date_facture(maintenant.date()).strftime('%d/%m/%Y'),
         'POIDS': nombre(resume['poids'], 2), 'FOB': nombre(resume['fob'], 2),
         'COLIS': nombre(sum(resultat.get('colis', resume.get('colis', [])))),
         'IMPORTATEUR': modele['importateur'], 'PLAQUE': modele['plaque'] or '',
@@ -272,9 +332,9 @@ def generer(modele_id, gabarit_id, auteur, base=None, base_modeles=None, corresp
     valeurs.update(FOB_LETTRES=lettres(resume['fob'], monnaie=True), POIDS_LETTRES=lettres(resume['poids']))
     with connexion(base) as db:
         db.execute('BEGIN IMMEDIATE')
-        existante = db.execute('SELECT id,numero,manifeste,contenu FROM factures WHERE modele_id=? AND contenu IS NOT NULL ORDER BY id DESC LIMIT 1', (modele_id,)).fetchone()
+        existante = db.execute('SELECT id,numero,manifeste,contenu,date,date_facture FROM factures WHERE modele_id=? AND contenu IS NOT NULL ORDER BY id DESC LIMIT 1', (modele_id,)).fetchone()
         if existante is not None:
-            facture = dict(existante)
+            facture = _mettre_a_niveau(db, dict(existante), _date_stockee(existante))
             if not facture['manifeste']:
                 # Anciennes archives : conserver leur code facture et attribuer
                 # une seule fois le manifeste, sans créer une autre facture.
@@ -285,7 +345,9 @@ def generer(modele_id, gabarit_id, auteur, base=None, base_modeles=None, corresp
                 db.execute('UPDATE factures SET manifeste=?,contenu=? WHERE id=?',
                            (manifeste, contenu, facture['id']))
                 facture.update(manifeste=manifeste, contenu=contenu)
+            facture.pop('date', None)
             return facture
+        valeurs['DATE_FACTURE'] = date_retenue(db, modele, maintenant, base_modeles)
         gabarit = db.execute('SELECT contenu,articles_json,prix_base,retire FROM gabarits WHERE id=?', (gabarit_id,)).fetchone()
         if gabarit is None:
             raise ValueError('Modèle de facture introuvable.')
@@ -314,11 +376,15 @@ def generer(modele_id, gabarit_id, auteur, base=None, base_modeles=None, corresp
             (modele_id, gabarit_id, maintenant.isoformat(), auteur)).lastrowid
         numero, manifeste = _reserver_numeros(base)
         # Mise à niveau en mémoire des modèles déjà importés, sans fichier intermédiaire.
-        from asydec.declarations.preparer_facture import preparer_lettres, preparer_manifeste
-        gabarit_contenu = preparer_lettres(preparer_manifeste(contenu_gabarit))
-        contenu = remplir(gabarit_contenu, dict(valeurs, NUMERO_FACTURE=numero, NUMERO_MANIFESTE=manifeste))
-        db.execute('UPDATE factures SET numero=?,manifeste=?,contenu=? WHERE id=?', (numero, manifeste, contenu, identifiant))
-    return {'id': identifiant, 'numero': numero, 'manifeste': manifeste, 'contenu': contenu}
+        from asydec.declarations.preparer_facture import (preparer_date, preparer_lettres, preparer_manifeste,
+                                                          retirer_page_vide)
+        gabarit_contenu = retirer_page_vide(preparer_date(preparer_lettres(preparer_manifeste(contenu_gabarit))))
+        from asydec.declarations.preparer_facture import libelles_anglais, cadrer_immatriculation
+        contenu = cadrer_immatriculation(libelles_anglais(remplir(gabarit_contenu, dict(valeurs, NUMERO_FACTURE=numero, NUMERO_MANIFESTE=manifeste))))
+        db.execute('UPDATE factures SET numero=?,manifeste=?,contenu=?,date_facture=? WHERE id=?',
+                   (numero, manifeste, contenu, valeurs['DATE_FACTURE'], identifiant))
+    return {'id': identifiant, 'numero': numero, 'manifeste': manifeste, 'contenu': contenu,
+            'date_facture': valeurs['DATE_FACTURE']}
 
 
 def factures_emises(gabarit_ids, base=None):
@@ -350,15 +416,16 @@ def retirer_modeles(gabarit_ids, base=None):
 
 def lister_factures(modele_id, base=None):
     with connexion(base) as db:
-        return [dict(r) for r in db.execute('SELECT id,numero,manifeste,date FROM factures WHERE modele_id=? ORDER BY id DESC', (modele_id,))]
+        return [dict(r) for r in db.execute('SELECT id,numero,manifeste,date,date_facture FROM factures WHERE modele_id=? ORDER BY id DESC', (modele_id,))]
 
 
 def lire(identifiant, base=None):
     with connexion(base) as db:
-        facture = db.execute('SELECT numero,manifeste,contenu FROM factures WHERE id=?', (identifiant,)).fetchone()
+        facture = db.execute('SELECT id,numero,manifeste,contenu,date,date_facture FROM factures WHERE id=?', (identifiant,)).fetchone()
         if facture is None:
             raise ValueError('Facture introuvable.')
-        return dict(facture)
+        sortie = _mettre_a_niveau(db, dict(facture), _date_stockee(facture)) if facture['contenu'] else dict(facture)
+        return {k: sortie[k] for k in ('numero', 'manifeste', 'contenu', 'date_facture')}
 
 
 def _normaliser(texte):
