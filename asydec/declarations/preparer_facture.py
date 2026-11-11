@@ -59,45 +59,83 @@ def libelles_anglais(contenu):
         archive.close()
 
 
-def cadrer_immatriculation(contenu):
-    """Réserve à la plaque sa place entre REGISTRATION NO’S et TRAILER (1).
+def cadrer_immatriculation(contenu, plaque=None):
+    """Aligne libellé et immatriculation d'après la géométrie du modèle.
 
-    Corrige les deux représentations du même dessin Word (DrawingML et VML).
+    Les dessins VML et DrawingML sont traités indépendamment, sans identifiant
+    de zone ni coordonnées propres à un fournisseur.
     """
+    def rectangle(forme, tag):
+        if tag == 'v:shape':
+            style = forme.getAttribute('style')
+            def mesure(cle, defaut=0):
+                m = re.search(r'(?:^|;)' + cle + r':(-?[0-9.,]+)pt(?:;|$)', style)
+                return float(m[1].replace(',', '.')) if m else defaut
+            return mesure('margin-left'), mesure('margin-top'), mesure('width')
+        def position(tag):
+            ps = forme.getElementsByTagName(tag)
+            offsets = ps[0].getElementsByTagName('wp:posOffset') if ps else []
+            return float(F._texte(offsets[0])) / 12700 if offsets else 0
+        extents = forme.getElementsByTagName('wp:extent')
+        largeur = float(extents[0].getAttribute('cx')) / 12700 if extents else 0
+        return position('wp:positionH'), position('wp:positionV'), largeur
+
+    def support(forme):
+        # Les positions relatives ne sont comparables que pour le même ancrage.
+        courant, dernier = forme, None
+        while courant is not None:
+            if courant.namespaceURI == F.W and courant.localName == 'p':
+                dernier = courant
+            courant = courant.parentNode
+        return dernier
+
+    libelle_re = re.compile(r"REGISTRATION\s+(?:NO[’']?S?|NUMBER)\s*[:.]?", re.I)
+    plaque_re = re.compile(r'(?:[A-Z]{1,3}\s*\d{2,5}[A-Z]{1,4})(?:\s*/\s*[A-Z]{1,3}\s*\d{2,5}[A-Z]{1,4})?', re.I)
     archive, parties = F._parties(contenu)
     modifies = {}
     try:
         for nom, doc in parties.items():
-            if 'REGISTRATION NO’S' not in texte(doc):
-                continue
-            noms = set()
-            for shape in doc.getElementsByTagName('v:shape'):
-                style = shape.getAttribute('style')
-                if not (re.search(r'margin-left:53[.,]1pt(?:;|$)', style)
-                        and re.search(r'width:166[.,]15pt(?:;|$)', style)):
-                    continue
-                noms.add(shape.getAttribute('id'))
-                for cle, valeur in [('margin-left', '104pt'), ('width', '70pt'), ('height', '12pt')]:
-                    style = re.sub(r'(?<![\w-])' + cle + r':[^;]+', cle + ':' + valeur, style)
-                shape.setAttribute('style', style)
-                for box in shape.getElementsByTagName('v:textbox'):
-                    box.setAttribute('inset', '0,0,0,0')
-            for anchor in doc.getElementsByTagName('wp:anchor'):
-                if not any(n.getAttribute('name') in noms for n in anchor.getElementsByTagName('wp:docPr')):
-                    continue
-                horizontal = anchor.getElementsByTagName('wp:positionH')[0]
-                F._ecrire(horizontal.getElementsByTagName('wp:posOffset')[0], str(104 * 12700))
-                extent = anchor.getElementsByTagName('wp:extent')[0]
-                extent.setAttribute('cx', str(70 * 12700))
-                extent.setAttribute('cy', str(12 * 12700))
-                for ext in anchor.getElementsByTagName('a:ext'):
-                    if ext.hasAttribute('cx'):
-                        ext.setAttribute('cx', str(70 * 12700))
-                        ext.setAttribute('cy', str(12 * 12700))
-                for body in anchor.getElementsByTagName('wps:bodyPr'):
-                    for cote in ('lIns', 'rIns', 'tIns', 'bIns'):
-                        body.setAttribute(cote, '0')
-            if noms:
+            change = False
+            for tag in ('v:shape', 'wp:anchor'):
+                formes = list(doc.getElementsByTagName(tag))
+                for libelle in formes:
+                    titre = texte(libelle).strip()
+                    if not libelle_re.fullmatch(titre):
+                        continue
+                    x, y, largeur = rectangle(libelle, tag)
+                    voisines = [s for s in formes if s is not libelle and support(s) is support(libelle)]
+                    candidates = [s for s in voisines if texte(s).strip() and
+                                  ((plaque and texte(s).strip() == plaque.strip())
+                                   or (not plaque and (plaque_re.fullmatch(texte(s).strip())
+                                                       or texte(s).strip() == '{{PLAQUE}}')))]
+                    if not candidates:
+                        continue
+                    valeur_zone = min(candidates, key=lambda s: abs(rectangle(s, tag)[0] - x)
+                                      + 4 * abs(rectangle(s, tag)[1] - y))
+                    px, _, pw = rectangle(valeur_zone, tag)
+                    limites = [rectangle(s, tag)[0] for s in voisines
+                               if re.match(r'(?i)TRAILER\s*\(', texte(s).strip())
+                               and rectangle(s, tag)[0] > x and abs(rectangle(s, tag)[1] - y) < 8]
+                    droite = min(limites) - 5.75 if limites else max(x + largeur, px + pw)
+                    largeur = droite - x
+                    if largeur <= 0:
+                        continue
+                    valeur = texte(valeur_zone).strip()
+                    remplacer(libelle, 0, len(texte(libelle)), titre + '  ' + valeur)
+                    remplacer(valeur_zone, 0, len(texte(valeur_zone)), '')
+                    for sz in list(libelle.getElementsByTagNameNS(F.W, 'sz')) + list(libelle.getElementsByTagNameNS(F.W, 'szCs')):
+                        sz.setAttribute('w:val', str(min(int(sz.getAttribute('w:val') or 19), 19)))
+                    if tag == 'v:shape':
+                        style = re.sub(r'(?<![\w-])width:[^;]+', f'width:{largeur:g}pt', libelle.getAttribute('style'))
+                        libelle.setAttribute('style', style)
+                    else:
+                        for extent in libelle.getElementsByTagName('wp:extent'):
+                            extent.setAttribute('cx', str(round(largeur * 12700)))
+                        for extent in libelle.getElementsByTagName('a:ext'):
+                            if extent.hasAttribute('cx'):
+                                extent.setAttribute('cx', str(round(largeur * 12700)))
+                    change = True
+            if change:
                 modifies[nom] = F.serialiser(doc)
         if not modifies:
             return contenu
@@ -219,6 +257,37 @@ def preparer(contenu):
         resultat = sortie.getvalue()
         F.inspecter(resultat)
         return resultat, reperes[0]
+    finally:
+        archive.close()
+
+
+def dater_manifeste(contenu, date):
+    """Date de départ du manifeste routier : conserve TZ, styles et vues Word.
+
+    La date de facture, les références de commande et les autres dates ne sont
+    pas concernées. Les modèles routiers portent la date suivie du pays TZ.
+    """
+    archive, parties = F._parties(contenu)
+    modifies = {}
+    try:
+        for nom, doc in parties.items():
+            if not re.search(r'(?i)MANIFEST\s+NO\s*:', texte(doc)):
+                continue
+            change = False
+            for p in paragraphes(doc):
+                for m in reversed(list(re.finditer(r'\b\d{2}[/-]\d{2}[/-]\d{4}(?=\s+TZ\b)', texte(p)))):
+                    if m[0] != date:
+                        remplacer(p, m.start(), m.end(), date)
+                        change = True
+            if change:
+                modifies[nom] = F.serialiser(doc)
+        if not modifies:
+            return contenu
+        sortie = BytesIO()
+        with ZipFile(sortie, 'w') as cible:
+            for info in archive.infolist():
+                cible.writestr(info, modifies.get(info.filename, archive.read(info.filename)))
+        return sortie.getvalue()
     finally:
         archive.close()
 

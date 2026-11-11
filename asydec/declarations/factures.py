@@ -1,5 +1,6 @@
 """Factures Word : modèles archivés et remplacement ciblé des champs OOXML."""
 import calendar
+import hashlib
 from contextlib import contextmanager
 from datetime import datetime, timedelta
 from io import BytesIO
@@ -296,6 +297,19 @@ def date_retenue(db, modele, maintenant, base_modeles=None):
     return date_facture(maintenant.date()).strftime('%d/%m/%Y')
 
 
+def date_manifeste(date, numero):
+    """Jour lundi–vendredi, 3 à 6 jours calendaires après la facture.
+
+    Le choix dépend des références archivées pour rester stable sans nouveau
+    tirage lors d'un téléchargement ou d'une mise à niveau.
+    """
+    jour = datetime.strptime(date, '%d/%m/%Y').date()
+    candidats = [jour + timedelta(days=d) for d in range(3, 7)
+                 if (jour + timedelta(days=d)).weekday() < 5]
+    indice = hashlib.sha256(f'{numero}|{date}'.encode()).digest()[0] % len(candidats)
+    return candidats[indice].strftime('%d/%m/%Y')
+
+
 def _mettre_a_niveau(db, facture, date):
     """Facture déjà émise : date ajoutée si son modèle Word n'en prévoyait pas, page blanche retirée.
     Numéros, montants et date déjà imprimée sont conservés."""
@@ -303,6 +317,8 @@ def _mettre_a_niveau(db, facture, date):
     contenu = cadrer_immatriculation(libelles_anglais(retirer_page_vide(preparer_date(facture['contenu']))))
     if 'DATE_FACTURE' in inspecter(contenu, exiger=False):
         contenu = remplir(contenu, {'DATE_FACTURE': date}, verifier=False)
+    from asydec.declarations.preparer_facture import dater_manifeste
+    contenu = dater_manifeste(contenu, date_manifeste(date, facture['numero']))
     if contenu != facture['contenu'] or not facture.get('date_facture'):
         db.execute('UPDATE factures SET contenu=?,date_facture=? WHERE id=?', (contenu, date, facture['id']))
         facture.update(contenu=contenu, date_facture=date)
@@ -380,7 +396,9 @@ def generer(modele_id, gabarit_id, auteur, base=None, base_modeles=None, corresp
                                                           retirer_page_vide)
         gabarit_contenu = retirer_page_vide(preparer_date(preparer_lettres(preparer_manifeste(contenu_gabarit))))
         from asydec.declarations.preparer_facture import libelles_anglais, cadrer_immatriculation
-        contenu = cadrer_immatriculation(libelles_anglais(remplir(gabarit_contenu, dict(valeurs, NUMERO_FACTURE=numero, NUMERO_MANIFESTE=manifeste))))
+        contenu = cadrer_immatriculation(libelles_anglais(remplir(gabarit_contenu, dict(valeurs, NUMERO_FACTURE=numero, NUMERO_MANIFESTE=manifeste))), plaque=valeurs['PLAQUE'])
+        from asydec.declarations.preparer_facture import dater_manifeste
+        contenu = dater_manifeste(contenu, date_manifeste(valeurs['DATE_FACTURE'], numero))
         db.execute('UPDATE factures SET numero=?,manifeste=?,contenu=?,date_facture=? WHERE id=?',
                    (numero, manifeste, contenu, valeurs['DATE_FACTURE'], identifiant))
     return {'id': identifiant, 'numero': numero, 'manifeste': manifeste, 'contenu': contenu,
