@@ -182,10 +182,11 @@ class FactureGlobaleTest(TestCase):
         self.assertEqual([(str(x['quantite']), str(x['valeur'])) for x in donnees['lignes']],
                          [('160', '112000.00'), ('400', '20000.00')])
         facture, colisage = texte(globale['documents']['facture']), texte(globale['documents']['packing list'])
-        for attendu in ('ORD0000013709', '$ 112 000,00', '$ 20 000,00', '$ 132 000,00'):
+        for attendu in ('ORD0000013709', '112,000.00', '20,000.00', '132,000.00'):
             self.assertIn(attendu, facture)
         self.assertNotIn('ORD0000013709-', facture)
         self.assertIn('All 2 parts', colisage)
+        self.assertIn('All 2 parts', facture)
         self.assertEqual(facture_licence.nom_fichier('LIC 1', globale),
                          'LIC-1 - global - facture ORD0000013709.docx')
 
@@ -206,7 +207,7 @@ class FactureGlobaleTest(TestCase):
 class FactureSimpleTest(TestCase):
     def test_facture_et_packing_list_creees_sans_modele(self):
         l = licence()
-        l['fournisseur'] = {'nom': 'KINSHOP GENERAL TRADING FZE', 'adresse': 'AJMAN FREE ZONE'}
+        l['fournisseur'] = {'nom': 'EXEMPLE GENERAL TRADING FZE', 'adresse': 'AJMAN FREE ZONE'}
         l['produits'] = [{'tarif_douanier': '8711100000', 'pays_origine': 'India', 'devise': 'USD'}]
         l['repartition']['parts'][1].update(conteneur='MRSU 3816289', scelle='G9152292')
         resultats = facture_licence.generer(l)
@@ -215,10 +216,11 @@ class FactureSimpleTest(TestCase):
         self.assertEqual(set(documents), {'facture', 'packing list'})
         for contenu in documents.values():
             with ZipFile(BytesIO(contenu)) as z:
-                self.assertEqual(sorted(z.namelist()), ['[Content_Types].xml', '_rels/.rels', 'word/document.xml'])
+                self.assertEqual(sorted(z.namelist()), ['[Content_Types].xml', '_rels/.rels', 'word/_rels/document.xml.rels',
+                                                        'word/document.xml', 'word/media/asydec-sceau-1.png'])
                 minidom.parseString(z.read('word/document.xml'))  # XML bien formé
         facture, colisage = texte(documents['facture']), texte(documents['packing list'])
-        communs = ('ORD0000013709-2', '16/06/2025', 'KINSHOP GENERAL TRADING FZE', 'ETS KATANGA',
+        communs = ('ORD0000013709-2', '16/06/2025', 'EXEMPLE GENERAL TRADING FZE', 'ETS KATANGA',
                    'Motocycles 50 cm3', 'Consignee:', 'INV NO', 'TOTAL FOB IN WORDS',
                    'ONE HUNDRED FIFTEEN THOUSAND ONE HUNDRED TWENTY EIGHT US DOLLARS')
         douane = ('LICENCE NO', 'DEC1-IB', 'DEC NO', 'TRUCK / TRAILER', 'T302XDH/T908ZPJ', 'CONTAINER', 'MRSU 3816289',
@@ -226,13 +228,13 @@ class FactureSimpleTest(TestCase):
         for absent in douane:
             self.assertNotIn(absent, facture)  # retirés de la facture commerciale
             self.assertNotIn(absent, colisage)  # et de la packing list
-        self.assertNotIn('Part 2 of 2', facture)
+        self.assertIn('Part 2 of 2', facture)
         self.assertIn('Part 2 of 2', colisage)
-        for attendu in communs + ('INVOICE', 'TOTAL FOB', 'FREIGHT', 'INSURANCE', 'TOTAL CIF', '$ 115 128,00'):
+        for attendu in communs + ('INVOICE', 'TOTAL FOB', 'FREIGHT', 'INSURANCE', 'TOTAL CIF', '115,128.00'):
             self.assertIn(attendu, facture)
         for absent in ('8711100000', 'India', 'HS CODE', 'ORIGIN', 'WEIGHT IN WORDS', 'TERMS'):
             self.assertNotIn(absent, facture)  # comme la facture commerciale réelle (FCM)
-        for attendu in communs + ('PACKING LIST', '22 998,00', 'TWENTY TWO THOUSAND NINE HUNDRED NINETY EIGHT KILOGRAMS'):
+        for attendu in communs + ('PACKING LIST', '22,998.00', 'TWENTY TWO THOUSAND NINE HUNDRED NINETY EIGHT KILOGRAMS'):
             self.assertIn(attendu, colisage)
         self.assertNotIn('PACKING LIST', facture)
         self.assertNotIn('INVOICE', colisage.replace('INV NO', ''))

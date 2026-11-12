@@ -311,6 +311,18 @@ def repartir_quantites(articles, total, poids=None):
         if i == appoint and prix_appoint is not None:
             copie['prix_unitaire'] = format(prix_appoint, '.2f')
         copies.append(copie)
+    # Articles comptés à l'unité : quantité entière la plus proche au prix d'origine, puis prix unitaire
+    # recalculé pour garder exactement la valeur de l'article (jamais de fraction de pièce).
+    from asydec.declarations import quantites_entieres as QE
+    for copie, p in zip(copies, prix):
+        q, pu = _decimal(copie['quantite']), _decimal(copie['prix_unitaire'])
+        if not QE.comptable(copie.get('unite')) or q == q.to_integral_value():
+            continue
+        montant = valeur(q, pu)
+        entiere = QE.entier(montant / p)
+        exact = QE.pu_exact(entiere, montant)
+        if exact is not None:
+            copie['quantite'], copie['prix_unitaire'] = QE.format_quantite(entiere), QE.format_pu(exact)
     return copies, ecart
 
 

@@ -24,21 +24,34 @@ def taux_choisi(app):
     texte = var.get().strip() if var is not None else ""
     if not texte:
         return None
+    from asydec.declarations.taux_declaration import lire
     try:
-        taux = float(texte.replace(" ", "").replace(",", "."))
+        taux = float(lire(texte))
     except ValueError:
-        taux = None
-    if taux is None or not math.isfinite(taux) or taux <= 0:
         raise ValueError(f"Taux de change « {texte} » invalide : saisissez un nombre positif (CDF pour 1 USD) "
-                         "ou videz le champ pour garder le taux du XML.")
+                         "ou videz le champ pour garder le taux du XML.") from None
     return taux
 
 
 def selecteur(parent, app):
     ttk.Label(parent, text="Taux CDF/USD", style="Doux.TLabel").pack(side="left", padx=(12, 4))
-    champ = ttk.Entry(parent, textvariable=variable(app), width=9, justify="right")
+    champ = ttk.Entry(parent, textvariable=variable(app), width=12, justify="right")
     champ.pack(side="left")
-    ttk.Label(parent, text="(vide = taux du XML)", style="Doux.TLabel").pack(side="left", padx=(4, 0))
+    lu = tk.StringVar()
+
+    def relire(*_):
+        texte = variable(app).get().strip()
+        if not texte:
+            lu.set("(vide = taux du XML)")
+            return
+        try:
+            lu.set(f"= {taux_choisi(app):,.4f} CDF pour 1 USD".replace(",", " "))
+        except ValueError:
+            lu.set("taux illisible")
+
+    variable(app).trace_add("write", relire)
+    relire()
+    ttk.Label(parent, textvariable=lu, style="Doux.TLabel").pack(side="left", padx=(4, 0))
     ecrire = getattr(app, "_ecrire_prefs", None)
     if callable(ecrire):
         champ.bind("<FocusOut>", lambda _e: ecrire())

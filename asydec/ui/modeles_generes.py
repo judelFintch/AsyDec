@@ -1,4 +1,5 @@
 """Liste persistante des propositions, avec validation locale explicite."""
+from datetime import datetime, timedelta
 from pathlib import Path
 import tempfile
 import tkinter as tk
@@ -117,6 +118,62 @@ STATUTS_COURTS={'en_attente':'En attente','valide':'Validé','rejete':'Rejeté'}
 
 
 
+# Étapes d'avancement : chaque modèle est rangé dans une seule section, dans cet ordre.
+ETAPES = (('encours', 'EN COURS', 'en attente de validation'),
+          ('prets', 'PRÊTS', 'validés, pas encore comparés à la déclaration réelle'),
+          ('passes', 'PASSÉS', 'comparés à la déclaration réelle'),
+          ('rejetes', 'REJETÉS', 'rejetés localement'))
+OUVERTES = {'encours': True, 'prets': True, 'passes': False, 'rejetes': False}
+PERIODES = {'Toutes les dates': None, "Aujourd'hui": 0, '7 derniers jours': 7, '30 derniers jours': 30}
+
+
+def etape(m):
+    """Section d'avancement du modèle : en cours, prêt, passé ou rejeté."""
+    if m.get('statut') == 'rejete':
+        return 'rejetes'
+    if m.get('comparaisons'):
+        return 'passes'
+    return 'prets' if m.get('statut') == 'valide' else 'encours'
+
+
+def _local(valeur_iso):
+    return datetime.fromisoformat(valeur_iso).astimezone() if valeur_iso else None
+
+
+def dans_periode(m, jours, maintenant=None):
+    """jours=None : toujours ; 0 : aujourd'hui ; n : depuis n jours. Compte la dernière action du modèle."""
+    if jours is None:
+        return True
+    quand = _local(m.get('modifie_utc') or m.get('cree_utc'))
+    if quand is None:
+        return False
+    debut = (maintenant or datetime.now().astimezone()).replace(hour=0, minute=0, second=0, microsecond=0)
+    return quand >= debut - timedelta(days=jours)
+
+
+def quand_court(valeur_iso, maintenant=None):
+    """« aujourd'hui 08:33 », « hier 17:10 » ou « 05/11 14:02 »."""
+    quand = _local(valeur_iso)
+    if quand is None:
+        return '—'
+    jour = (maintenant or datetime.now().astimezone()).date()
+    if quand.date() == jour:
+        return f"aujourd'hui {quand:%H:%M}"
+    if quand.date() == jour - timedelta(days=1):
+        return f'hier {quand:%H:%M}'
+    return quand.strftime('%d/%m/%y %H:%M')
+
+
+def correspond(m, recherche):
+    """Recherche libre : plaque, importateur, numéro ou nom du fichier XML."""
+    recherche = recherche.strip().lower()
+    if not recherche:
+        return True
+    texte = ' '.join(str(x or '') for x in (m.get('id'), m.get('plaque'), m.get('importateur'),
+                                             Path(m['chemin_xml']).name if m.get('chemin_xml') else ''))
+    return recherche in texte.lower()
+
+
 class PageModelesGeneres(ttk.Frame):
     def __init__(self, parent, app):
         super().__init__(parent)
@@ -132,6 +189,16 @@ class PageModelesGeneres(ttk.Frame):
         self.filtre.set('Tous')
         self.filtre.pack(side='left',padx=4)
         self.filtre.bind('<<ComboboxSelected>>',lambda e:self.afficher())
+        self.periode = ttk.Combobox(barre, state='readonly', values=list(PERIODES), width=16)
+        self.periode.set('Toutes les dates')
+        self.periode.pack(side='left', padx=4)
+        self.periode.bind('<<ComboboxSelected>>', lambda e: self.afficher())
+        self.var_recherche = tk.StringVar()
+        ttk.Label(barre, text='Rechercher', style='Doux.TLabel').pack(side='left', padx=(8, 0))
+        recherche = ttk.Entry(barre, textvariable=self.var_recherche, width=18)
+        recherche.pack(side='left', padx=4)
+        recherche.bind('<KeyRelease>', lambda e: self.afficher())
+        self.ouvertes = dict(OUVERTES)
         for texte, action in [('Actualiser',self.afficher),('Détails…',self.consulter),('Ouvrir le dossier',self.ouvrir_dossier),('Anomalies…',self.voir_anomalies)]:
             theme.bouton(barre,texte,action).pack(side='left',padx=4)
         self.comparer_bouton=theme.bouton(barre,'Comparer avec un XML…',self.comparer,state='disabled')
@@ -172,8 +239,16 @@ class PageModelesGeneres(ttk.Frame):
         cadre,self.table=theme.tableau(self,[
             ('bon','★',30,'center'),('note','Note',80,'center'),('id','N°',45,'e'),('risque','Risque',110,'w'),('plaque','Plaque',140,'w'),('importateur','Importateur',190,'w'),
             ('statut','Statut',95,'center'),('compare','Écart taxes comparé',150,'e'),('fob','FOB USD',95,'e'),
-            ('poids','Poids kg',85,'e'),('taxes','Taxes CDF',110,'e'),('fichier','Fichier XML généré',230,'w')],12)
+            ('poids','Poids kg',85,'e'),('taxes','Taxes CDF',110,'e'),('quand','Dernière action',130,'w'),
+            ('fichier','Fichier XML généré',230,'w')],12)
         cadre.pack(fill='both',expand=True)
+        # Colonne d'arbre : sections repliables par étape d'avancement.
+        self.table.configure(show='tree headings')
+        self.table.heading('#0', text='Étape', anchor='w')
+        self.table.column('#0', width=200, stretch=False, anchor='w')
+        self.table.tag_configure('section', font=(theme.POLICE, 12, 'bold'), background=theme.FOND_LATERAL)
+        self.table.bind('<<TreeviewOpen>>', lambda e: self._memoriser_section(True))
+        self.table.bind('<<TreeviewClose>>', lambda e: self._memoriser_section(False))
         self.table.tag_configure('valide',foreground=theme.OK)
         self.table.tag_configure('rejete',foreground=theme.TEXTE_DOUX)
         self.table.tag_configure('risque_eleve',foreground=theme.ERREUR)
@@ -200,6 +275,9 @@ class PageModelesGeneres(ttk.Frame):
             self.analyses=analyser_modeles(self.app)
             if self.filtre.get()=='À risque ⚠':
                 lignes=[m for m in lignes if anomalies.niveau(self.analyses.get(m['id'],[])) in ('eleve','moyen')]
+            jours = PERIODES.get(self.periode.get())
+            recherche = self.var_recherche.get()
+            lignes=[m for m in lignes if dans_periode(m, jours) and correspond(m, recherche)]
         except Exception as exc:
             self.message.afficher('erreur','Liste indisponible',[str(exc)])
             return
@@ -211,13 +289,24 @@ class PageModelesGeneres(ttk.Frame):
         self.bon_bouton.configure(state='disabled',text='☆ Cocher bon modèle')
         self.supprimer_bouton.configure(state='disabled',text='Restaurer' if supprimes else 'Supprimer…')
         self.table.delete(*self.table.get_children())
+        # Une section par étape ; « Supprimés » reste une liste simple.
+        parents = {}
+        if not supprimes:
+            comptes = {}
+            for m in lignes:
+                comptes[etape(m)] = comptes.get(etape(m), 0) + 1
+            for cle, titre, aide in ETAPES:
+                if comptes.get(cle):
+                    parents[cle] = self.table.insert('', 'end', iid=f'section:{cle}', open=self.ouvertes.get(cle, True),
+                        text=f'{titre} ({comptes[cle]})', values=('', '', '', aide), tags=('section',))
         for identifiant,m in self.modeles.items():
             r=m['resultat']
             risque=anomalies.niveau(self.analyses.get(m['id'],[]))
-            self.table.insert('','end',iid=identifiant,tags=(f'risque_{risque}' if risque else m['statut'],),
+            self.table.insert(parents.get(etape(m), ''),'end',iid=identifiant,tags=(f'risque_{risque}' if risque else m['statut'],),
                 values=('★' if m['bon'] else '',etoiles(m.get('note')),identifiant,TEXTES_RISQUE[risque],m['plaque'] or '—',
                 m['importateur'],STATUTS_COURTS[m['statut']],ecart_court(m),
                 nombre(r['resume']['fob'],2),nombre(r['resume']['poids']),nombre(r['resume'].get('taxes_totales')),
+                quand_court(m.get('modifie_utc')),
                 Path(m['chemin_xml']).name if m['chemin_xml'] else '—'))
         self.var_resume.set('Sélectionnez un modèle pour voir ses informations.')
         self.message.afficher('ok',f'{len(lignes)} modèle(s) dans cette liste',
@@ -267,7 +356,19 @@ class PageModelesGeneres(ttk.Frame):
 
     def selection(self):
         choix=self.table.selection()
-        return int(choix[0]) if choix else None
+        return int(choix[0]) if choix and choix[0].isdigit() else None
+
+    def lignes_affichees(self):
+        """Numéros des modèles affichés, sections comprises, dans l'ordre."""
+        sortie = []
+        for iid in self.table.get_children():
+            sortie.extend(self.table.get_children(iid) if iid.startswith('section:') else (iid,))
+        return tuple(sortie)
+
+    def _memoriser_section(self, ouverte):
+        iid = self.table.focus()
+        if iid.startswith('section:'):
+            self.ouvertes[iid.split(':', 1)[1]] = ouverte
 
     def consulter(self):
         if self.app.session_verrouillee:
@@ -436,6 +537,7 @@ class PageModelesGeneres(ttk.Frame):
         self.afficher()
         if self.table.exists(str(identifiant)):
             self.table.selection_set(str(identifiant))
+            self.table.see(str(identifiant))
         self.message.afficher('ok',f'Modèle n° {identifiant} noté {note}/5 ({service.NOTES[note]})',
             [EFFET_NOTE[note]])
 
@@ -455,6 +557,7 @@ class PageModelesGeneres(ttk.Frame):
         self.afficher()
         if self.table.exists(str(identifiant)):
             self.table.selection_set(str(identifiant))
+            self.table.see(str(identifiant))
 
     def supprimer(self):
         if self.app.session_verrouillee:
@@ -520,6 +623,7 @@ class PageModelesGeneres(ttk.Frame):
         self.afficher()
         if self.table.exists(str(identifiant)):
             self.table.selection_set(str(identifiant))
+            self.table.see(str(identifiant))
 
     def corriger_dossier(self, identifiant=None, parent=None):
         if self.app.session_verrouillee:
@@ -682,3 +786,4 @@ class PageModelesGeneres(ttk.Frame):
         self.afficher()
         if self.table.exists(str(identifiant)):
             self.table.selection_set(str(identifiant))
+            self.table.see(str(identifiant))

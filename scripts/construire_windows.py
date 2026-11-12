@@ -28,6 +28,7 @@ def main():
           if (RACINE/'ressources/cvi/CVI-modele.docx').is_file() else []),
         *(['--add-data', str(RACINE/'ressources/declaration/Declaration-modele.docx')+';ressources/declaration']
           if (RACINE/'ressources/declaration/Declaration-modele.docx').is_file() else []),
+        '--add-data', str(RACINE/'ressources/factures')+';ressources/factures',
         '--collect-all', 'rapidocr_onnxruntime', '--collect-all', 'onnxruntime',
         '--add-data', f'{RACINE}/asydec/construction.json;asydec',
         '--distpath', str(RACINE/'dist'), '--workpath', str(RACINE/'build'),

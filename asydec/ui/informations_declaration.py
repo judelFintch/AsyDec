@@ -1,8 +1,9 @@
 """Étape de saisie des informations de déclaration."""
+import re
 import sqlite3
 import tkinter as tk
 from tkinter import ttk
-from asydec.declarations import informations_declaration as regles, licences_ouvertes
+from asydec.declarations import informations_declaration as regles, licences_ouvertes, taux_declaration
 from asydec.ui import theme
 
 
@@ -12,7 +13,7 @@ class InformationsDeclaration(tk.Toplevel):
         self.app, self.licence = app, licence
         self.apres_validation = apres_validation
         self.title('Informations déclaration')
-        self.geometry('820x780')
+        self.geometry(f'860x{min(860, self.winfo_screenheight() - 90)}')
         self.minsize(740, 680)
         self.transient(parent.winfo_toplevel())
         cadre = ttk.Frame(self, padding=20)
@@ -76,28 +77,50 @@ class InformationsDeclaration(tk.Toplevel):
                 self.champs[cle] = variable
                 ttk.Entry(case, textvariable=variable, state='readonly' if cle in regles.DATES_AUTO else 'normal').pack(fill='x')
         ttk.Label(chronologie, text='Saisie pour la première part · E, liquidation et manifeste suivants : +1 à +6.\n'
-                  'Q commun aux cinq premières parts, puis deuxième Q pour les suivantes.\n'
+                  'Q partagé par groupes aléatoires de 2 à 6 parts consécutives à la même date, +1 à +6 d’un groupe à l’autre.\n'
                   'Week-ends et fériés RDC exclus · E ≤ liquidation ≤ quittance ≤ aujourd’hui.',
                   style='Doux.TLabel', wraplength=700).grid(row=4, column=0, columnspan=2, sticky='w', pady=6)
-        theme.bouton(chronologie, 'Reproposer liquidation, quittance et CVI', self.reproposer,
-                     state='normal' if self.calcul_possible else 'disabled').grid(row=5,column=0,columnspan=2,sticky='w',pady=6)
+        boutons = ttk.Frame(chronologie)
+        boutons.grid(row=5, column=0, columnspan=2, sticky='w', pady=6)
+        theme.bouton(boutons, 'Reproposer liquidation, quittance et CVI', self.reproposer,
+                     state='normal' if self.calcul_possible else 'disabled').grid(row=0, column=0, sticky='w')
+        theme.bouton(boutons, 'Proposer E, L, Q et manifeste', lambda: self.proposer_numeros(tout=True),
+                     state='normal' if self.calcul_possible else 'disabled').grid(row=0, column=1, sticky='w', padx=(10, 0))
+        theme.bouton(boutons, 'Ajouter des E connus…', self.ajouter_numeros_connus).grid(row=1, column=0, sticky='w', pady=(6, 0))
+        theme.bouton(boutons, '📈 Suivi des numéros', self.voir_suivi).grid(row=1, column=1, sticky='w', padx=(10, 0), pady=(6, 0))
+        self.explication_numeros = tk.StringVar()
+        ttk.Label(chronologie, textvariable=self.explication_numeros, style='Doux.TLabel', wraplength=720,
+                  justify='left').grid(row=6, column=0, columnspan=2, sticky='w')
+        self.alertes_numeros = tk.StringVar()
+        ttk.Label(chronologie, textvariable=self.alertes_numeros, style='Alerte.TLabel', wraplength=720,
+                  justify='left').grid(row=7, column=0, columnspan=2, sticky='w')
+        self._points_suivi = None
+        if self.calcul_possible:
+            self.proposer_numeros(tout=False)
+        for cle in ('numero_e', 'numero_liquidation', 'numero_quittance', 'manifeste', *regles.DATES_AUTO):
+            self.champs[cle].trace_add('write', lambda *_: self.after_idle(self.controler_numeros))
+        self.controler_numeros()
+        self._champ_taux(complements, len(regles.CHAMPS[8:]))
         ttk.Label(cadre, text='Observations', style='Doux.TLabel').pack(anchor='w')
-        self.observations = tk.Text(cadre, height=3, wrap='word', font=(theme.POLICE, 12))
+        self.observations = tk.Text(cadre, height=2, wrap='word', font=(theme.POLICE, 12))
         self.observations.pack(fill='both', expand=True, pady=(4, 12))
         self.observations.insert('1.0', informations.get('observations', ''))
         self.erreur = tk.StringVar()
-        ttk.Label(cadre, textvariable=self.erreur, style='Erreur.TLabel', wraplength=740).pack(anchor='w')
+        # Validation toujours visible : barre fixée en bas, avant le reste du contenu.
         actions = ttk.Frame(cadre)
-        actions.pack(fill='x', pady=(12, 0))
+        actions.pack(side='bottom', fill='x', pady=(12, 0), before=cadre.winfo_children()[0])
         theme.bouton(actions, 'Annuler', self.destroy).pack(side='left')
         theme.bouton(actions, 'Enregistrer les informations', self.enregistrer, principal=True,
                      state='normal' if self.calcul_possible else 'disabled').pack(side='right')
+        ttk.Label(cadre, textvariable=self.erreur, style='Erreur.TLabel', wraplength=740).pack(
+            side='bottom', anchor='w', before=actions)
 
     def enregistrer(self):
         if self.app.session_verrouillee or not self.calcul_possible:
             return
         valeurs = {cle: v.get() for cle, v in self.champs.items()}
         valeurs['observations'] = self.observations.get('1.0', 'end-1c')
+        valeurs['taux_change'] = self.taux.get()
         try:
             licences_ouvertes.enregistrer_informations_declaration(self.licence['numero_validation'], valeurs)
         except (ValueError, OSError, sqlite3.Error) as exc:
@@ -106,14 +129,138 @@ class InformationsDeclaration(tk.Toplevel):
         self.apres_validation()
         self.destroy()
 
+    def _champ_taux(self, page, rang):
+        """Taux de change de la déclaration : proposé depuis un taux existant, modifiable, sans effet
+        sur les autres étapes (seule la case 23 de la déclaration Word l'affiche)."""
+        try:
+            taux, source = licences_ouvertes.proposer_taux_change(
+                self.licence['numero_validation'], preference=(getattr(self.app, 'prefs', None) or {}).get('taux_change'))
+        except (ValueError, OSError, sqlite3.Error):
+            taux, source = None, ''
+        self.taux = tk.StringVar(value=taux_declaration.texte(taux) if taux else '')
+        case = ttk.Frame(page, padding=(0, 0, 16, 12))
+        case.grid(row=(rang + 1) // 2, column=0, columnspan=2, sticky='ew')
+        ttk.Label(case, text='Taux de change (CDF pour 1 USD) · affiché sur la déclaration', style='Doux.TLabel').pack(anchor='w', pady=(0, 4))
+        ligne = ttk.Frame(case)
+        ligne.pack(fill='x')
+        ttk.Entry(ligne, textvariable=self.taux, width=16, justify='right').pack(side='left')
+        note = (f'Proposé : {source}.' if taux else 'Aucun taux connu : saisissez-le, ou laissez vide pour garder celui du XML SYDONIA.')
+        ttk.Label(ligne, text=note + ' Le changer ne touche à aucune autre étape ; régénérez seulement les déclarations.',
+                  style='Doux.TLabel', wraplength=520).pack(side='left', padx=(10, 0))
+
+    def proposer_numeros(self, tout):
+        """Numéros E, L, Q et manifeste logiques et croissants, d'après les dossiers déjà traités
+        (même année, même bureau si connu). À l'ouverture, seules les cases vides sont remplies."""
+        dates = {cle: self.champs[cle].get() for cle in regles.DATES_AUTO}
+        try:
+            propositions = licences_ouvertes.proposer_numeros(self.licence['numero_validation'], dates,
+                                                              self.champs['bureau_code'].get())
+        except (ValueError, OSError, sqlite3.Error) as exc:
+            self.explication_numeros.set(f'Proposition des numéros impossible : {exc}')
+            return
+        remplis = []
+        for cle, (valeur, explication) in propositions.items():
+            if tout or not self.champs[cle].get().strip():
+                self.champs[cle].set(valeur)
+                remplis.append(explication)
+        if remplis:
+            compact = [re.sub(r' \(règle : .*?\)', '', re.sub(r', (dossier|liste|déclaration réelle) [^)]*\)', ')', e))
+                       for e in remplis]
+            self.explication_numeros.set('Numéros proposés (modifiables) : ' + ' · '.join(compact))
+        elif not tout:
+            self.explication_numeros.set('Numéros déjà saisis conservés · « Proposer E, L, Q et manifeste » '
+                                         'pour une proposition d’après les autres dossiers.')
+
+    def ajouter_numeros_connus(self):
+        """Coller un tableau de numéros E réels (plaques, E, paiement, déclaration) pour affiner les propositions."""
+        from asydec.declarations import numeros_logiques
+        fenetre = tk.Toplevel(self)
+        fenetre.title('Numéros E connus')
+        fenetre.transient(self)
+        fenetre.geometry('760x560')
+        cadre = ttk.Frame(fenetre, padding=16)
+        cadre.pack(fill='both', expand=True)
+        ttk.Label(cadre, text='Collez le tableau tel quel depuis Excel ou Word, avec sa ligne d’en-tête '
+                  '(# · PLAQUES · PAIEMENT · E · PAIEMENT ORANGE · DECLARATION). Chaque E est retenu avec sa date de '
+                  'DÉCLARATION ; les lignes sans E ou sans date de déclaration sont ignorées.',
+                  style='SousTitre.TLabel', wraplength=720, justify='left').pack(anchor='w', pady=(0, 8))
+        zone = tk.Text(cadre, height=18, wrap='none', font=(theme.POLICE, 11))
+        zone.pack(fill='both', expand=True)
+        resultat = tk.StringVar(value=f'{len(licences_ouvertes.lister_numeros_connus())} numéro(s) E connus en base.')
+        ttk.Label(cadre, textvariable=resultat, style='Doux.TLabel', wraplength=720).pack(anchor='w', pady=(8, 0))
+
+        def enregistrer():
+            points, ignorees = numeros_logiques.lire_liste(zone.get('1.0', 'end'))
+            if not points:
+                resultat.set('Aucun numéro E avec date de déclaration trouvé : vérifiez la ligne d’en-tête.')
+                return
+            try:
+                nouveaux = licences_ouvertes.ajouter_numeros_connus(points)
+            except (ValueError, OSError, sqlite3.Error) as exc:
+                resultat.set(str(exc))
+                return
+            ecartes = len(points) - len(numeros_logiques.coherents(points))
+            resultat.set(f'{len(points)} numéro(s) lus · {nouveaux} nouveau(x) enregistré(s) · {ignorees} ligne(s) ignorée(s)'
+                         + (f' · {ecartes} hors chronologie (écartés des calculs)' if ecartes else '') + '.')
+            zone.delete('1.0', 'end')
+            self._points_suivi = None
+            self.controler_numeros()
+            if self.calcul_possible:
+                self.proposer_numeros(tout=False)
+        actions = ttk.Frame(cadre)
+        actions.pack(fill='x', pady=(10, 0))
+        theme.bouton(actions, 'Fermer', fenetre.destroy).pack(side='left')
+        theme.bouton(actions, 'Enregistrer les numéros', enregistrer, principal=True).pack(side='right')
+
+    def _points(self):
+        if self._points_suivi is None:
+            try:
+                self._points_suivi = licences_ouvertes.points_suivi(exclure=self.licence['numero_validation'])
+            except (ValueError, OSError, sqlite3.Error):
+                self._points_suivi = []
+        return self._points_suivi
+
+    def controler_numeros(self):
+        """Signale tout de suite un numéro saisi qui contredit la progression connue (même année)."""
+        from asydec.declarations import numeros_logiques
+        if not self.winfo_exists():
+            return
+        messages = []
+        for type_, (cle, cle_date, _, _) in numeros_logiques.TYPES.items():
+            message = numeros_logiques.controler(self._points(), type_, self.champs[cle].get(),
+                                                 numeros_logiques.lire_date(self.champs[cle_date].get()))
+            if message:
+                messages.append('⚠ ' + message)
+        messages += ['⚠ ' + m for m in numeros_logiques.controler_sous_e(
+            self.champs['numero_e'].get(), {c: v.get() for c, v in self.champs.items()})]
+        self.alertes_numeros.set('\n'.join(messages))
+
+    def voir_suivi(self):
+        from asydec.ui.suivi_numeros import SuiviNumeros
+        from asydec.declarations import numeros_logiques
+        jour = numeros_logiques.lire_date(self.champs['date_enregistrement'].get())
+        points = list(self._points())
+        # La saisie en cours apparaît aussi (non enregistrée).
+        for type_, (cle, cle_date, _, _) in numeros_logiques.TYPES.items():
+            numeros_logiques._ajouter(points, type_, self.champs[cle].get(), self.champs[cle_date].get(), '',
+                                      'saisie en cours ' + self.licence['numero_validation'])
+        SuiviNumeros(self, points, jour.year if jour else None)
+
     def reproposer(self):
         if self.app.session_verrouillee or not self.calcul_possible:
             return
+        actuelles = {cle: self.champs[cle].get() for cle in regles.DATES_AUTO}
         try:
-            dates = regles.proposer_dates_declaration(self.licence.get('date_bl'))
+            nombre = len(regles.combinaisons_dates_declaration(self.licence.get('date_bl')))
+            dates = regles.proposer_dates_declaration(self.licence.get('date_bl'), exclure=actuelles)
         except ValueError as exc:
             self.erreur.set(str(exc))
             return
         for cle, valeur in dates.items():
             self.champs[cle].set(valeur)
-        self.erreur.set('')
+        if nombre <= 1:
+            self.erreur.set('Aucune autre proposition possible : avec cette date E, les jours E+2 et E+3 '
+                            'ne sont pas ouvrables (week-end ou férié RDC) ou dépassent aujourd’hui, '
+                            'et la date CVI en découle.')
+        else:
+            self.erreur.set('')

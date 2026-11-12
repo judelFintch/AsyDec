@@ -159,5 +159,20 @@ class DateUneFoisParDossierTest(TestCase):
         self.assertEqual(len(paragraphes(f['contenu'])), len(paragraphes(ancien)) - 1)
 
 
+class AnalyseModeleMemoriseeTest(TestCase):
+    def test_analyse_calculee_une_fois_puis_relue_de_la_base(self):
+        with TemporaryDirectory() as temp:
+            base = Path(temp) / 'factures.db'
+            source = Path(temp) / 'shabani.docx'
+            source.write_bytes(SHABANI)
+            F.importer(source, base)
+            F._ANALYSES.clear()
+            premiere = F.lister_modeles(base)
+            F._ANALYSES.clear()  # nouveau lancement : plus rien en mémoire
+            with patch.object(F, 'analyser_gabarit', side_effect=AssertionError('modèle réanalysé')):
+                self.assertEqual(F.lister_modeles(base), premiere)
+            self.assertTrue(premiere[0]['plaque_prevue'])
+
+
 if __name__ == '__main__':
     main()

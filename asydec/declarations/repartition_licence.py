@@ -99,21 +99,52 @@ def ecart_arrondi(produits, fob):
 def ajuster_articles(produits, fob):
     """Articles corrigés pour que quantité × prix unitaire donne exactement le FOB de la licence.
 
-    Seul un écart d'arrondi (voir ecart_arrondi) est corrigé, sur un seul article : le moins cher
-    (ajustement le plus fin), dont on retouche la quantité au millième puis, si nécessaire, le prix
-    de quelques centimes au plus près de l'original. Ex. 39,865 × 702 = 27 985,23 pour un FOB de
-    27 985,00 devient 39,859 × 702,10 = 27 985,00. Sinon, les articles sont renvoyés inchangés."""
+    1. Articles comptés à l'unité (motos, pièces, paires…) : quantité entière, jamais de décimales ; le prix
+       unitaire est recalculé pour garder la valeur de l'article (voir quantites_entieres).
+    2. Écart d'arrondi avec le FOB (voir ecart_arrondi) : porté par un article mesuré (kg, litres…) dont la
+       quantité est retouchée au millième, le moins cher d'abord ; sans article mesuré, par le prix unitaire
+       de l'article compté le plus cher. Ex. 39,865 motos × 702 = 27 985,23 pour un FOB de 27 985,00
+       devient 40 motos × 699,625 = 27 985,00.
+    Écart réel (non dû à l'arrondi) : seules les quantités sont rendues entières, valeurs inchangées."""
+    from asydec.declarations import quantites_entieres as QE
     try:
         ecart = ecart_arrondi(produits, fob)
     except ValueError:
+        ecart = None
+    articles = _articles(produits)
+    if not articles:
         return produits
-    if not ecart:
-        return produits
+    mesures = [i for i, (produit, *_) in enumerate(articles) if not QE.comptable(produit.get('unite'))]
+    if ecart and not mesures:
+        cibles = [_valeur(q, p) for _, q, p, _ in articles]
+        plus_cher = max(range(len(cibles)), key=lambda i: cibles[i])
+        if cibles[plus_cher] + ecart > 0:
+            cibles[plus_cher] += ecart
+            return QE.arrondir(produits, cibles)
+        return QE.arrondir(produits)
+    if ecart is not None and mesures:
+        # Pièces arrondies à prix inchangé ; l'article mesuré absorbe l'écart au millième.
+        entiers = QE.entiers_prix_conserves(produits)
+        valeurs = [_valeur(q, p) for _, q, p, _ in _articles(entiers)]
+        if sum(valeurs) == montant(fob):
+            return entiers
+        corriges = _ajuster_quantite(entiers, fob, mesures)
+        if corriges is not entiers:
+            return corriges
+    resultat = QE.arrondir(produits)
+    if ecart:
+        resultat = _ajuster_quantite(resultat, fob, mesures)
+    return resultat
+
+
+def _ajuster_quantite(produits, fob, indices):
+    """Écart d'arrondi porté par un des articles « indices » : quantité au millième puis, si besoin,
+    prix de quelques centimes au plus près de l'original. Articles inchangés si impossible."""
     articles = _articles(produits)
     total = montant(fob)
     millieme, centime = Decimal('0.001'), Decimal('0.01')
     valeurs = [_valeur(q, p) for _, q, p, _ in articles]
-    for i in sorted(range(len(articles)), key=lambda i: articles[i][2]):
+    for i in sorted(indices, key=lambda i: articles[i][2]):
         _, q0, p0, _ = articles[i]
         reste = total - sum(valeurs) + valeurs[i]
         if reste <= 0:

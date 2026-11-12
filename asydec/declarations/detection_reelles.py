@@ -49,6 +49,9 @@ def _fichiers(racines):
             continue
         try:
             octets = chemin.read_bytes()
+            from asydec.declarations.verification_xml import est_verification
+            if est_verification(octets):  # XML de vérification AsyDec : jamais une déclaration réelle
+                continue
             donnees = extraire(octets)
         except (OSError, ValueError):
             continue

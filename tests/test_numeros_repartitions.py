@@ -22,17 +22,14 @@ class NumerosPartsTest(unittest.TestCase):
             nombres=[int(i[cle][1:]) for i in infos]
             self.assertTrue(all(1<=b-a<=6 for a,b in zip(nombres,nombres[1:])))
         self.assertEqual({i['numero_dec'] for i in infos},{'DEC123'})
-        self.assertEqual({i['numero_quittance'] for i in infos[:5]},{'Q00300'})
-        self.assertEqual(len({i['numero_quittance'] for i in infos}),2)
-        self.assertEqual(len({i['numero_quittance'] for i in infos[5:]}),1)
+        quittances=[i['numero_quittance'] for i in infos]
+        self.assertEqual(quittances[0],'Q00300')
+        self.assertTrue(regles.quittances_valides(quittances,'Q00300',['']*12))
         avant=copy.deepcopy(l)
         self.assertFalse(regles.completer(l))
         self.assertEqual(l,avant)
 
-    def test_cinq_parts_un_q_et_suffixes_preserves(self):
-        l=self.licence(5)
-        regles.completer(l)
-        self.assertEqual({p['informations_declaration']['numero_quittance'] for p in l['repartition']['parts']},{'Q00300'})
+    def test_suffixes_preserves(self):
         self.assertRegex(regles.incrementer('2026/0099/NCA',random.Random(1)),r'^2026/01\d\d/NCA$')
 
     def test_persistence_et_revalidation_sans_nouveau_tirage(self):
@@ -76,3 +73,40 @@ class NumerosPartsTest(unittest.TestCase):
         l=self.licence(3)
         regles.completer(l,random.Random(3))
         self.assertEqual({p['informations_declaration'].get('manifeste','') for p in l['repartition']['parts']},{''})
+
+
+class GroupesQuittanceTest(unittest.TestCase):
+    def test_groupes_aleatoires_de_deux_a_six_parts(self):
+        tailles_vues = set()
+        for graine in range(300):
+            rng = random.Random(graine)
+            for nombre in range(2, 25):
+                tailles = regles.tailles_groupes(nombre, rng)
+                self.assertEqual(sum(tailles), nombre)
+                self.assertTrue(all(2 <= t <= 6 for t in tailles), tailles)
+                tailles_vues.update(tailles)
+        self.assertEqual(tailles_vues, {2, 3, 4, 5, 6})
+
+    def test_une_seule_part(self):
+        self.assertEqual(regles.tailles_groupes(1, random.Random(1)), [1])
+
+    def test_q_croissants_par_groupe_et_meme_date(self):
+        quittances = regles.tirer_quittances('Q00300', ['15/05/2019'] * 10, random.Random(4))
+        self.assertEqual(quittances[0], 'Q00300')
+        self.assertTrue(regles.quittances_valides(quittances, 'Q00300', ['15/05/2019'] * 10))
+        self.assertGreater(len(set(quittances)), 1)
+
+    def test_changement_de_date_ouvre_un_nouveau_groupe(self):
+        dates = ['15/05/2019'] * 4 + ['16/05/2019'] * 4
+        quittances = regles.tirer_quittances('300', dates, random.Random(2))
+        self.assertNotEqual(quittances[3], quittances[4])
+        self.assertTrue(regles.quittances_valides(quittances, '300', dates))
+        self.assertFalse(regles.quittances_valides(['300'] * 8, '300', dates))
+
+    def test_ancien_tirage_conforme_conserve_sinon_retire(self):
+        dates = [''] * 12
+        self.assertTrue(regles.quittances_valides(['300'] * 5 + ['304'] * 5 + ['306'] * 2, '300', dates))
+        # Ancienne règle « cinq puis tout le reste » : 7 parts sur un même Q, non conforme.
+        self.assertFalse(regles.quittances_valides(['300'] * 5 + ['304'] * 7, '300', dates))
+        self.assertFalse(regles.quittances_valides(['300'] * 2 + ['310'] * 10, '300', dates))
+        self.assertFalse(regles.quittances_valides(['300'] * 6 + ['300'] * 0 + ['301'], '300', [''] * 7))

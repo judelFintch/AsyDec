@@ -160,7 +160,8 @@ class EcartArrondiTest(unittest.TestCase):
         (article,)=calcul.ajuster_articles(self.PRODUITS,'27985')
         q,pu=Decimal(article['quantite']),Decimal(article['prix_unitaire'])
         self.assertEqual((q*pu).quantize(Decimal('.01')),Decimal('27985.00'))
-        self.assertLessEqual(abs(pu-702),1)
+        # Motos : 39,865 devient 40 pièces, PU recalculé 699,625 (jamais de fraction de moto).
+        self.assertEqual((q,pu),(Decimal(40),Decimal('699.625')))
         self.assertEqual(self.PRODUITS[0]['quantite'],'39.865')  # original intact
         # Répartition : chaque part a quantité × prix = sa valeur (au centime) et le total = FOB.
         r=calcul.preparer('27985',23000,[article],nombre=3)
@@ -169,7 +170,10 @@ class EcartArrondiTest(unittest.TestCase):
             a=p['articles'][0]
             self.assertLessEqual(abs((Decimal(a['quantite'])*pu).quantize(Decimal('.01'))-Decimal(a['valeur'])),Decimal('0.01'))
         # Écart réel ou aucun écart : inchangés.
-        self.assertIs(calcul.ajuster_articles(self.PRODUITS,'27000'),self.PRODUITS)
+        # Écart réel : quantité entière, valeur d'origine conservée par le PU.
+        (reel,)=calcul.ajuster_articles(self.PRODUITS,'27000')
+        self.assertEqual(Decimal(reel['quantite']),40)
+        self.assertEqual((Decimal(reel['quantite'])*Decimal(reel['prix_unitaire'])).quantize(Decimal('.01')),Decimal('27985.23'))
         exact=[dict(self.PRODUITS[0],quantite='164')]
         self.assertIs(calcul.ajuster_articles(exact,'115128'),exact)
 
@@ -230,3 +234,34 @@ class OptionsRepartitionTest(unittest.TestCase):
             r=registre.charger('LICENCE',fichier)['repartition']
             self.assertEqual((len(r['parts']),r['plafond_actif']),(1,False))
             self.assertEqual(registre.options_repartition({}),{'nombre':None,'plafond':True})
+
+
+class QuantitesEntieresTest(unittest.TestCase):
+    def test_unites_comptees_et_mesurees(self):
+        from asydec.declarations import quantites_entieres as Q
+        for u in ('Unite(Piece)', 'pcs', 'Paire', 'Nombre', 'Carton', 'Pièces'):
+            self.assertTrue(Q.comptable(u), u)
+        for u in ('Kilogramme', 'KG', 'Litre', 'm3', 'Tonne', ''):
+            self.assertFalse(Q.comptable(u), u)
+
+    def test_motos_fractionnaires_deviennent_entieres_fob_exact(self):
+        from asydec.declarations import quantites_entieres as Q
+        produits=[dict(designation='Motocycles',quantite='1425.212',unite='Unite(Piece)',prix_unitaire='701.65')]
+        (a,)=calcul.ajuster_articles(produits,'1000000')
+        self.assertEqual((a['quantite'],a['prix_unitaire']),('1425','701.754386'))
+        r=calcul.preparer('1000000',23000,[a],nombre=10)
+        self.assertEqual(sum(Decimal(p['fob']) for p in r['parts']),Decimal('1000000.00'))
+        quantites=[Decimal(p['articles'][0]['quantite']) for p in r['parts']]
+        self.assertTrue(all(q==q.to_integral_value() for q in quantites))
+        self.assertEqual(sum(quantites),1425)
+        self.assertEqual(Q.pu_texte('701.754386'),'701.754386')
+        self.assertEqual(Q.pu_texte('1234.5'),'1,234.50')
+
+    def test_article_mesure_absorbe_l_ecart_prix_des_pieces_intact(self):
+        produits=[dict(designation='Chapeaux',quantite='10000.4',unite='Unite(Piece)',prix_unitaire='0.9'),
+                  dict(designation='Fil',quantite='2400.5',unite='Kilogramme',prix_unitaire='2')]
+        chapeaux,fil=calcul.ajuster_articles(produits,'13801.36')
+        self.assertEqual((chapeaux['quantite'],chapeaux['prix_unitaire']),('10000','0.9'))
+        self.assertEqual(fil['prix_unitaire'],'2')
+        total=sum((Decimal(a['quantite'])*Decimal(a['prix_unitaire'])).quantize(Decimal('.01')) for a in (chapeaux,fil))
+        self.assertEqual(total,Decimal('13801.36'))

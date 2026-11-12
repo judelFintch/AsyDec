@@ -85,30 +85,29 @@ def ouvrir(parent, app, modele_id):
         selection_id = modeles[choix.current()]['id'] if 0 <= choix.current() < len(modeles) else None
         from asydec.declarations import modeles_generes
         d = modeles_generes.detail(modele_id)
-        contexte.set(f"Plaque du modèle : {d['plaque']}" if d.get('plaque') else
-                     'Plaque obligatoire : renseignez-la et enregistrez-la dans Modèles générés avant de créer la facture.')
+        contexte.set(f"Importateur : {d['importateur']}\n" + (f"Plaque du modèle : {d['plaque']}" if d.get('plaque') else
+                     'Plaque obligatoire : renseignez-la et enregistrez-la dans Modèles générés avant de créer la facture.'))
         modeles = factures.classer_gabarits(factures.lister_modeles(), d)
         choix['values'] = [f"{'Conseillé : ' if m['propose'] else ''}{destinataire(m)} — {m['nom']} (n° {m['id']})"
                            for m in modeles]
-        if selection_id is not None:
-            choix.set('')
-            for i, g in enumerate(modeles):
-                if g['id'] == selection_id:
-                    choix.current(i)
-                    break
-        if modeles and choix.current() < 0:
-            choix.current(0)
+        choix.set('')
+        indice = factures.selection_par_defaut(modeles, d, selection_id)
+        if indice is not None:
+            choix.current(indice)
         expliquer()
         archives = factures.lister_factures(modele_id)
         liste.delete(0, 'end')
         for f in archives:
-            liste.insert('end', f"{f['numero']} — manifeste {f['manifeste'] or 'ancien'} — {f['date'][:10]}")
+            liste.insert('end', f"{f['numero']} — manifeste {f['manifeste'] or 'ancien'} — émise le {f['date'][:10]}"
+                         + (f" — datée du {f['date_facture']}" if f.get('date_facture') else '')
+                         + f" — Word : {f['nom_gabarit']} (n° {f['gabarit_id']})")
 
     def expliquer():
         if 0 <= choix.current() < len(modeles):
             recommandation.set(modeles[choix.current()]['raison'])
         else:
-            recommandation.set('Chargez un modèle Word ou ajoutez-le dans la bibliothèque Modèles de facture.')
+            recommandation.set('Aucun modèle compatible sélectionné pour cet importateur. '
+                               'Chargez son modèle Word ou sélectionnez un modèle correspondant dans la bibliothèque.')
 
     choix.bind('<<ComboboxSelected>>', lambda _e: expliquer())
 
@@ -122,8 +121,10 @@ def ouvrir(parent, app, modele_id):
         try:
             identifiant = factures.importer(fichier)
             actualiser()
+            from asydec.declarations import modeles_generes
+            dossier = modeles_generes.detail(modele_id)
             for i, g in enumerate(modeles):
-                if g['id'] == identifiant:
+                if g['id'] == identifiant and factures.correspond_importateur(g, dossier):
                     choix.current(i)
                     break
             expliquer()
@@ -171,7 +172,7 @@ def ouvrir(parent, app, modele_id):
         if app.session_verrouillee:
             return
         if choix.current() < 0:
-            messagebox.showinfo('Modèle nécessaire', 'Chargez d’abord votre modèle Word.', parent=fenetre)
+            messagebox.showinfo('Modèle nécessaire', 'Sélectionnez ou chargez un modèle Word correspondant à l’importateur du dossier.', parent=fenetre)
             return
         try:
             from asydec.declarations import modeles_generes
@@ -179,6 +180,9 @@ def ouvrir(parent, app, modele_id):
             if not (d.get('plaque') or '').strip():
                 raise ValueError('Plaque obligatoire : renseignez et enregistrez la plaque dans Modèles générés, puis revenez créer la facture.')
             gabarit = modeles[choix.current()]
+            if not factures.correspond_importateur(gabarit, d):
+                raise ValueError(f"Le destinataire du Word ({destinataire(gabarit)}) ne correspond pas à l’importateur "
+                                 f"du dossier ({d['importateur']}). Choisissez le modèle de cet importateur.")
             if not gabarit['pret']:
                 configurer(fenetre, gabarit['id'], actualiser)
                 return
@@ -203,7 +207,8 @@ def ouvrir(parent, app, modele_id):
                 return
             facture = factures.generer(modele_id, gabarit['id'], app.utilisateur,
                                        correspondance_confirmee=confirme)
-            statut.set(f"Facture {facture['numero']} — manifeste {facture['manifeste'] or 'ancien'}")
+            statut.set(f"Facture {facture['numero']} — manifeste {facture['manifeste'] or 'ancien'}"
+                       f" — Word : {destinataire(gabarit)} / {gabarit['nom']} (n° {gabarit['id']})")
             actualiser()
             enregistrer(facture, chemin)
         except Exception as exc:

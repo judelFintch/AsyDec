@@ -7,8 +7,8 @@ import sqlite3
 import re
 import xml.etree.ElementTree as ET
 
-from asydec.declarations import licences_ouvertes, xml_licence, mise_a_jour_repartitions, recuperation_simulation, facture_licence, cvi
-from asydec.declarations import declaration_licence
+from asydec.declarations import licences_ouvertes, xml_licence, mise_a_jour_repartitions, recuperation_simulation, facture_licence, facture_kinshop, cvi
+from asydec.declarations import declaration_licence, finalisation
 
 from asydec.declarations.documents_finaux import preparer_licence, proposer_date_facture, ECART_FACTURE_MIN, ECART_FACTURE_MAX
 from asydec.ui import theme, synthese_licence
@@ -37,7 +37,8 @@ class PageDocumentsFinaux(ttk.Frame):
         self.modifie = False
         self.vue_active = 'liste'
         self.liste = ListeLicences(self, self.nouvelle, self.rouvrir, self.traiter_licence, self.voir_repartitions,
-                                   supprimer=self.supprimer_licence, recommencer=self.recommencer_licence)
+                                   supprimer=self.supprimer_licence, recommencer=self.recommencer_licence,
+                                   marquer_physique=self.marquer_physique)
         # « Tout supprimer » (self.supprimer_toutes) volontairement absent de la liste : trop risqué à cet endroit.
         self.formulaire = ttk.Frame(self)
         self.traitement = ttk.Frame(self)
@@ -413,7 +414,14 @@ class PageDocumentsFinaux(ttk.Frame):
         for cle, variable in self.champs.items():
             variable.set(valeurs.get(cle, ''))
         self.details.charger(valeurs)
-        self.licence = self._preparer_licence()
+        # Une donnée devenue incohérente (ex. facture datée après la licence) ne doit pas empêcher
+        # d'ouvrir le dossier : il s'ouvre, l'erreur est signalée et le bouton de validation reste bloqué.
+        try:
+            self.licence = self._preparer_licence()
+            erreur = None
+        except ValueError as exc:
+            self.licence = None
+            erreur = str(exc)
         try:
             espace_travail.dossier_dec(valeurs.get('numero_dec'))  # dossier DEC créé à l'ouverture
         except (OSError, ValueError):
@@ -429,9 +437,29 @@ class PageDocumentsFinaux(ttk.Frame):
             self.etat_dossier.set('Étape 1 · À compléter')
             self.source.set(f'Licence enregistrée : {numero} · repris automatiquement : {repris}. '
                             'Vérifiez puis cliquez sur « Valider et enregistrer ».')
+        if erreur:
+            self.etat_dossier.set('Étape 1 · À corriger')
+            self.resultat.set(erreur)
+            self.bouton_valider.configure(state='disabled')
+            self.source.set(f'Licence enregistrée : {numero} · à corriger : {erreur}')
         self.carnet.select(0)
         self._montrer_formulaire()
+        if erreur:
+            messagebox.showwarning('Dossier à corriger',
+                                   f'{erreur}\n\nCorrigez la valeur dans l’onglet Licence (par exemple avec '
+                                   '« Proposer n° et date de facture »), puis cliquez sur « Valider et enregistrer ».\n\n'
+                                   'Le traitement du dossier reste accessible avec « Traitement licence ».', parent=self)
         return True
+
+    def marquer_physique(self, numero, physique):
+        """Coche « en physique » depuis la liste ; renvoie la date enregistrée, '' si décoché, None si échec."""
+        if self.app.session_verrouillee:
+            return None
+        try:
+            return licences_ouvertes.marquer_physique(numero, physique)
+        except (ValueError, OSError, sqlite3.Error) as exc:
+            messagebox.showerror('Dossier en physique', str(exc), parent=self)
+            return None
 
     def supprimer_licence(self, numero, recommencer=False):
         """Retire la licence de la liste. Soussigné, fournisseur et articles restent proposés
@@ -698,12 +726,17 @@ class PageDocumentsFinaux(ttk.Frame):
             messagebox.showerror('Factures', str(exc), parent=self)
             return
         self.traiter_licence(numero)
-        messagebox.showinfo('Factures et packing lists enregistrées',
+        alertes = facture_licence.avertissements_quantites(licence)
+        avertissement = ('\n\nQuantités fractionnaires de pièces à vérifier sur la licence :\n'
+                         + '\n'.join(alertes[:5])
+                         + (f'\n… et {len(alertes) - 5} autre(s).' if len(alertes) > 5 else '')) if alertes else ''
+        notification = messagebox.showwarning if alertes else messagebox.showinfo
+        notification('Factures et packing lists enregistrées',
                             f"{len(resultats)} facture(s) et {len(resultats)} packing list(s) séparées du {resultats[0]['date']} : "
                             f"{resultats[0]['numero']} à {resultats[-1]['numero']}.\n"
                             f"Facture globale {globale['numero']} : FOB {format_nombre(float(globale['fob']), 2)} USD, "
                             f"{globale['articles']} article(s), {format_nombre(globale['poids_kg'], 2)} kg.\n\n"
-                            f"{espace_travail.relatif(dossier)}",
+                            f"{espace_travail.relatif(dossier)}{avertissement}",
                             parent=self)
 
     def generer_cvi(self, numero):
@@ -743,7 +776,8 @@ class PageDocumentsFinaux(ttk.Frame):
             messagebox.showerror('Remplissage CVI', str(exc), parent=self)
             return
         self.traiter_licence(numero)
-        messagebox.showinfo('CVI et BL enregistrés', f'CVI et BL de la licence enregistrés dans un Word de deux pages.\n\n{dossier}', parent=self)
+        nombre_bl = cvi.nombre_bl(licence)
+        messagebox.showinfo('CVI et BL enregistrés', f'CVI et {nombre_bl} BL enregistrés dans un Word de {1 + nombre_bl} pages.\n\n{dossier}', parent=self)
 
     # Fichiers déjà produits par étape : utilisés pour retrouver le dossier sans dossier de travail.
     TITRES_RANGEMENT = {None: 'Dossier DEC', 'licence': 'Licence', 'factures': 'Factures', 'cvi': 'CVI et BL',
@@ -789,16 +823,65 @@ class PageDocumentsFinaux(ttk.Frame):
     def ouvrir_factures(self, numero):
         self.ouvrir_rangement(numero, 'factures')
 
+    HAUTEUR_LISTE = 230
+
+    def _bloc_liste(self, parent, titre, licence, cle, chemins):
+        """Cadre de liste à hauteur limitée (défilement au-delà) avec, en tête, le chemin cliquable du dossier.
+
+        Renvoie le cadre intérieur, où les lignes sont placées avec grid à partir de la ligne 1."""
+        cadre = ttk.Frame(parent, padding=12, relief='solid', borderwidth=1)
+        cadre.pack(fill='x', pady=(0, 16))
+        entete = ttk.Frame(cadre)
+        entete.pack(fill='x', pady=(0, 8))
+        ttk.Label(entete, text=titre, style='Section.TLabel').pack(side='left')
+        try:
+            dossier = espace_travail.dossier_dec(licence['numero_dec'], cle)
+        except (OSError, ValueError, KeyError):
+            dossier = None
+        existants = [Path(c) for c in chemins if c and Path(c).is_file()]
+        if existants and (dossier is None or existants[0].parent != Path(dossier)):
+            dossier = existants[0].parent
+        if dossier is not None:
+            lien = tk.Label(entete, text='📂 ' + espace_travail.relatif(dossier), fg=theme.ACCENT, bg=theme.FOND,
+                            font=(theme.POLICE, 10, 'underline'), cursor='hand2', anchor='e')
+            lien.pack(side='right', padx=(14, 0))
+            lien.bind('<Button-1>', lambda _e, d=Path(dossier): self.ouvrir_dossier(d))
+        zone = ttk.Frame(cadre)
+        zone.pack(fill='x')
+        toile = tk.Canvas(zone, highlightthickness=0, bg=theme.FOND, height=40)
+        barre = ttk.Scrollbar(zone, orient='vertical', command=toile.yview)
+        toile.configure(yscrollcommand=barre.set)
+        toile.pack(side='left', fill='x', expand=True)
+        interieur = tk.Frame(toile, bg=theme.FOND)
+        fenetre = toile.create_window((0, 0), window=interieur, anchor='nw')
+
+        def ajuster(_e=None):
+            hauteur = interieur.winfo_reqheight()
+            toile.configure(scrollregion=(0, 0, interieur.winfo_reqwidth(), hauteur),
+                            height=min(hauteur, self.HAUTEUR_LISTE))
+            if hauteur > self.HAUTEUR_LISTE:
+                if not barre.winfo_ismapped():
+                    barre.pack(side='right', fill='y')
+            elif barre.winfo_ismapped():
+                barre.pack_forget()
+        interieur.bind('<Configure>', ajuster)
+        toile.bind('<Configure>', lambda e: toile.itemconfigure(fenetre, width=e.width))
+
+        def molette(evenement):
+            if toile.winfo_exists() and interieur.winfo_reqheight() > self.HAUTEUR_LISTE:
+                toile.yview_scroll(-1 * (evenement.delta if abs(evenement.delta) < 20 else evenement.delta // 120), 'units')
+        toile.bind('<Enter>', lambda _: toile.bind_all('<MouseWheel>', molette))
+        toile.bind('<Leave>', lambda _: toile.unbind_all('<MouseWheel>'))
+        return interieur
+
     def _liste_xml_generes(self, parent, licence):
         """Liste cliquable des XML générés à l'étape 7 : nom du fichier (ouvre le XML) et 📂 (le montre dans le dossier)."""
         xml = licence.get('xml_genere') or {}
         entrees = xml.get('fichiers') or ([dict(parts=[1], fichier=xml['fichier'])] if xml.get('fichier') else [])
         if not entrees:
             return
-        bloc = ttk.Frame(parent, padding=12, relief='solid', borderwidth=1)
-        bloc.pack(fill='x', pady=(0, 16))
-        ttk.Label(bloc, text=f'XML générés ({len(entrees)})', style='Section.TLabel').grid(row=0, column=0, columnspan=3,
-                                                                                         sticky='w', pady=(0, 8))
+        bloc = self._bloc_liste(parent, f'XML générés ({len(entrees)})', licence, 'xml_generes',
+                                [e['fichier'] for e in entrees])
         bloc.columnconfigure(1, weight=1)
         for i, entree in enumerate(entrees, 1):
             chemin = Path(entree['fichier'])
@@ -817,6 +900,44 @@ class PageDocumentsFinaux(ttk.Frame):
                                    font=(theme.POLICE, 10), cursor='hand2')
                 dossier.grid(row=i, column=2, sticky='e', padx=(14, 0), pady=2)
                 dossier.bind('<Button-1>', lambda _e, c=chemin: self.ouvrir_fichier(c, reveler=True))
+
+    def imprimer_documents(self, numero):
+        """Factures, packing lists, CVI + BL, déclarations et fiche : un seul PDF, envoyé à l'imprimante."""
+        if self.app.session_verrouillee or self.import_en_cours:
+            return
+        from asydec.ui.impression_documents import FenetreImpression
+        try:
+            licence = licences_ouvertes.charger(numero)
+        except (ValueError, OSError, sqlite3.Error) as exc:
+            messagebox.showerror('Imprimer les documents', str(exc), parent=self)
+            return
+        FenetreImpression(self, self.app, licence, self.ouvrir_fichier)
+
+    def imprimer_dossier(self, numero):
+        """Fiche PDF du dossier (informations et répartitions), enregistrée dans le dossier DEC puis ouverte
+        pour impression (Aperçu, Edge, Acrobat…)."""
+        from asydec.declarations import fiche_dossier
+        try:
+            licence = licences_ouvertes.charger(numero)
+            contenu = fiche_dossier.pdf(licence)
+            dossier = espace_travail.dossier_dec(licence['numero_dec'])
+        except (ValueError, OSError, sqlite3.Error) as exc:
+            messagebox.showerror('Imprimer détails dossier', str(exc), parent=self)
+            return
+        if dossier is None:
+            choisi = filedialog.askdirectory(parent=self, title='Dossier où enregistrer la fiche du dossier')
+            if not choisi:
+                return
+            dossier = Path(choisi)
+        destination = Path(dossier) / f'{numero} - details dossier.pdf'
+        try:
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.write_bytes(contenu)
+        except OSError as exc:
+            messagebox.showerror('Imprimer détails dossier',
+                                 f'{exc}\n\nFermez la fiche si elle est ouverte, puis recommencez.', parent=self)
+            return
+        self.ouvrir_fichier(destination)
 
     def ouvrir_fichier(self, chemin, reveler=False):
         """Ouvre le fichier avec l'application par défaut, ou le sélectionne dans le Finder / l'Explorateur."""
@@ -889,6 +1010,41 @@ class PageDocumentsFinaux(ttk.Frame):
         self.traiter_licence(numero)
         self.voir_comparaison(numero)
 
+    def generer_verifications(self, numero):
+        """Étape 8 sans SYDONIA : XML de vérification pour les parts sans XML SYDONIA importé."""
+        if self.app.session_verrouillee or self.import_en_cours:
+            return
+        from asydec.declarations import taux_declaration
+        try:
+            licence = licences_ouvertes.charger(numero)
+            dossier = espace_travail.dossier_dec(licence['numero_dec'], 'xml_sydonia')
+        except (ValueError, OSError, sqlite3.Error) as exc:
+            messagebox.showerror('XML de vérification', str(exc), parent=self)
+            return
+        if dossier is None:
+            choisi = filedialog.askdirectory(parent=self, title='Dossier où enregistrer les XML de vérification')
+            if not choisi:
+                return
+            dossier = Path(choisi)
+        taux = taux_declaration.du_dossier(licence)
+        if not messagebox.askyesno(
+                'XML de vérification',
+                'AsyDec va produire, pour chaque part sans XML SYDONIA importé, un XML de vérification à partir '
+                'du XML attendu (étape 7) : montants en francs congolais, bases et taxes recalculés '
+                + (f'au taux {taux} de l’étape 3.' if taux else 'au taux du XML généré (aucun taux saisi à l’étape 3).')
+                + '\n\nLes XML SYDONIA déjà importés sont gardés. Ces fichiers sont marqués « vérification AsyDec » : '
+                  'ce ne sont pas des déclarations réelles et ils ne servent jamais de référence.\n\nContinuer ?',
+                parent=self):
+            return
+        try:
+            fichiers = licences_ouvertes.generer_verifications(numero, dossier)
+        except (ValueError, OSError, sqlite3.Error, ET.ParseError) as exc:
+            messagebox.showerror('XML de vérification', str(exc), parent=self)
+            return
+        self.traiter_licence(numero)
+        messagebox.showinfo('XML de vérification', f'{len(fichiers)} XML de vérification enregistré(s) et comparé(s) :\n'
+                            + espace_travail.relatif(dossier), parent=self)
+
     @staticmethod
     def _comparaisons(licence):
         """Comparaisons enregistrées (une par XML SYDONIA importé), recalculées pour l'affichage."""
@@ -922,7 +1078,10 @@ class PageDocumentsFinaux(ttk.Frame):
         FenetreComparaison(self, licence, comparaisons)
 
     def generer_declarations(self, numero):
-        """Étape 9 : une déclaration Word par part, depuis le modèle fourni (forme inchangée)."""
+        """Étape 9 : une déclaration Word par part, depuis le modèle fourni (forme inchangée).
+
+        La préparation (environ une demi-seconde par part) tourne en arrière-plan avec une barre de
+        progression : l'application reste réactive même avec 20 ou 30 déclarations."""
         if self.app.session_verrouillee or self.import_en_cours:
             return
         modele = declaration_licence.modele_defaut()
@@ -934,14 +1093,68 @@ class PageDocumentsFinaux(ttk.Frame):
             modele = Path(choisi)
         try:
             licence = licences_ouvertes.charger(numero)
-            # Toutes les parts sont préparées en mémoire : rien n'est écrit si l'une échoue.
-            resultats = declaration_licence.generer(licence, modele.read_bytes())
+            contenu_modele = modele.read_bytes()
             dossier = espace_travail.dossier_dec(licence['numero_dec'], 'declarations')
-            if dossier is None:
-                choisi = filedialog.askdirectory(parent=self, title='Dossier où enregistrer les déclarations')
-                if not choisi:
-                    return
-                dossier = Path(choisi)
+        except (ValueError, OSError, sqlite3.Error) as exc:
+            messagebox.showerror('Génération déclaration', str(exc), parent=self)
+            return
+        if dossier is None:
+            choisi = filedialog.askdirectory(parent=self, title='Dossier où enregistrer les déclarations')
+            if not choisi:
+                return
+            dossier = Path(choisi)
+
+        import queue
+        import threading
+        file = queue.Queue()
+        fenetre = tk.Toplevel(self)
+        fenetre.title('Génération des déclarations')
+        fenetre.transient(self.winfo_toplevel())
+        fenetre.resizable(False, False)
+        fenetre.protocol('WM_DELETE_WINDOW', lambda: None)  # pas de fermeture pendant le travail
+        cadre = ttk.Frame(fenetre, padding=20)
+        cadre.pack(fill='both', expand=True)
+        statut = tk.StringVar(value='Préparation des déclarations…')
+        ttk.Label(cadre, textvariable=statut, width=48).pack(anchor='w', pady=(0, 10))
+        barre = ttk.Progressbar(cadre, mode='determinate', maximum=100, length=380)
+        barre.pack(fill='x')
+        self.import_en_cours = True
+
+        def travail():
+            try:
+                # Toutes les parts sont préparées en mémoire : rien n'est écrit si l'une échoue.
+                resultats = declaration_licence.generer(
+                    licence, contenu_modele, lambda fait, total: file.put(('progression', fait, total)))
+                file.put(('fini', resultats))
+            except Exception as exc:  # affiché à l'utilisateur ; aucun fichier n'a été écrit
+                file.put(('erreur', exc))
+
+        def suivre():
+            try:
+                while True:
+                    evenement = file.get_nowait()
+                    if evenement[0] == 'progression':
+                        _, fait, total = evenement
+                        barre['value'] = 100 * fait / total if total else 100
+                        statut.set(f'Déclaration {min(fait + 1, total)} / {total} en préparation…' if fait < total
+                                   else f'{total} déclaration(s) prêtes · enregistrement…')
+                    else:
+                        self.import_en_cours = False
+                        fenetre.destroy()
+                        if evenement[0] == 'erreur':
+                            messagebox.showerror('Génération déclaration', str(evenement[1]), parent=self)
+                        else:
+                            self._enregistrer_declarations(numero, licence, evenement[1], dossier, modele)
+                        return
+            except queue.Empty:
+                pass
+            self.after(120, suivre)
+
+        threading.Thread(target=travail, daemon=True).start()
+        self.after(120, suivre)
+
+    def _enregistrer_declarations(self, numero, licence, resultats, dossier, modele):
+        try:
             anciens = {str(Path(f['fichier'])) for f in (licence.get('declarations') or {}).get('fichiers') or []}
             fichiers = []
             for resultat in resultats:
@@ -951,17 +1164,32 @@ class PageDocumentsFinaux(ttk.Frame):
                 destination.write_bytes(resultat['contenu'])
                 fichiers.append(destination)
             licences_ouvertes.enregistrer_declarations(numero, declaration_licence.fiche(resultats, fichiers, modele))
+            sans = declaration_licence.parts_sans_sydonia(licences_ouvertes.charger(numero))
         except (ValueError, OSError, sqlite3.Error, ET.ParseError) as exc:
             messagebox.showerror('Génération déclaration', str(exc), parent=self)
             return
         self.traiter_licence(numero)
         plusieurs = [r['part'] for r in resultats if r['articles'] > 1]
-        sans = declaration_licence.parts_sans_sydonia(licences_ouvertes.charger(numero))
-        details = '\n'.join(f"• Part {r['part']} : {declaration_licence.texte_controle(r['controle'])}" for r in resultats)
-        incomplet = any(r['controle']['manquantes'] for r in resultats) or sans
+        a_revoir = [r for r in resultats if r['controle']['manquantes']]
+        # Coupures (police du modèle jamais changée) : regroupées, les mêmes cases reviennent sur chaque part.
+        coupees = {}
+        for r in resultats:
+            for c in r.get('coupures') or []:
+                coupees.setdefault(c, []).append(r['part'])
+        texte_coupures = '\n'.join(f"• {c}" + (f" (parts {', '.join(map(str, p))})" if len(p) < len(resultats) else ' (toutes les parts)')
+                                   for c, p in list(coupees.items())[:8])
+        # Message court même avec 30 parts : le détail de chaque part reste dans la liste de l'étape 9.
+        details = '\n'.join(f"• Part {r['part']} : {declaration_licence.texte_controle(r['controle'])}"
+                             for r in a_revoir[:8])
+        if len(a_revoir) > 8:
+            details += f"\n• … et {len(a_revoir) - 8} autre(s)"
+        incomplet = bool(a_revoir or sans or coupees)
         (messagebox.showwarning if incomplet else messagebox.showinfo)(
             'Déclarations enregistrées',
-            f"{len(resultats)} déclaration(s) Word, remplie(s) depuis le XML SYDONIA de chaque part :\n{details}"
+            f"{len(resultats)} déclaration(s) Word enregistrée(s), remplie(s) depuis le XML SYDONIA de chaque part."
+            + (f"\n\nÀ revoir ({len(a_revoir)}) :\n{details}" if a_revoir
+               else '\n\n✓ Toutes les parts sont prêtes pour la déclaration.')
+            + (f"\n\nTexte coupé pour garder la police et la taille du modèle :\n{texte_coupures}" if coupees else '')
             + (f"\n\nSans XML SYDONIA importé à l’étape 8, pas de déclaration pour : part(s) {', '.join(map(str, sans))}."
                if sans else '')
             + (f"\n\nParts à plusieurs articles ({', '.join(map(str, plusieurs))}) : le formulaire ne porte que "
@@ -973,20 +1201,20 @@ class PageDocumentsFinaux(ttk.Frame):
         entrees = (licence.get('declarations') or {}).get('fichiers') or []
         if not entrees:
             return
-        bloc = ttk.Frame(parent, padding=12, relief='solid', borderwidth=1)
-        bloc.pack(fill='x', pady=(0, 16))
+        bloc = self._bloc_liste(parent, f'Déclarations générées ({len(entrees)})', licence, 'declarations',
+                                [e['fichier'] for e in entrees])
         bloc.columnconfigure(2, weight=1)
-        ttk.Label(bloc, text=f'Déclarations générées ({len(entrees)})', style='Section.TLabel').grid(
-            row=0, column=0, columnspan=4, sticky='w', pady=(0, 8))
         for ligne, entree in enumerate(entrees, 1):
             ttk.Label(bloc, text=f"Part {entree['part']}" + (f" · E {entree['numero_e']}" if entree.get('numero_e') else ''),
                       style='Doux.TLabel').grid(row=ligne, column=0, sticky='w', padx=(0, 14), pady=2)
-            ttk.Label(bloc, text=entree.get('origine', ''), style='Doux.TLabel').grid(row=ligne, column=1, sticky='w', padx=(0, 14))
+            ttk.Label(bloc, text=entree.get('origine', ''), style='Doux.TLabel', wraplength=260,
+                      justify='left').grid(row=ligne, column=1, sticky='w', padx=(0, 14))
             chemin = Path(entree['fichier'])
             existe = chemin.is_file()
             lien = tk.Label(bloc, text=chemin.name + ('' if existe else '  (introuvable)'),
                             fg=theme.ACCENT if existe else theme.TEXTE_DOUX, bg=theme.FOND,
-                            font=(theme.POLICE, 11, 'underline' if existe else 'normal'), cursor='hand2' if existe else '')
+                            font=(theme.POLICE, 11, 'underline' if existe else 'normal'), cursor='hand2' if existe else '',
+                            wraplength=360, justify='left', anchor='w')
             lien.grid(row=ligne, column=2, sticky='w', pady=2)
             if existe:
                 lien.bind('<Button-1>', lambda _e, c=chemin: self.ouvrir_fichier(c))
@@ -994,6 +1222,11 @@ class PageDocumentsFinaux(ttk.Frame):
                                    font=(theme.POLICE, 10), cursor='hand2')
                 dossier.grid(row=ligne, column=3, sticky='e', padx=(14, 0), pady=2)
                 dossier.bind('<Button-1>', lambda _e, c=chemin: self.ouvrir_fichier(c, reveler=True))
+        coupees = sorted({c for e in entrees for c in e.get('coupures') or []})
+        if coupees:
+            tk.Label(bloc, text='✂ Texte coupé pour garder la police du modèle :\n' + '\n'.join('• ' + c for c in coupees),
+                     fg=theme.ALERTE, bg=theme.FOND, font=(theme.POLICE, 10), wraplength=900, justify='left',
+                     anchor='w').grid(row=len(entrees) + 1, column=0, columnspan=4, sticky='w', pady=(8, 0))
 
     def _liste_xml_sydonia(self, parent, licence):
         """Liste des XML SYDONIA importés à l'étape 8 : part associée, résultat, lien vers le fichier."""
@@ -1002,11 +1235,9 @@ class PageDocumentsFinaux(ttk.Frame):
                                                         resume=recuperation['resume'])] if recuperation.get('fichier') else [])
         if not imports:
             return
-        bloc = ttk.Frame(parent, padding=12, relief='solid', borderwidth=1)
-        bloc.pack(fill='x', pady=(0, 16))
+        bloc = self._bloc_liste(parent, f'XML SYDONIA importés ({len(imports)})', licence, 'xml_sydonia',
+                                [e['fichier'] for e in imports])
         bloc.columnconfigure(2, weight=1)
-        ttk.Label(bloc, text=f'XML SYDONIA importés ({len(imports)})', style='Section.TLabel').grid(
-            row=0, column=0, columnspan=4, sticky='w', pady=(0, 8))
         for ligne, entree in enumerate(imports, 1):
             resume = entree.get('resume') or {}
             if resume.get('controles_differents'):
@@ -1015,6 +1246,8 @@ class PageDocumentsFinaux(ttk.Frame):
                 etat, couleur = '⚠ autres champs modifiés', theme.ALERTE
             else:
                 etat, couleur = '✓ identique', theme.OK
+            if entree.get('simule'):
+                etat, couleur = '◆ vérification AsyDec (sans SYDONIA)', theme.ACCENT
             ttk.Label(bloc, text=str(entree.get('libelle', 'part 1')).capitalize(), style='Doux.TLabel').grid(
                 row=2 * ligne - 1, column=0, sticky='w', padx=(0, 14), pady=2)
             tk.Label(bloc, text=etat, fg=couleur, bg=theme.FOND, font=(theme.POLICE, 10, 'bold')).grid(
@@ -1023,7 +1256,8 @@ class PageDocumentsFinaux(ttk.Frame):
             existe = chemin.is_file()
             lien = tk.Label(bloc, text=chemin.name + ('' if existe else '  (introuvable)'),
                             fg=theme.ACCENT if existe else theme.TEXTE_DOUX, bg=theme.FOND,
-                            font=(theme.POLICE, 11, 'underline' if existe else 'normal'), cursor='hand2' if existe else '')
+                            font=(theme.POLICE, 11, 'underline' if existe else 'normal'), cursor='hand2' if existe else '',
+                            wraplength=360, justify='left', anchor='w')
             lien.grid(row=2 * ligne - 1, column=2, sticky='w', pady=2)
             if existe:
                 lien.bind('<Button-1>', lambda _e, c=chemin: self.ouvrir_fichier(c))
@@ -1057,6 +1291,9 @@ class PageDocumentsFinaux(ttk.Frame):
             dossier_dec = None
         if dossier_dec is not None:
             theme.bouton(haut, f'Ouvrir le dossier {dossier_dec.name}', lambda d=dossier_dec: self.ouvrir_dossier(d)).pack(side='right')
+        theme.bouton(haut, '🖨  Imprimer les documents…', lambda: self.imprimer_documents(numero),
+                     principal=True).pack(side='right', padx=(0, 10))
+        theme.bouton(haut, 'Détails dossier (PDF)', lambda: self.imprimer_dossier(numero)).pack(side='right', padx=(0, 10))
         theme.entete_page(self.traitement, 'Traitement licence', numero)
         repartition_resume = licence.get('repartition') or {}
         morceaux = [licence.get('soussigne', {}).get('nom') or 'Soussigné non renseigné',
@@ -1067,6 +1304,21 @@ class PageDocumentsFinaux(ttk.Frame):
                          f"{synthese_licence.nombre(repartition_resume.get('poids_total_kg'))} kg"]
         ttk.Label(self.traitement, text='  ·  '.join(morceaux), style='Section.TLabel',
                   wraplength=900).pack(anchor='w', pady=(0, 14))
+        from asydec.declarations.numeros_logiques import parts_hors_regle
+        hors_regle = parts_hors_regle(licence)
+        if hors_regle:
+            bandeau = tk.Frame(self.traitement, bg=theme.FOND_ERREUR, padx=12, pady=8)
+            bandeau.pack(fill='x', pady=(0, 12))
+            details = '\n'.join(f"• Part {n} : " + ' · '.join(m.split(' :')[0] for m in messages)
+                                for n, messages in hors_regle[:5])
+            if len(hors_regle) > 5:
+                details += f"\n• … et {len(hors_regle) - 5} autre(s) part(s)"
+            tk.Label(bandeau, text='⚠ Règle non respectée : liquidation, Q et manifeste doivent toujours être '
+                                   f'inférieurs au E ({len(hors_regle)} part(s)).\n' + details,
+                     fg=theme.ERREUR, bg=theme.FOND_ERREUR, font=(theme.POLICE, 11), justify='left',
+                     anchor='w').pack(side='left', fill='x', expand=True)
+            theme.bouton(bandeau, 'Corriger à l’étape 3', lambda: self.informations_declaration(numero),
+                         principal=True).pack(side='right')
 
         repartition = licence.get('repartition')
         informations = licence.get('informations_declaration')
@@ -1088,6 +1340,8 @@ class PageDocumentsFinaux(ttk.Frame):
             texte_infos = ' · '.join(f'{titre} : {informations[cle]}' for cle, titre in
                                      (('numero_e', 'E'), ('numero_liquidation', 'L'), ('numero_quittance', 'Q'),
                                       ('manifeste', 'Manifeste')) if informations.get(cle)) or 'Informations enregistrées.'
+            if (licence.get('taux_change') or {}).get('valeur'):
+                texte_infos += f" · Taux déclaration : {licence['taux_change']['valeur']}"
         else:
             texte_infos = 'Numéros E, liquidation, Q, manifeste, références, bureau douanier et transport.'
         factures = licence.get('factures_parts')
@@ -1095,7 +1349,7 @@ class PageDocumentsFinaux(ttk.Frame):
         reference = licence.get('numero_facture')
         if facture_ok:
             liste = factures['parts']
-            origine = ('facture simple AsyDec' if factures.get('methode') == 'simple'
+            origine = (('présentation KINSHOP' if facture_kinshop.correspond(licence) else 'facture simple AsyDec') if factures.get('methode') == 'simple'
                        else 'modèle ' + Path(factures['modele']).name)
             texte_facture = (f"{len(liste)} facture(s) et {len(liste)} packing list(s) séparées du {factures['date_facture']} : "
                              f"{liste[0]['numero']} à {liste[-1]['numero']}, plus la facture globale "
@@ -1118,8 +1372,8 @@ class PageDocumentsFinaux(ttk.Frame):
             texte_declaration = (f"{len(licence['declarations']['fichiers'])} déclaration(s) Word, une par part, "
                                  'remplie(s) sur le modèle fourni sans en changer la forme · dossier 6 - DECLARATIONS.')
         elif licence.get('declarations'):
-            texte_declaration = ('Les XML ont changé depuis la génération des déclarations : générez-les à nouveau '
-                                 '(les fichiers seront remplacés).')
+            texte_declaration = ('Les XML ou le taux de change de l’étape 3 ont changé depuis la génération des '
+                                 'déclarations : générez-les à nouveau (les fichiers seront remplacés).')
         else:
             texte_declaration = ('Une déclaration (DCU) Word par part, remplie sur votre modèle sans changer sa forme : '
                                  'cases, polices et image de fond conservées. E, L, Q, leurs dates, manifeste et plaques '
@@ -1130,9 +1384,24 @@ class PageDocumentsFinaux(ttk.Frame):
             texte_recuperation = recuperation_simulation.conclusion(recuperation['resume'])
         elif licence.get('xml_genere'):
             texte_recuperation = ('Importez le ou les XML récupérés de SYDONIA (plusieurs à la fois possible) : '
-                                  'chacun est comparé au XML attendu de sa part.')
+                                  'chacun est comparé au XML attendu de sa part.\n'
+                                  'Sans accès à SYDONIA : « Générer les XML de vérification » produit, pour les parts '
+                                  'sans XML importé, un XML recalculé au taux de l’étape 3 (marqué vérification AsyDec).')
         else:
             texte_recuperation = 'Disponible après la génération XML (étape 7).'
+        statut_final = finalisation.statut(licence)
+        fiche_finale = licence.get('finalisation') or {}
+        if statut_final == finalisation.EN_ATTENTE_ARCHIVAGE:
+            texte_finalisation = (f"Dossier finalisé le {self._date_locale(fiche_finale.get('finalise_le'))} : "
+                                  'en attente d’archivage. Il apparaît avec ce statut dans la liste des licences. '
+                                  'Pour corriger un document, annulez la finalisation, régénérez-le puis finalisez à nouveau.'
+                                  + (f"\nObservation : {fiche_finale['observation']}" if fiche_finale.get('observation') else ''))
+        elif statut_final == finalisation.A_REFAIRE:
+            texte_finalisation = ('Des documents ont été régénérés depuis la finalisation : vérifiez-les, '
+                                  'puis finalisez à nouveau le dossier.')
+        else:
+            texte_finalisation = ('Dernière étape : vérifie que tous les documents sont produits et à jour, '
+                                  'puis met le dossier « en attente d’archivage ». Rien n’est déplacé ni effacé.')
         etapes = (
             ('Licence', 'Informations de la licence', True, True,
              'Coordonnées, prix et articles récupérés sur la licence.',
@@ -1151,11 +1420,12 @@ class PageDocumentsFinaux(ttk.Frame):
               ('📂 Dossier DEC', lambda: self.ouvrir_rangement(numero)))),
             ('Factures', 'Factures et packing lists', facture_ok, a_jour, texte_facture,
              (('Choisir le modèle de facture…', lambda: self.generer_facture(numero)),
-              ('Facture simple AsyDec', lambda: self.generer_facture(numero, simple=True)),
+              ('Facture KINSHOP' if facture_kinshop.correspond(licence) else 'Facture simple AsyDec', lambda: self.generer_facture(numero, simple=True)),
               ('📂 Dossier factures', lambda: self.ouvrir_rangement(numero, 'factures')))),
             ('CVI + BL', 'Remplissage CVI et BL', cvi.est_a_jour(licence), a_jour and facture_ok,
-             'Un seul fichier Word de deux pages : CVI puis BL. Le BL réunit les conteneurs, scellés, quantités et poids de toutes les répartitions. Les polices et positions du modèle sont conservées. '
-             'Les numéros E, L et Q proviennent de la première répartition validée. Sur le CVI : DIB = numéro complet de licence ; poids global = somme des poids de toutes les répartitions.',
+             'Un seul fichier Word : le CVI puis 1 à 3 BL. Un BL réunit 10 conteneurs au plus : 1 BL jusqu’à 10 répartitions, 2 BL jusqu’à 20, 3 BL jusqu’à 30 ; chacun a son numéro, ses conteneurs, scellés, poids et colis. Les polices et positions du modèle sont conservées. '
+             'Les numéros E, L et Q proviennent de la première répartition validée. Sur le CVI : DIB = numéro complet de licence ; '
+             'FOB, CIF, quantité, poids et n° de facture = totaux de tout le dossier (facture globale), comme le BL.',
              (('Remplir CVI et BL…', lambda: self.generer_cvi(numero)),
               ('📂 Dossier CVI et BL', lambda: self.ouvrir_rangement(numero, 'cvi')))),
             ('XML', 'Génération XML', bool(licence.get('xml_genere')), a_jour and facture_ok,
@@ -1168,17 +1438,29 @@ class PageDocumentsFinaux(ttk.Frame):
               ('📂 Dossier XML générés', lambda: self.ouvrir_rangement(numero, 'xml_generes')))),
             ('SYDONIA', 'Récupération simulation', bool(recuperation), bool(licence.get('xml_genere')), texte_recuperation,
              (('Importer les XML SYDONIA…', lambda: self.recuperer_simulation(numero)),
+              ('Générer les XML de vérification (sans SYDONIA)', lambda: self.generer_verifications(numero)),
               ('Voir la comparaison', lambda: self.voir_comparaison(numero)),
               ('📂 Dossier XML SYDONIA', lambda: self.ouvrir_rangement(numero, 'xml_sydonia')))),
             ('Déclaration', 'Génération déclaration', declaration_licence.est_a_jour(licence), bool(recuperation),
              texte_declaration,
              (('Générer les déclarations', lambda: self.generer_declarations(numero)),
               ('📂 Dossier déclarations', lambda: self.ouvrir_rangement(numero, 'declarations')))),
+            ('Finaliser', 'Finalisation du dossier', statut_final == finalisation.EN_ATTENTE_ARCHIVAGE,
+             statut_final != finalisation.EN_COURS or finalisation.pret(licence), texte_finalisation,
+             ((('Annuler la finalisation', lambda: self.annuler_finalisation(numero))
+               if statut_final == finalisation.EN_ATTENTE_ARCHIVAGE
+               else ('Finaliser le dossier', lambda: self.finaliser(numero))),
+              ('Détails dossier (PDF)', lambda: self.imprimer_dossier(numero)),
+              ('📂 Dossier DEC', lambda: self.ouvrir_rangement(numero)))),
         )
         etats = []
         for court, titre, fait, accessible, description, boutons in etapes:
             if fait and titre == 'Récupération simulation' and recuperation['resume'].get('controles_differents'):
                 etats.append(('⚠', 'Écarts à vérifier', theme.ERREUR, theme.FOND_ERREUR, 'Erreur.TLabel'))
+            elif titre == 'Finalisation du dossier' and statut_final == finalisation.A_REFAIRE:
+                etats.append(('⚠', 'À refaire', theme.ERREUR, theme.FOND_ERREUR, 'Erreur.TLabel'))
+            elif fait and titre == 'Finalisation du dossier':
+                etats.append(('✓', 'En attente d’archivage', theme.OK, theme.FOND_OK, 'Ok.TLabel'))
             elif fait:
                 etats.append(('✓', 'Terminée', theme.OK, theme.FOND_OK, 'Ok.TLabel'))
             elif accessible:
@@ -1186,7 +1468,7 @@ class PageDocumentsFinaux(ttk.Frame):
             else:
                 etats.append(('○', 'Bloquée', theme.TEXTE_DOUX, theme.FOND_LATERAL, 'Doux.TLabel'))
 
-        # Frise : les 9 étapes dans l'ordre, cliquables ; l'étape affichée est encadrée.
+        # Frise : les 10 étapes dans l'ordre, cliquables ; l'étape affichée est encadrée.
         frise = tk.Frame(self.traitement, bg=theme.FOND)
         frise.pack(fill='x', pady=(0, 14))
         pastilles = []
@@ -1229,6 +1511,8 @@ class PageDocumentsFinaux(ttk.Frame):
                 self._liste_xml_sydonia(panneau, licence)
             elif titre == 'Génération déclaration':
                 self._liste_declarations(panneau, licence)
+            elif titre == 'Finalisation du dossier':
+                self._liste_controles(panneau, licence)
             actions = ttk.Frame(panneau)
             actions.pack(anchor='w')
             for j, (texte, commande) in enumerate(boutons):
@@ -1271,6 +1555,63 @@ class PageDocumentsFinaux(ttk.Frame):
         toile.bind('<Enter>', lambda _: toile.bind_all('<MouseWheel>', molette))
         toile.bind('<Leave>', lambda _: toile.unbind_all('<MouseWheel>'))
         synthese_licence.construire(contenu, licence).pack(fill='x')
+
+    @staticmethod
+    def _date_locale(iso):
+        from datetime import datetime
+        try:
+            return datetime.fromisoformat(iso).astimezone().strftime('%d/%m/%Y à %H:%M')
+        except (TypeError, ValueError):
+            return '?'
+
+    def _liste_controles(self, parent, licence):
+        cadre = ttk.LabelFrame(parent, text='Contrôles avant archivage', padding=12)
+        cadre.pack(fill='x', pady=(0, 16))
+        for libelle, reussi, bloquant in finalisation.controles(licence):
+            icone, style = ('✓', 'Ok.TLabel') if reussi else ('✗', 'Erreur.TLabel') if bloquant else ('⚠', 'Alerte.TLabel')
+            ttk.Label(cadre, text=f'{icone}  {libelle}' + ('' if reussi or bloquant else ' (non bloquant)'),
+                      style=style).pack(anchor='w', pady=1)
+
+    def finaliser(self, numero):
+        if self.app.session_verrouillee or self.import_en_cours:
+            return
+        try:
+            licence = licences_ouvertes.charger(numero)
+        except (ValueError, OSError, sqlite3.Error) as exc:
+            messagebox.showerror('Finaliser le dossier', str(exc), parent=self)
+            return
+        manquants = finalisation.bloquants(licence)
+        if manquants:
+            messagebox.showwarning('Finaliser le dossier', 'Le dossier n’est pas complet :\n\n• '
+                                   + '\n• '.join(manquants), parent=self)
+            return
+        avertissements = [l for l, reussi, bloquant in finalisation.controles(licence) if not reussi and not bloquant]
+        if not messagebox.askyesno(
+                'Finaliser le dossier', f'Finaliser le dossier {numero} et le mettre en attente d’archivage ?\n\n'
+                + (''.join(f'⚠ {a}\n' for a in avertissements) + '\n' if avertissements else '')
+                + 'Les documents restent en place ; vous pourrez annuler la finalisation si une correction est nécessaire.',
+                parent=self):
+            return
+        try:
+            licences_ouvertes.finaliser(numero)
+        except (ValueError, OSError, sqlite3.Error) as exc:
+            messagebox.showerror('Finaliser le dossier', str(exc), parent=self)
+            return
+        self.traiter_licence(numero)
+
+    def annuler_finalisation(self, numero):
+        if self.app.session_verrouillee or self.import_en_cours:
+            return
+        if not messagebox.askyesno('Annuler la finalisation',
+                                   f'Remettre le dossier {numero} « en cours » ? Il ne sera plus en attente d’archivage.',
+                                   icon='warning', parent=self):
+            return
+        try:
+            licences_ouvertes.annuler_finalisation(numero)
+        except (ValueError, OSError, sqlite3.Error) as exc:
+            messagebox.showerror('Annuler la finalisation', str(exc), parent=self)
+            return
+        self.traiter_licence(numero)
 
     def repartir_licence(self, numero):
         if self.app.session_verrouillee or self.import_en_cours:

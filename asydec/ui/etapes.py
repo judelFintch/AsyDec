@@ -273,8 +273,10 @@ class PageArticles(ttk.Frame):
                         command=self.changer_mode).pack(side="left")
         ttk.Radiobutton(reglages, text="FOB saisis", value="SAISI", variable=self.var_mode,
                         command=self.changer_mode).pack(side="left", padx=(12, 30))
+        self.var_poids_total = tk.StringVar()
         self.var_fob_total, self.var_colis_total = tk.StringVar(), tk.StringVar()
-        for texte, var in (("FOB total (USD)", self.var_fob_total), ("Colis total", self.var_colis_total)):
+        for texte, var in (("Poids total (kg)", self.var_poids_total), ("FOB total (USD)", self.var_fob_total),
+                           ("Colis total", self.var_colis_total)):
             ttk.Label(reglages, text=texte).pack(side="left", padx=(12, 4))
             e = ttk.Entry(reglages, textvariable=var, width=11, justify="right")
             e.pack(side="left")
@@ -352,6 +354,8 @@ class PageArticles(ttk.Frame):
                 e = ttk.Entry(grille, width=largeur, justify="right")
                 e.grid(row=k + 1, column=colonne, padx=5, pady=2)
                 e.bind("<KeyRelease>", self.planifier)
+                if colonne == 2:
+                    e.bind("<KeyRelease>", self._suivre_poids, add="+")
                 liste.append(e)
         self.etiquettes_totaux = [ttk.Label(grille, text="", style="Total.TLabel", anchor="e") for _ in range(3)]
         ttk.Label(grille, text="Total", style="Total.TLabel").grid(row=n+1, column=1, padx=5, pady=(8, 0), sticky="w")
@@ -367,7 +371,32 @@ class PageArticles(ttk.Frame):
                 "fob": [lire(e) for e in self.e_fob] if saisi else None,
                 "fob_total": generer.nombre(self.var_fob_total.get()) if self.var_fob_total.get().strip() else None,
                 "colis": colis if any(c is not None for c in colis) else None,
-                "colis_total": generer.nombre(self.var_colis_total.get()) if self.var_colis_total.get().strip() else None}
+                "colis_total": generer.nombre(self.var_colis_total.get()) if self.var_colis_total.get().strip() else None,
+                "poids_total": self._poids_total_saisi()}
+
+    def _suivre_poids(self, _evenement=None):
+        """Poids saisis ligne par ligne : le champ « Poids total » suit la somme du tableau complet."""
+        poids = [lire(e) for e in self.e_poids]
+        if poids and all(p is not None for p in poids):
+            self.var_poids_total.set(f"{round(sum(poids), 3):g}")
+
+    def _poids_total_saisi(self):
+        """Poids total du champ (kg), ou None s'il est vide ou illisible."""
+        var = getattr(self, "var_poids_total", None)
+        texte = var.get().strip() if var is not None else ""
+        if not texte:
+            return None
+        try:
+            return generer.nombre(texte)
+        except (ValueError, TypeError):
+            return None
+
+    def _total_poids(self, v):
+        """Poids total voulu : celui du champ, sinon la somme du tableau complet, sinon celui du dossier."""
+        if v.get("poids_total") is not None:
+            return v["poids_total"]
+        poids = v["poids"]
+        return sum(poids) if all(p is not None for p in poids) else self.app.info["poids"]
 
     def remplir(self, poids, fob=None, colis=None, mode=None):
         if mode:
@@ -381,6 +410,8 @@ class PageArticles(ttk.Frame):
             self.var_fob_total.set(f"{round(sum(fob), 2):g}")
         if colis and all(c is not None for c in colis):
             self.var_colis_total.set(str(int(sum(colis))))
+        if poids and all(p is not None for p in poids):
+            self.var_poids_total.set(f"{round(sum(poids), 3):g}")
         self.actualiser()
 
     def nouvelle_base(self):
@@ -389,6 +420,7 @@ class PageArticles(ttk.Frame):
         self._nommer_articles()
         self.var_fob_total.set(f"{info['fob']:g}")
         self.var_colis_total.set(str(info["colis"]))
+        self.var_poids_total.set(f"{info['poids']:g}")
         self.remplir(None, mode="RATIOS")
         self.panneau.preparer()
 
@@ -478,13 +510,13 @@ class PageArticles(ttk.Frame):
         from asydec.ui.taux_change import confirmer
         info, profil, v = self.app.info, self.app.profil, self.valeurs()
         poids = v["poids"]
-        total_poids = sum(poids) if all(p is not None for p in poids) else info["poids"]
+        total_poids = self._total_poids(v)
         total_fob = v["fob_total"] if v["fob_total"] is not None else info["fob"]
         total_colis = v["colis_total"] if v["colis_total"] is not None else info["colis"]
         if total_poids != int(total_poids):
             messagebox.showinfo("Générer une autre répartition",
                 f"Le poids total ({total_poids:g} kg) doit être un nombre entier de kilogrammes. "
-                "Corrigez les poids ou utilisez « Ajuster au poids total… ».", parent=self)
+                "Corrigez le champ « Poids total (kg) ».", parent=self)
             return
         try:
             if not confirmer(self.app, [self.app.base], parent=self):
@@ -495,7 +527,8 @@ class PageArticles(ttk.Frame):
         cle = (self.app.base, self.app.reference, int(total_poids), round(total_fob, 2), int(total_colis),
                tuple(profil["bornes"]), bool(profil.get("variables_libres")))
         vues = self.deja_vues.setdefault(cle, set())
-        if all(p is not None for p in poids) and v["fob"] and v["colis"] and None not in v["fob"]:
+        if (all(p is not None for p in poids) and sum(poids) == total_poids
+                and v["fob"] and v["colis"] and None not in v["fob"]):
             vues.add(variantes.cle_variante({"poids": poids, "fob": v["fob"], "colis": v["colis"]}))
         self.regenerer_bouton.configure(state="disabled")
         self.configure(cursor="watch")
@@ -574,8 +607,7 @@ class PageArticles(ttk.Frame):
     def totaux(self):
         """Totaux de la répartition : ceux du tableau s'il est complet, sinon ceux du XML du dossier."""
         info, v = self.app.info, self.valeurs()
-        poids = v["poids"]
-        return (sum(poids) if all(p is not None for p in poids) else info["poids"],
+        return (self._total_poids(v),
                 v["fob_total"] if v["fob_total"] is not None else info["fob"],
                 v["colis_total"] if v["colis_total"] is not None else info["colis"])
 

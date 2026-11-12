@@ -30,39 +30,25 @@ LISTES = ('PAYEUR', 'DESTINATAIRE', 'EXPORTATEUR', 'DECLARANT', 'TAXE_CODE', 'TA
 # et la police du modèle ; les suivantes ne sont pas affichées.
 TAXES = ('TAXE_CODE', 'TAXE_TAUX', 'TAXE_BASE', 'TAXE_MONTANT')
 TAXES_PREVUES = 8
-# Lignes que peut contenir chaque case sur le formulaire fourni (au-delà, la case déborderait).
-LIGNES_MAX = {'PAYEUR': 5, 'DESTINATAIRE': 4, 'EXPORTATEUR': 2, 'DECLARANT': 3, **dict.fromkeys(TAXES, TAXES_PREVUES)}
-
-
-def _enfant(parent, nom, avant):
-    """Enfant w:nom de parent, créé au bon rang du schéma (avant le premier des éléments `avant`)."""
-    noeud = next((n for n in parent.childNodes if n.nodeType == 1 and n.localName == nom), None)
-    if noeud is None:
-        noeud = parent.ownerDocument.createElementNS(W, 'w:' + nom)
-        suivant = next((n for n in parent.childNodes if n.nodeType == 1 and n.localName in avant), None)
-        parent.insertBefore(noeud, suivant)
-    return noeud
-
-
-APRES_SPACING = ('ind', 'contextualSpacing', 'mirrorIndents', 'suppressOverlap', 'jc', 'textDirection',
-                 'textAlignment', 'textboxTightWrap', 'outlineLvl', 'divId', 'cnfStyle', 'rPr', 'sectPr', 'pPrChange')
-APRES_SZ = ('szCs', 'highlight', 'u', 'effect', 'bdr', 'shd', 'fitText', 'vertAlign', 'rtl', 'cs', 'em', 'lang',
-            'eastAsianLayout', 'specVanish', 'oMath')
-
-
-# Zone de texte d'une seule ligne (hauteur en EMU) : un texte trop long y passerait à la ligne et
-# recouvrirait la case voisine. Sa police est alors réduite (jusqu'à TAILLE_MIN demi-points) pour tenir.
-HAUTEUR_UNE_LIGNE = 400000
-TAILLE_MIN = 10
+# Règle du formulaire : la police et la taille du modèle ne changent JAMAIS (ni l'interligne).
+# Une valeur trop longue pour sa case est coupée (entre deux mots si possible) à ce qui tient
+# à la taille du modèle, et la coupure est signalée. Word replie et déborde un peu avant les
+# dimensions calculées : on ne compte que cette part de la largeur et de la hauteur.
 EMU_PAR_POINT = 12700
-# Word replie et déborde un peu avant les dimensions calculées, et une zone de texte du modèle descend
-# parfois sous le trait de sa case : on ne compte que cette part de la largeur et de la hauteur.
-MARGE_LARGEUR = 0.92
+# Calé sur Word : un texte à 94,4 % de la largeur utile tient, à 95,1 % il passe à la ligne.
+MARGE_LARGEUR = 0.948
 MARGE_HAUTEUR = 0.90
+INTERLIGNE_ARIAL = 1.15  # hauteur d'une ligne simple en Arial, en multiple de la taille
+
+# Libellés des cases pour les avertissements de coupure.
+CASES = {'PAYEUR': 'case 9 · responsable financier', 'DESTINATAIRE': 'case 8 · destinataire',
+         'EXPORTATEUR': 'case 2 · exportateur', 'DECLARANT': 'case 14 · déclarant',
+         'TAXE_CODE': 'case 47 · codes taxes', 'TAXE_TAUX': 'case 47 · taux', 'TAXE_BASE': 'case 47 · bases',
+         'TAXE_MONTANT': 'case 47 · montants'}
 
 
 def _zone(paragraphe):
-    """(largeur utile, hauteur) en EMU de la zone de texte qui contient le paragraphe, sinon None."""
+    """(largeur utile, hauteur utile) en points de la zone de texte qui contient le paragraphe, sinon None."""
     noeud = paragraphe.parentNode
     while noeud is not None and not (noeud.nodeType == 1 and noeud.localName == 'wsp'):
         noeud = noeud.parentNode
@@ -72,8 +58,9 @@ def _zone(paragraphe):
     corps = [n for n in noeud.childNodes if n.nodeType == 1 and n.localName == 'bodyPr']
     if not ext or not corps:
         return None
-    marges = sum(int(corps[0].getAttribute(m) or 91440) for m in ('lIns', 'rIns'))
-    return int(ext[0].getAttribute('cx')) - marges, int(ext[0].getAttribute('cy'))
+    largeur = int(ext[0].getAttribute('cx')) - sum(int(corps[0].getAttribute(m) or 91440) for m in ('lIns', 'rIns'))
+    hauteur = int(ext[0].getAttribute('cy')) - sum(int(corps[0].getAttribute(m) or 45720) for m in ('tIns', 'bIns'))
+    return largeur / EMU_PAR_POINT * MARGE_LARGEUR, hauteur / EMU_PAR_POINT * MARGE_HAUTEUR
 
 
 def largeur_texte(contenu, demi_points):
@@ -85,69 +72,132 @@ def largeur_texte(contenu, demi_points):
         return len(contenu) * 0.55 * demi_points / 2
 
 
-def ajuster_liste(paragraphe, lignes):
-    """Case d'adresse : resserre ses lignes (lignes longues repliées comprises) si elles dépassent sa zone."""
-    zone = _zone(paragraphe)
-    if not zone:
-        return
-    noeud = paragraphe.parentNode
-    while noeud.localName != 'wsp':
-        noeud = noeud.parentNode
-    corps = [n for n in noeud.childNodes if n.nodeType == 1 and n.localName == 'bodyPr'][0]
-    hauteur = (zone[1] - sum(int(corps.getAttribute(m) or 45720) for m in ('tIns', 'bIns'))) / EMU_PAR_POINT * MARGE_HAUTEUR
-    largeur = zone[0] / EMU_PAR_POINT * MARGE_LARGEUR
+def _taille(paragraphe):
     tailles = [int(n.getAttribute('w:val')) for n in paragraphe.getElementsByTagNameNS(W, 'sz')
                if n.getAttribute('w:val').isdigit()]
-    taille = max(tailles or [16])
-    apres = [int(n.getAttribute('w:after') or 0) for n in paragraphe.getElementsByTagNameNS(W, 'spacing')]
-    pas = taille / 2 * 1.15 + (apres[0] if apres else 0) / 20
-    visuelles = sum(max(1, math.ceil(largeur_texte(l.strip(), taille) / largeur)) for l in lignes)
-    if visuelles * pas > hauteur:
-        resserrer(paragraphe, visuelles, hauteur)
+    return max(tailles or [16])
 
 
-def ajuster_a_la_zone(paragraphe):
-    """Réduit la police d'un paragraphe trop long pour sa zone de texte d'une ligne (jamais l'inverse)."""
+def lignes_possibles(paragraphe):
+    """Nombre de lignes que la zone du paragraphe affiche à la taille du modèle (None sans zone)."""
     zone = _zone(paragraphe)
-    contenu = texte(paragraphe).strip()
-    if not zone or not contenu or zone[1] > HAUTEUR_UNE_LIGNE or paragraphe.getElementsByTagNameNS(W, 'tab'):
-        return
-    largeur = zone[0] / EMU_PAR_POINT * MARGE_LARGEUR
-    runs = paragraphe.getElementsByTagNameNS(W, 'r')
-    tailles = [int(n.getAttribute('w:val')) for n in paragraphe.getElementsByTagNameNS(W, 'sz')
-               if n.parentNode.parentNode.localName == 'r' and n.getAttribute('w:val').isdigit()]
-    taille = max(tailles or [16])
-    if largeur_texte(contenu, taille) <= largeur:
-        return
-    while taille > TAILLE_MIN and largeur_texte(contenu, taille) > largeur:
-        taille -= 1
-    for run in runs:
-        rpr = next((n for n in run.childNodes if n.nodeType == 1 and n.localName == 'rPr'), None)
-        if rpr is None:
-            rpr = run.ownerDocument.createElementNS(W, 'w:rPr')
-            run.insertBefore(rpr, run.firstChild)
-        _enfant(rpr, 'sz', APRES_SZ).setAttributeNS(W, 'w:val', str(taille))
-        _enfant(rpr, 'szCs', APRES_SZ[1:]).setAttributeNS(W, 'w:val', str(taille))
+    if not zone:
+        return None
+    taille = _taille(paragraphe) / 2
+    espacements = paragraphe.getElementsByTagNameNS(W, 'spacing')
+    apres = sum(int(espacements[0].getAttribute(c) or 0) for c in ('w:after', 'w:before')) / 20 if espacements else 0
+    return max(1, int((zone[1] + apres) // (taille * INTERLIGNE_ARIAL + apres)))
 
 
-def resserrer(paragraphe, lignes, hauteur):
-    """Interligne exact et police réduite pour que `lignes` lignes tiennent dans `hauteur` points."""
-    pas = hauteur / lignes                            # points par ligne
-    taille = max(8, min(16, int(pas * 2 / 1.2)))      # demi-points ; la police reste lisible
-    ppr = next((n for n in paragraphe.childNodes if n.nodeType == 1 and n.localName == 'pPr'), None)
-    if ppr is None:
-        ppr = paragraphe.ownerDocument.createElementNS(W, 'w:pPr')
-        paragraphe.insertBefore(ppr, paragraphe.firstChild)
-    espacement = _enfant(ppr, 'spacing', APRES_SPACING)
-    for nom, valeur in (('before', '0'), ('after', '0'), ('line', str(int(pas * 20))), ('lineRule', 'exact')):
-        espacement.setAttributeNS(W, 'w:' + nom, valeur)
+def replier(contenu, largeur, demi_points):
+    """Lignes affichées par Word (repli entre les mots ; un mot trop long est coupé)."""
+    lignes, courante = [], ''
+    for mot in re.split(r'(\s+)', contenu):
+        essai = courante + mot
+        if courante and not mot.isspace() and largeur_texte(essai.rstrip(), demi_points) > largeur:
+            lignes.append(courante.rstrip())
+            courante = mot.lstrip()
+        else:
+            courante = essai
+        while largeur_texte(courante.rstrip(), demi_points) > largeur and len(courante) > 1:
+            coupe = len(courante)
+            while coupe > 1 and largeur_texte(courante[:coupe], demi_points) > largeur:
+                coupe -= 1
+            lignes.append(courante[:coupe])
+            courante = courante[coupe:]
+    if courante.strip() or not lignes:
+        lignes.append(courante.rstrip())
+    return lignes
+
+
+def _tabulations(paragraphe):
+    """Tabulations du texte (pas les taquets définis dans le paragraphe)."""
+    return [t for t in paragraphe.getElementsByTagNameNS(W, 'tab') if t.parentNode.localName == 'r']
+
+
+def _segments(paragraphe):
+    """Texte du paragraphe découpé aux tabulations, dans l'ordre des runs."""
+    segments = ['']
     for run in paragraphe.getElementsByTagNameNS(W, 'r'):
-        rpr = next((n for n in run.childNodes if n.nodeType == 1 and n.localName == 'rPr'), None)
-        if rpr is None:
-            rpr = run.ownerDocument.createElementNS(W, 'w:rPr')
-            run.insertBefore(rpr, run.firstChild)
-        _enfant(rpr, 'sz', APRES_SZ).setAttributeNS(W, 'w:val', str(taille))
-        _enfant(rpr, 'szCs', APRES_SZ[1:]).setAttributeNS(W, 'w:val', str(taille))
+        for enfant in run.childNodes:
+            if enfant.nodeType != 1:
+                continue
+            if enfant.localName == 't':
+                segments[-1] += ''.join(n.data for n in enfant.childNodes if n.nodeType == 3)
+            elif enfant.localName == 'tab':
+                segments.append('')
+    return segments
+
+
+def _taquets(paragraphe):
+    return sorted(int(t.getAttribute('w:pos')) / 20 for t in paragraphe.getElementsByTagNameNS(W, 'tab')
+                  if t.parentNode.localName == 'tabs' and t.getAttribute('w:pos').lstrip('-').isdigit())
+
+
+def _largeur_tabulee(segments, taquets, demi_points):
+    x = 0.0
+    for i, segment in enumerate(segments):
+        if i:
+            suivant = next((t for t in taquets if t > x + 0.5), None)
+            x = suivant if suivant is not None else (math.floor(x / 36) + 1) * 36  # taquets par défaut : 36 pt
+        x += largeur_texte(segment.rstrip() if i == len(segments) - 1 else segment, demi_points)
+    return x
+
+
+def couper(paragraphe):
+    """Nombre de caractères du texte gardés pour que le paragraphe tienne dans sa case à la taille du
+    modèle (coupe en fin de texte, entre deux mots si possible) ; renvoie (gardés, texte retiré)."""
+    contenu = texte(paragraphe)
+    zone = _zone(paragraphe)
+    if not zone or not contenu.strip():
+        return len(contenu), ''
+    taille, possibles = _taille(paragraphe), lignes_possibles(paragraphe)
+    tabulee = bool(_tabulations(paragraphe))
+    segments, taquets = (_segments(paragraphe), _taquets(paragraphe)) if tabulee else (None, None)
+
+    def tient(k):
+        if tabulee:
+            reste, coupes = k, []
+            for segment in segments:
+                coupes.append(segment[:max(0, reste)])
+                reste -= len(segment)
+            return _largeur_tabulee(coupes, taquets, taille) <= zone[0]
+        return len(replier(contenu[:k], zone[0], taille)) <= possibles
+
+    if tient(len(contenu)):
+        return len(contenu), ''
+    candidats = [i for i in range(len(contenu) - 1, 0, -1) if contenu[i] == ' ' and contenu[i - 1] != ' ']
+    garde = next((k for k in candidats if contenu[:k].strip() and tient(k)), None)
+    if garde is None:
+        garde = next((k for k in range(len(contenu) - 1, 0, -1) if tient(k)), 0)
+    return garde, contenu[garde:].strip()
+
+
+def tenir(paragraphe, lignes):
+    """Lignes logiques gardées pour que la case les affiche à la taille du modèle : (gardées, retiré).
+
+    retiré : texte non affiché (vide si tout tient). Une ligne trop longue est coupée entre deux mots."""
+    zone, possibles = _zone(paragraphe), lignes_possibles(paragraphe)
+    if not zone or _tabulations(paragraphe):
+        return lignes, ''
+    taille = _taille(paragraphe)
+    gardees, retire, reste = [], [], possibles
+    for ligne in lignes:
+        if reste <= 0:
+            retire.append(ligne.strip())
+            continue
+        visuelles = replier(ligne, zone[0], taille)
+        if len(visuelles) <= reste:
+            gardees.append(ligne)
+            reste -= len(visuelles)
+        else:
+            gardees.append(' '.join(v.strip() for v in visuelles[:reste]) if ligne.strip() else ligne)
+            # garder l'indentation éventuelle du modèle
+            if visuelles and ligne[:len(ligne) - len(ligne.lstrip())]:
+                gardees[-1] = ligne[:len(ligne) - len(ligne.lstrip())] + gardees[-1].lstrip()
+            retire.append(' '.join(v.strip() for v in visuelles[reste:]))
+            reste = 0
+    return gardees, ' / '.join(r for r in retire if r)
 
 
 def modele_defaut():
@@ -174,14 +224,25 @@ def montant(valeur, decimales=0):
 
 
 def date_dcu(valeur):
-    """Date SYDONIA m/j/aa -> JJ/MM/AAAA."""
+    """Date -> JJ/MM/AAAA.
+
+    SYDONIA écrit m/j/aa (année à 2 chiffres, ex. 3/15/19) ; AsyDec (étape 3) écrit déjà JJ/MM/AAAA.
+    Une année à 4 chiffres est donc toujours lue jour/mois : 05/11/2026 reste le 5 novembre,
+    jamais le 11 mai."""
     texte_ = str(valeur or '').strip()
-    for format_ in ('%m/%d/%y', '%m/%d/%Y', '%d/%m/%Y', '%Y-%m-%d'):
+    formats = ('%m/%d/%y',) if re.fullmatch(r'\d{1,2}/\d{1,2}/\d{2}', texte_) else ('%d/%m/%Y', '%Y-%m-%d', '%d.%m.%Y')
+    for format_ in formats:
         try:
             return datetime.strptime(texte_, format_).strftime('%d/%m/%Y')
         except ValueError:
             pass
     return texte_
+
+
+def licence_courte(numero):
+    """Case 44 « Licence No » : seulement le numéro DEC, sans la suite (DEC1707768-7CD6545D-RC -> DEC1707768)."""
+    texte_ = str(numero or '').strip()
+    return texte_.split('-', 1)[0] if re.match(r'^DEC\d+-', texte_, re.I) else texte_
 
 
 def _t(element, chemin):
@@ -261,7 +322,7 @@ def valeurs(contenu_xml):
         unite = item.find('Tarification/Supplementary_unit')
         v.update({
             'DESIGNATION': _t(item, 'Goods_description/Description_of_goods'),
-            'NUMERO_LICENCE': _t(item, 'Licence_number'),
+            'NUMERO_LICENCE': licence_courte(_t(item, 'Licence_number')),
             'MARQUES': _t(item, 'Packages/Marks1_of_packages'),
             'NOMBRE_COLIS': montant(_t(item, 'Packages/Number_of_packages'), 2),
             'CODE_COLIS': _t(item, 'Packages/Kind_of_packages_code'), 'NOM_COLIS': _t(item, 'Packages/Kind_of_packages_name'),
@@ -292,8 +353,13 @@ def valeurs(contenu_xml):
 # Remplissage du Word
 # ---------------------------------------------------------------------------
 
-def remplir(modele, donnees):
-    """Octets du .docx rempli. Les balises sans valeur sont vidées ; une balise inconnue est refusée."""
+def remplir(modele, donnees, coupures=None):
+    """Octets du .docx rempli. Les balises sans valeur sont vidées ; une balise inconnue est refusée.
+
+    La police et la taille du modèle ne changent jamais : une valeur trop longue pour sa case est coupée,
+    et chaque coupure est ajoutée à la liste `coupures` (libellé de la case et texte non affiché)."""
+    coupures = [] if coupures is None else coupures
+    plans = {}
     try:
         archive = ZipFile(BytesIO(modele))
     except BadZipFile:
@@ -310,10 +376,21 @@ def remplir(modele, donnees):
                 continue
             liste = next((m.group(1) for m in balises if m.group(1) in LISTES), None)
             if liste:
-                lignes = [str(x) for x in donnees.get(liste) or []][:LIGNES_MAX.get(liste)] or ['']
-                # Avant la copie : chaque ligne hérite du resserrement. Case 47 : police du modèle, jamais resserrée.
-                if liste not in TAXES:
-                    ajuster_liste(p, lignes)
+                lignes = [str(x) for x in donnees.get(liste) or []] or ['']
+                cle_plan = ('liste', liste)
+                if cle_plan not in plans and liste in TAXES:
+                    # Case 47 : les 4 colonnes gardent le même nombre de lignes ; un montant n'est jamais coupé.
+                    plans[cle_plan] = lignes[:TAXES_PREVUES]
+                    if len(lignes) > TAXES_PREVUES and ('liste', 'taxes') not in plans:
+                        plans[('liste', 'taxes')] = True
+                        coupures.append(f'case 47 · calcul des impositions : {len(lignes) - TAXES_PREVUES} taxe(s) '
+                                        f'au-delà des {TAXES_PREVUES} lignes du formulaire non affichée(s)')
+                if cle_plan not in plans:
+                    gardees, retire = tenir(p, lignes)
+                    plans[cle_plan] = gardees
+                    if retire:
+                        coupures.append(f"{CASES.get(liste, liste)} : non affiché faute de place « {retire} »")
+                lignes = plans[cle_plan] or ['']
                 # Ordre conservé : les copies sont insérées après le paragraphe d'origine, dans l'ordre.
                 suivant = p.nextSibling
                 for ligne in lignes[1:]:
@@ -329,7 +406,18 @@ def remplir(modele, donnees):
                     raise ValueError(f'Champ de déclaration inconnu dans le modèle : {cle}.')
                 trouvees.add(cle)
                 remplacer(p, m.start(), m.end(), str(donnees.get(cle) or ''))
-            ajuster_a_la_zone(p)
+            # Même texte pour la zone de texte et sa copie de secours (Word ancien) : plan calculé une fois.
+            cle_plan = ('texte', contenu)
+            rempli = texte(p)
+            if cle_plan not in plans:
+                garde, retire = couper(p)
+                plans[cle_plan] = garde
+                if retire:
+                    noms = [m.group(1) for m in balises]
+                    libelle = next((l for c, l in ESSENTIELS if c in noms), ', '.join(noms))
+                    coupures.append(f"{libelle} : non affiché faute de place « {retire} »")
+            if plans[cle_plan] < len(rempli):
+                remplacer(p, plans[cle_plan], len(rempli), '')  # seule la fin est retirée
         if not {'NUMERO_E', 'DESIGNATION', 'TOTAL_FACTURE'} <= trouvees:
             raise ValueError('Modèle de déclaration non préparé : balises {{NUMERO_E}}, {{DESIGNATION}}, {{TOTAL_FACTURE}} absentes.')
         sortie = BytesIO()
@@ -528,19 +616,30 @@ def propre_a_la_part(sydonia_modele, reference_modele, reference_part):
             and (reference_modele or c in ('POIDS_BRUT', 'POIDS_NET', 'REF_ANNEE', 'REF_SUITE'))}
 
 
-def generer(licence, modele):
+def generer(licence, modele, progression=None):
     """[dict(part, contenu (octets .docx), origine, articles, controle)] pour chaque répartition couverte par
     un XML SYDONIA (le sien, ou celui d'une part de même montant pris comme modèle), tous préparés avant
     tout enregistrement."""
-    references = {s['part']: s['reference'] for s in sources(licence)}
+    from asydec.declarations import taux_declaration
+    liste = sources(licence)
+    references = {s['part']: s['reference'] for s in liste}
+    taux = taux_declaration.du_dossier(licence)
     resultat = []
-    for source in sources(licence):
+    if progression:
+        progression(0, len(liste))
+    for source in liste:
         donnees, controle = completer(source['contenu'], source['reference'], source['projet'])
         if source.get('partage'):
             donnees.update(propre_a_la_part(source['contenu'], references.get(source['partage']), source['reference']))
+        if taux is not None:  # taux de l'étape 3 : affichage seulement (case 23), le XML n'est pas modifié
+            donnees['TAUX'] = montant(taux, taux_declaration.DECIMALES)
+        coupures = []
+        contenu = remplir(modele, donnees, coupures)
         resultat.append(dict(part=source['part'], origine=source['origine'], numero_e=donnees.get('NUMERO_E', ''),
                              articles=int(_decimal(donnees.get('NOMBRE_ARTICLES')) or 1), controle=controle,
-                             contenu=remplir(modele, donnees), donnees=donnees))
+                             contenu=contenu, donnees=donnees, coupures=coupures))
+        if progression:
+            progression(len(resultat), len(liste))
     return resultat
 
 
@@ -549,15 +648,36 @@ def nom_fichier(numero_licence, part):
 
 
 def fiche(resultats, fichiers, modele):
-    return dict(modele=str(modele), genere_le=datetime.now(timezone.utc).isoformat(),
+    return dict(modele=str(modele), genere_le=datetime.now(timezone.utc).isoformat(), version_dates=VERSION_DATES, version_police=VERSION_POLICE,
                 fichiers=[dict(part=r['part'], origine=r['origine'], numero_e=r['numero_e'], fichier=str(f),
-                               controle=r.get('controle'))
+                               controle=r.get('controle'), coupures=r.get('coupures') or [])
                           for r, f in zip(resultats, fichiers)])
+
+
+# 2 : dates E, L, Q de l'étape 3 lues jour/mois (avant : 05/11 devenait 11/05 si le jour était ≤ 12).
+VERSION_DATES = 2
+# 1 : police et taille du modèle jamais modifiées (texte coupé et signalé) ; avant, la police était réduite.
+VERSION_POLICE = 2  # 2 : case 44 limitée au numéro DEC
+
+
+def _dates_ambigues(licence):
+    """True si une date E, L ou Q a un jour ≤ 12 différent du mois : écrite à l'envers avant la version 2."""
+    for part in (licence.get('repartition') or {}).get('parts') or []:
+        for cle in ('date_enregistrement', 'date_liquidation', 'date_quittance'):
+            valeur = str((part.get('informations_declaration') or {}).get(cle) or '')
+            if re.fullmatch(r'\d{2}/\d{2}/\d{4}', valeur) and int(valeur[:2]) <= 12 and valeur[:2] != valeur[3:5]:
+                return True
+    return False
 
 
 def est_a_jour(licence):
     """Déclarations produites depuis les XML actuels (génération étape 7 et import étape 8)."""
     fiche = licence.get('declarations')
+    if fiche and (fiche.get('version_dates') or 1) < VERSION_DATES and _dates_ambigues(licence):
+        return False
+    if fiche and (fiche.get('version_police') or 0) < VERSION_POLICE:
+        return False
     return bool(fiche and fiche.get('fichiers')
+                and fiche.get('taux') == (licence.get('taux_change') or {}).get('valeur')
                 and fiche.get('xml_genere_le') == (licence.get('xml_genere') or {}).get('genere_le')
                 and fiche.get('recuperation_le') == (licence.get('recuperation_simulation') or {}).get('importe_le'))

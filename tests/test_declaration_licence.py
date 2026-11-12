@@ -170,23 +170,33 @@ class DeclarationTest(unittest.TestCase):
         self.assertNotIn('T03', x)
         self.assertNotIn('w:lineRule="exact"', ligne('T02'))
 
-    def test_texte_trop_long_reduit_pour_tenir_dans_sa_case(self):
+    def test_police_jamais_changee_texte_coupe_et_signale(self):
         import re
         v = D.valeurs(BASE.read_text(encoding='utf-8'))
-        self.assertEqual(D.nom_banque('FirstBank DRC SA / LUBUMBASHI'), 'FirstBank DRC SA')
         v['NOM_BANQUE'] = D.nom_banque('FirstBank DRC SA / LUBUMBASHI')
-        v['PAYEUR'] = ['KATANGA TVS SARL', 'AV/LUMUMBA Q/KATAKI C/LUBUMBASHI', '--', 'KATANGA']
-        x = document(D.remplir(MODELE.read_bytes(), v))
-        banque = x[x.rfind('<w:r>', 0, x.index('FirstBank')):x.index('FirstBank')]
-        self.assertEqual(re.findall(r'<w:sz w:val="(\d+)"', banque)[-1], '16')  # nom seul, police du modèle
-        self.assertNotIn('LUBUMBASHI', x[x.index('FirstBank'):x.index('FirstBank') + 40])
-        self.assertIn('>KATANGA<', x)  # toutes les lignes du XML, resserrées dans la case 9
-        payeur = x[x.rfind('<w:p ', 0, x.index('>KATANGA<')):x.index('>KATANGA<')]
-        self.assertIn('w:lineRule="exact"', payeur)
+        # Case 9 : 3 lignes en Arial 8 ; la 4e et la 5e ne sont pas affichées, la police reste celle du modèle.
+        v['PAYEUR'] = ['KATANGA TVS SARL', 'AV/LUMUMBA Q/KATAKI C/LUBUMBASHI', '--', 'KATANGA', 'LIGNE CINQ']
+        v['DESIGNATION'] = 'MOTOCYCLES ' * 40
+        coupures = []
+        x = document(D.remplir(MODELE.read_bytes(), v, coupures))
+        modele = document(MODELE.read_bytes())
+        # Aucune taille, police ni interligne ajouté ou modifié dans tout le document.
+        for motif in (r'<w:sz w:val="(\d+)"', r'w:ascii="([^"]+)"'):
+            self.assertEqual(set(re.findall(motif, x)), set(re.findall(motif, modele)))
+        self.assertNotIn('w:lineRule="exact"', x)
+        self.assertIn('>KATANGA TVS SARL<', x)
+        self.assertNotIn('LIGNE CINQ', x)
+        self.assertTrue(any('case 9' in c and 'LIGNE CINQ' in c for c in coupures), coupures)
+        self.assertTrue(any('désignation' in c for c in coupures), coupures)
+        self.assertLess(x.count('MOTOCYCLES'), 80)  # coupée (zone de texte et copie de secours)
+
+    def test_texte_qui_tient_sans_coupure(self):
+        v = D.valeurs(BASE.read_text(encoding='utf-8'))
         v['NOM_BANQUE'] = 'RAWBANK'
-        x = document(D.remplir(MODELE.read_bytes(), v))
-        banque = x[x.rfind('<w:r>', 0, x.index('RAWBANK')):x.index('RAWBANK')]
-        self.assertEqual(re.findall(r'<w:sz w:val="(\d+)"', banque)[-1], '16')  # texte court : modèle inchangé
+        coupures = []
+        x = document(D.remplir(MODELE.read_bytes(), v, coupures))
+        self.assertIn('RAWBANK', x)
+        self.assertFalse([c for c in coupures if 'RAWBANK' in c])
 
     def test_modele_non_prepare_refuse(self):
         with self.assertRaises(ValueError):

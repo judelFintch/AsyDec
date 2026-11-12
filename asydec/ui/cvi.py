@@ -11,6 +11,7 @@ class ComplementsCVI(tk.Toplevel):
         self.title('CVI et BL · première répartition')
         self.transient(parent.winfo_toplevel())
         self.resultat = None
+        self.licence = licence
         self.geometry('880x760')
         self.minsize(740, 600)
         self.variables = {}
@@ -28,7 +29,9 @@ class ComplementsCVI(tk.Toplevel):
         carnet.pack(fill='both', expand=True)
         groupes = (
             ('CVI', [(cle, titre) for cle, titre in cvi.CHAMPS_COMPLEMENTAIRES.items() if cle not in cvi.CHAMPS_BL]),
-            ('Infos BL', list(cvi.CHAMPS_BL.items())),
+            ('Infos BL', [(cle, f'N° du BL {cle[-1]} (répartitions {10 * (int(cle[-1]) - 1) + 1} à '
+                                f'{min(10 * int(cle[-1]), len(cvi.parts_triees(licence)))}) · modifiable')
+                          for cle in cvi.cles_numeros_bl(licence)[1:]] + list(cvi.CHAMPS_BL.items())),
         )
         for titre_page, elements in groupes:
             champs = ttk.Frame(carnet, padding=12)
@@ -41,10 +44,27 @@ class ComplementsCVI(tk.Toplevel):
                 ttk.Label(case, text=titre, style='Doux.TLabel', wraplength=370).pack(anchor='w')
                 variable = tk.StringVar(value=valeurs.get(cle, ''))
                 self.variables[cle] = variable
-                ttk.Entry(case, textvariable=variable, state='readonly' if cle in cvi.REFERENCES_CVI or cle == 'NUMERO_BL' else 'normal').pack(fill='x', pady=(4, 0))
-        ttk.Label(cadre, text='BL : ' + (donnees.get('NUMERO_BL') or 'Non renseigné')
+                lecture = cle in cvi.REFERENCES_CVI or cle == 'NUMERO_BL' or cle in cvi.CHAMPS_DERIVES
+                ttk.Entry(case, textvariable=variable, state='readonly' if lecture else 'normal').pack(fill='x', pady=(4, 0))
+                if cle in cvi.CHAMPS_DERIVES:
+                    ttk.Label(case, text='Automatique : ' + ('pays d’origine des articles de la licence' if cle == 'ORIGINE'
+                                                             else 'déduit du port de chargement'),
+                              style='Doux.TLabel').pack(anchor='w')
+        nombre_bl = len(donnees.get('_PAGES_BL') or [1])
+        ttk.Label(cadre, text=(f'{nombre_bl} BL (10 conteneurs par BL) : ' if nombre_bl > 1 else 'BL : ')
+                  + (donnees.get('NUMERO_BL') or 'Non renseigné')
                   + ' · Date : ' + (donnees.get('DATE_BL') or 'absente'),
                   style='Doux.TLabel', wraplength=800).pack(anchor='w', pady=(8, 0))
+        from asydec.declarations import coherence_transport
+        self.alerte = tk.StringVar()
+        ttk.Label(cadre, textvariable=self.alerte, style='Alerte.TLabel', wraplength=800).pack(anchor='w')
+
+        def port_change(*_):
+            port = self.variables['PORT_CHARGEMENT_BL'].get()
+            self.variables['CONDITIONS_FOB_BL'].set(coherence_transport.conditions_fob(port))
+            self.alerte.set('\n'.join(coherence_transport.alertes(licence, port)))
+        self.variables['PORT_CHARGEMENT_BL'].trace_add('write', port_change)
+        port_change()
         self.erreur = tk.StringVar()
         ttk.Label(cadre, textvariable=self.erreur, style='Erreur.TLabel', wraplength=800).pack(anchor='w')
         pied = ttk.Frame(cadre)
@@ -57,9 +77,14 @@ class ComplementsCVI(tk.Toplevel):
     def valider(self):
         valeurs = {cle: v.get().strip() for cle, v in self.variables.items()}
         manquants = [titre for cle, titre in cvi.CHAMPS_COMPLEMENTAIRES.items() if not valeurs[cle]]
+        manquants += [f'N° du BL {cle[-1]}' for cle in cvi.NUMEROS_BL_SUIVANTS if cle in valeurs and not valeurs[cle]]
+        numeros = [valeurs[c] for c in ['NUMERO_BL', *cvi.NUMEROS_BL_SUIVANTS] if valeurs.get(c)]
+        if not manquants and len(set(numeros)) != len(numeros):
+            self.erreur.set('Chaque BL doit avoir un numéro différent.')
+            return
         if manquants:
             self.erreur.set('À compléter : ' + ', '.join(manquants))
             return
         valeurs['DESIGNATION'] = cvi.adapter_designation(valeurs['DESIGNATION'])
-        self.resultat = valeurs
+        self.resultat = cvi.appliquer_derives(self.licence, valeurs)
         self.destroy()

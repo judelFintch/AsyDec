@@ -44,7 +44,7 @@ class TestCVI(unittest.TestCase):
         valeurs = cvi.donnees(licence, part)
         self.assertEqual(valeurs['NUMERO_E'], 'E 00125')
         self.assertEqual(valeurs['NUMERO_QUITTANCE'], 'Q 46')
-        self.assertEqual(valeurs['NUMERO_FACTURE'], 'INV1-2')
+        self.assertEqual(valeurs['NUMERO_FACTURE'], 'INV1')  # CVI global : facture globale
 
     def test_un_seul_cvi_de_la_part_1_meme_si_liste_desordonnee(self):
         from unittest.mock import patch
@@ -147,7 +147,7 @@ class TestCVI(unittest.TestCase):
         self.assertEqual(v['FOURNISSEUR_LIGNE_3'], 'VILLE')
         self.assertEqual(v['AGENT_BL_LIGNE_2'], 'RUE')
         self.assertEqual(v['AGENT_BL_LIGNE_4'], '')
-        self.assertEqual(v['NUMERO_FACTURE'], 'INV1-1')
+        self.assertEqual(v['NUMERO_FACTURE'], 'INV1')  # CVI global : facture globale
         self.assertEqual(v['DATE_FACTURE_BL'], '05.11.2026')
 
 
@@ -180,7 +180,7 @@ class TestCVI(unittest.TestCase):
             licence = {'repartition': {'parts': [{'numero': 1}]}}
             valeurs = cvi.proposer_complements(licence, fichier)
             self.assertEqual(valeurs['NAVIRE_BL'], 'OEL SHRAVAN')
-            self.assertEqual(valeurs['VOYAGE_BL'], '994334')
+            self.assertEqual(valeurs['VOYAGE_BL'], '994335')
             self.assertEqual(valeurs['PORT_CHARGEMENT_BL'], 'JEBEL ALI')
             self.assertEqual(valeurs['PORT_DECHARGEMENT_BL'], 'DAR ES SALAAM')
             self.assertEqual(valeurs['TARE_BL'], '3900')
@@ -355,7 +355,7 @@ class TestCVI(unittest.TestCase):
         self.assertEqual([v[c] for c in cvi.CHAMPS_LISTE_BL][:5],
                          ['SEAL SCELLE1','TEST 0000002','SEAL SCELLE2','TEST 0000003','SEAL SCELLE3'])
         self.assertEqual(v['NOMBRE_CONTENEURS_BL'],'3')
-        self.assertEqual(v['QUANTITE_BL'],'60.00')
+        self.assertEqual(v['QUANTITE_BL'],'60')  # colis : nombre entier
         self.assertEqual(v['QUANTITE_BL_LETTRES'],'SIXTY')
         self.assertEqual(v['POIDS_BL'],'69 000.00')
         self.assertEqual(v['NUMERO_FACTURE_BL'],'INV123')
@@ -368,8 +368,8 @@ class TestCVI(unittest.TestCase):
                 for texte in ('SEAL SCELLE1','TEST 0000002','SEAL SCELLE2','TEST 0000003','SEAL SCELLE3'):
                     self.assertIn(texte,zones['Zone de texte 19'])
                 desc=zones['Zone de texte 25']
-                for texte in ('3 X 40HC CONTAINER','TOTAL 60.00 PACKAGES ONLY','TOTAL SIXTY ONLY',
-                              'PRODUIT','GOODS AS PER PACKING LIST','TERMS FOB CHENNAI PORT, CHINA',
+                for texte in ('3 X 40HC CONTAINER','TOTAL 60 PACKAGES ONLY','TOTAL SIXTY ONLY',
+                              'PRODUIT','GOODS AS PER PACKING LIST','TERMS FOB JEBEL ALI PORT, UAE',
                               'INV.NO.INV123 DT. 05.11.2026'):
                     self.assertIn(texte,desc)
                 self.assertNotIn('{{',cvi.texte(d))
@@ -380,6 +380,97 @@ class TestCVI(unittest.TestCase):
             {'numero':2,'poids_kg':23000,'conteneur':'C2'}]}}
         with self.assertRaisesRegex(ValueError,'répartition 2'):
             cvi.donnees(licence,cvi.premiere_part(licence))
-        licence['repartition']['parts']=[{'numero':i,'poids_kg':23000,'conteneur':f'C{i}','scelle':f'S{i}'} for i in range(1,12)]
-        with self.assertRaisesRegex(ValueError,'sans omission'):
+        licence['repartition']['parts']=[{'numero':i,'poids_kg':23000,'conteneur':f'C{i}','scelle':f'S{i}'} for i in range(1,32)]
+        with self.assertRaisesRegex(ValueError,'3 BL'):
             cvi.donnees(licence,cvi.premiere_part(licence))
+        licence['repartition']['parts']=licence['repartition']['parts'][:11]
+        with self.assertRaisesRegex(ValueError,'Numéro manquant pour le BL'):
+            cvi.donnees(licence,cvi.premiere_part(licence))
+
+
+class PlusieursBLTest(unittest.TestCase):
+    def licence(self, nombre):
+        return {'numero_validation': 'MULTI', 'numero_facture': 'INV1', 'date_facture': '05/11/2026',
+                'repartition': {'parts': [{'numero': i, 'poids_kg': 23000, 'conteneur': f'CONT{i:03d}',
+                                           'scelle': f'S{i}', 'articles': [{'designation': 'Motos', 'quantite': '10',
+                                                                            'unite': 'pièce'}]}
+                                          for i in range(1, nombre + 1)]}}
+
+    def test_nombre_de_bl(self):
+        for parts, attendu in ((1, 1), (10, 1), (11, 2), (20, 2), (21, 3), (30, 3)):
+            self.assertEqual(cvi.nombre_bl(self.licence(parts)), attendu)
+        self.assertEqual(cvi.cles_numeros_bl(self.licence(25)), ['NUMERO_BL', 'NUMERO_BL_2', 'NUMERO_BL_3'])
+
+    def test_pages_bl_par_tranche_de_dix(self):
+        licence = self.licence(23)
+        v = cvi.donnees(licence, cvi.premiere_part(licence),
+                        {'NUMERO_BL': 'E 1', 'NUMERO_BL_2': 'E 2', 'NUMERO_BL_3': 'E 3'})
+        pages = v['_PAGES_BL']
+        self.assertEqual([p['NUMERO_BL'] for p in pages], ['E 1', 'E 2', 'E 3'])
+        self.assertEqual([p['NOMBRE_CONTENEURS_BL'] for p in pages], ['10', '10', '3'])
+        self.assertEqual([p['CONTENEUR'] for p in pages], ['CONT001', 'CONT011', 'CONT021'])
+        self.assertEqual(pages[1]['CONTENEUR_SCELLE_BL_1'], 'SEAL S11')
+        self.assertEqual(pages[2]['CONTENEUR_SCELLE_BL_5'], 'SEAL S23')
+        self.assertEqual(pages[2]['CONTENEUR_SCELLE_BL_6'], '')
+        self.assertEqual(pages[0]['QUANTITE_BL'], '100')
+        self.assertEqual(pages[2]['QUANTITE_BL'], '30')
+        self.assertEqual(pages[2]['POIDS_BL'], '69 000.00')
+        # Le CVI garde les totaux de tout le dossier et cite les trois BL.
+        self.assertEqual(v['POIDS_GLOBAL_CVI'], '529 000,00')
+        self.assertEqual(v['NUMERO_BL'], 'E 1 / E 2 / E 3')
+
+    def test_remplir_duplique_la_page_bl(self):
+        zone = lambda t: f'<w:r><w:pict><w:txbxContent><w:p><w:r><w:t>{t}</w:t></w:r></w:p></w:txbxContent></w:pict></w:r>'
+        xml = ('<w:p>' + ''.join(zone(t) for t in ('{{NUMERO_E}}', '{{NUMERO_LIQUIDATION}}', '{{NUMERO_QUITTANCE}}',
+                                                   '{{DATE_CVI}}', 'CVI {{NUMERO_BL}}'))
+               + '<w:r><w:br w:type="page"/></w:r>' + zone('BL {{NUMERO_BL}} {{CONTENEUR}} {{QUANTITE_BL}}') + '</w:p>')
+        pages = [dict(NUMERO_BL='E 1', CONTENEUR='C1', QUANTITE_BL='100'),
+                 dict(NUMERO_BL='E 2', CONTENEUR='C11', QUANTITE_BL='30')]
+        valeurs = dict(NUMERO_E='E', NUMERO_LIQUIDATION='L', NUMERO_QUITTANCE='Q', DATE_CVI='05/11/2026',
+                       NUMERO_BL='E 1 / E 2', _PAGES_BL=pages)
+        with ZipFile(BytesIO(cvi.remplir(modele(xml), valeurs))) as z:
+            contenu = z.read('word/document.xml').decode()
+        self.assertIn('CVI E 1 / E 2', contenu)
+        self.assertIn('BL E 1 C1 100', contenu)
+        self.assertIn('BL E 2 C11 30', contenu)
+        self.assertEqual(contenu.count('w:type="page"'), 2)
+
+    def test_numeros_bl_reserves_sans_doublon(self):
+        import tempfile
+        from pathlib import Path
+        with tempfile.TemporaryDirectory() as dossier:
+            fichier = Path(dossier) / 'base.sqlite'
+            a = cvi.reserver_references(self.licence(15), fichier)
+            licence_b = self.licence(1)
+            licence_b['numero_validation'] = 'AUTRE'
+            b = cvi.reserver_references(licence_b, fichier)
+        numeros = [a['NUMERO_BL'], a['NUMERO_BL_2'], b['NUMERO_BL']]
+        self.assertEqual(len(set(numeros)), 3)
+
+
+class CVIGlobalTest(unittest.TestCase):
+    def test_fob_cif_quantite_et_facture_de_tout_le_dossier(self):
+        licence = {'numero_facture': 'INV9', 'date_facture': '05/02/2019', 'numero_dec': 'DEC9',
+                   'montant_fob': '1000000',
+                   'repartition': {'parts': [
+                       {'numero': 1, 'fob': '100350.88', 'poids_kg': 23000,
+                        'articles': [{'designation': 'Motos', 'quantite': '143'}]},
+                       {'numero': 2, 'fob': '899649.12', 'poids_kg': 23000,
+                        'articles': [{'designation': 'Motos', 'quantite': '1282'}]}]}}
+        part = licence['repartition']['parts'][0]
+        v = cvi.donnees(licence, part, {'FRET': '5000', 'ASSURANCE': '100'})
+        self.assertEqual(v['FOB'], '1 000 000,00')
+        self.assertEqual(v['CIF'], '1 005 100,00')
+        self.assertEqual(v['QUANTITE'], '1 425,00')
+        self.assertEqual(v['POIDS_GLOBAL_CVI'], '46 000,00')
+        self.assertEqual(v['NUMERO_FACTURE'], 'INV9')
+        self.assertEqual(v['QUANTITE_BL'], '1 425')  # un colis par moto, sans décimales
+
+    def test_colis_entiers_meme_si_quantites_fractionnaires(self):
+        licence = {'numero_facture': 'INV9', 'date_facture': '05/02/2019', 'numero_dec': 'DEC9',
+                   'repartition': {'parts': [
+                       {'numero': 1, 'fob': '10', 'poids_kg': 100,
+                        'articles': [{'designation': 'Motos', 'quantite': '142.522', 'unite': 'Unite(Piece)'}]},
+                       {'numero': 2, 'fob': '10', 'poids_kg': 120,
+                        'articles': [{'designation': 'Fil', 'quantite': '120', 'unite': 'Kilogramme'}]}]}}
+        self.assertEqual(cvi.colis_dossier(licence, licence['repartition']['parts']), 143 + 2)

@@ -12,6 +12,8 @@ MODULES = (
      'Déclarations de marchandises diverses, modèles dynamiques et positions tarifaires reprises du XML.', 'Ouvrir Divers'),
     ('documents_finaux', 'Documents finaux',
      'Espace dédié aux documents finaux.', 'Ouvrir Documents finaux'),
+    ('generateur_factures', 'Générateur de documents',
+     'Facture, packing list et manifeste natifs AsyDec, en cinq présentations.', 'Ouvrir le générateur'),
 )
 
 

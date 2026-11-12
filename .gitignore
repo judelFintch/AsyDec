@@ -3,6 +3,7 @@
 __pycache__/
 *.py[cod]
 .pytest_cache/
+.tmp/
 
 # Local declaration data, reference models, and generated reports
 *.xml

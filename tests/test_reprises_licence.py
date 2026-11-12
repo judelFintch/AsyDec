@@ -87,10 +87,12 @@ class AutomatiqueTest(unittest.TestCase):
                 self.assertEqual(ecart, 0)
                 q, pu = Decimal(produit['quantite']), Decimal(produit['prix_unitaire'])
                 self.assertEqual((q * pu).quantize(Decimal('.01')), Decimal(fob))
-                self.assertLessEqual(abs(pu - 702), 1)  # au plus près du prix d'origine
+                # Pièces : quantité entière ; le PU s'écarte au plus de la valeur d'une pièce répartie.
+                self.assertEqual(q, q.to_integral_value())
+                self.assertLessEqual(abs(pu - 702), Decimal(702) / q)
         # Prix inchangé quand la quantité suffit à tomber juste.
         (produit,), _ = reprises.repartir_quantites([dict(ARTICLE, prix_unitaire='702')], '115128')
-        self.assertEqual((produit['quantite'], produit['prix_unitaire']), ('164.000', '702'))
+        self.assertEqual((Decimal(produit['quantite']), Decimal(produit['prix_unitaire'])), (Decimal(164), Decimal(702)))
         for mauvais in ('', '0'):
             with self.assertRaisesRegex(ValueError, 'FOB'):
                 reprises.repartir_quantites(articles, mauvais)

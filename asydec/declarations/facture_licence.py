@@ -65,6 +65,23 @@ def lignes_part(part):
             for a, p in zip(articles, poids)]
 
 
+def avertissements_quantites(licence):
+    """Signale les fractions de pièces sans altérer les données de licence."""
+    from asydec.declarations.facture_simple import _unite
+    alertes = []
+    for part in parts(licence):
+        for ligne in donnees_part(licence, part)['lignes']:
+            if _unite(ligne.get('unite', '')) == 'PCS' and ligne['quantite'] != ligne['quantite'].to_integral_value():
+                alertes.append(f"Part {part['numero']} : {ligne['designation']} — {ligne['quantite']} PCS.")
+    return alertes
+
+
+def _pu_fr(prix):
+    """PU à la française, décimales utiles seulement (ex. « 701,754386 », « 702,00 »)."""
+    from asydec.declarations.quantites_entieres import pu_texte
+    return pu_texte(prix, ' ').replace('.', ',')
+
+
 def _quantite(q):
     return nombre(q) if q == q.to_integral_value() else nombre(float(q), 3)
 
@@ -334,7 +351,9 @@ def donnees_globale(licence):
         # Prix unitaire moyen seulement si les parts n'ont pas toutes le même prix
         # (un écart d'arrondi absorbé dans la valeur ne change pas le prix de la licence).
         if len(set(ligne.pop('prix'))) > 1 and ligne['quantite']:
-            ligne['prix_unitaire'] = (ligne['valeur'] / ligne['quantite']).quantize(Decimal('.01'), rounding=ROUND_HALF_UP)
+            from asydec.declarations.quantites_entieres import pu_exact
+            ligne['prix_unitaire'] = (pu_exact(ligne['quantite'], ligne['valeur'])
+                                      or (ligne['valeur'] / ligne['quantite']).quantize(Decimal('.01'), rounding=ROUND_HALF_UP))
 
     def distincts(valeurs):
         return ' - '.join(dict.fromkeys(v for v in valeurs if v))
@@ -384,9 +403,11 @@ def _generer_documents(licence, contenu_modele, donnees):
             if prix_kg and ligne['poids'] else ligne['prix_unitaire']
         valeurs.update({f'COLIS_{i}': _quantite(ligne['quantite']), f'FOB_{i}': nombre(float(ligne['valeur']), 2),
                         f'POIDS_{i}': nombre(ligne['poids'], 2),
-                        f'PRIX_UNITAIRE_{i}': nombre(float(prix), 4 if prix_kg else 2)})
+                        f'PRIX_UNITAIRE_{i}': nombre(float(prix), 4) if prix_kg else _pu_fr(prix)})
     valeurs = {c: v for c, v in valeurs.items() if c in champs}
-    facture, packing_list = separer(F.remplir(contenu, valeurs, verifier=False))
+    from asydec.declarations.sceau import apposer
+    facture, packing_list = (apposer(document, licence) for document in
+                             separer(F.remplir(contenu, valeurs, verifier=False)))
     return dict(resultat, documents={FACTURE: facture, PACKING_LIST: packing_list})
 
 

@@ -27,3 +27,13 @@ def nombre(valeur, monnaie=False):
     if monnaie:
         return entier(unites)+(' AND '+entier(cents)+' CENTS' if cents else '')
     return entier(unites)+(' POINT '+PETITS[cents//10]+' '+PETITS[cents%10] if cents else '')
+
+
+def dollars_us(valeur):
+    """Montant anglais avec la devise avant les centimes."""
+    d = Decimal(str(valeur)).quantize(Decimal('.01'), rounding=ROUND_HALF_UP)
+    nombre(d)  # Même validation de domaine que les autres conversions.
+    unites = int(d)
+    cents = int((d - unites) * 100)
+    return (entier(unites) + (' US DOLLAR' if unites == 1 else ' US DOLLARS')
+            + (' AND ' + entier(cents) + (' CENT' if cents == 1 else ' CENTS') if cents else ''))

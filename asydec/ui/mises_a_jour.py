@@ -28,7 +28,10 @@ class PageMisesAJour(ttk.Frame):
         ttk.Entry(self,textvariable=self.jeton,show='•',width=64).pack(anchor='w')
         ttk.Button(self,text='Enregistrer le jeton dans le Trousseau',command=self.retenir_jeton).pack(anchor='w',pady=8)
         v=courante()
-        ttk.Label(self,text=f"Construction : {v['version']} · {v['revision'][:12]}\nDonnées : {chemins.RACINE}",wraplength=820).pack(anchor='w',pady=20)
+        from asydec.systeme import mises_a_jour as maj
+        installee = maj.TYPES_MAC.get(v.get('architecture'), {}).get('libelle', v.get('architecture') or 'non précisée')
+        ttk.Label(self,text=f"Ce Mac : {maj.type_mac()}\nVersion installée : {installee}\n"
+                            f"Construction : {v['version']} · {v['revision'][:12]}\nDonnées : {chemins.RACINE}",wraplength=820).pack(anchor='w',pady=20)
 
     def retenir_jeton(self):
         if self.app.session_verrouillee:

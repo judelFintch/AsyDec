@@ -26,6 +26,7 @@ from asydec.ui.importateurs import IMPORTATEUR_XML
 from asydec.ui.mediatheque import PageMediatheque
 from asydec.ui.modeles_generes import PageModelesGeneres
 from asydec.ui.factures import PageBibliothequeFactures
+from asydec.ui.generateur_factures import PageGenerateurFactures
 from asydec.ui.mises_a_jour import PageMisesAJour
 from asydec.ui.outils import PageEtude, PageHistorique, PageRatios, PageRepartitions
 from asydec.ui.parametres import PageParametres
@@ -63,6 +64,7 @@ class AsyDec(tk.Tk):
         self.session_verrouillee = False
         self.derniere_activite = time.monotonic()
         self._minuteur_session = None
+        self.report_callback_exception = self._erreur_inattendue
         erreur_reglages = None
         try:
             self.reglages = local.lire_reglages()
@@ -103,7 +105,7 @@ class AsyDec(tk.Tk):
         self.var_importateur = tk.StringVar(value=IMPORTATEUR_XML)
         self._importateurs = {}
         for cle, classe in [("accueil", PageAccueil), ("documents_finaux", PageDocumentsFinaux), ("divers", PageDivers), ("dossier", PageDossier), ("articles", PageArticles), ("verifier", PageVerifier),
-                            ("modeles_generes", PageModelesGeneres), ("factures", PageBibliothequeFactures), ("mises_a_jour", PageMisesAJour), ("rapport_comparaisons", PageRapportComparaisons),
+                            ("modeles_generes", PageModelesGeneres), ("factures", PageBibliothequeFactures), ("generateur_factures", PageGenerateurFactures), ("mises_a_jour", PageMisesAJour), ("rapport_comparaisons", PageRapportComparaisons),
                             ("mediatheque", PageMediatheque), ("references", PageReferences),
                             ("repartitions", PageRepartitions), ("ratios", PageRatios), ("etude", PageEtude),
                             ("historique", PageHistorique), ("parametres", PageParametres)]:
@@ -189,7 +191,7 @@ class AsyDec(tk.Tk):
         commun.pack(side='bottom', fill='x', pady=12)
         tk.Label(commun, text='OUTILS COMMUNS', font=(theme.POLICE, 10, 'bold'),
                  fg=theme.TEXTE_DOUX, bg=theme.FOND_LATERAL, anchor='w').pack(fill='x', padx=8)
-        for cle, texte in (('factures', 'Modèles de facture'), ('mises_a_jour', 'Mises à jour Mac'), ('parametres', 'Paramètres')):
+        for cle, texte in (('generateur_factures', 'Générateur de documents'), ('factures', 'Modèles de facture'), ('mises_a_jour', 'Mises à jour Mac'), ('parametres', 'Paramètres')):
             lien = tk.Label(commun, text=texte, font=(theme.POLICE, 13), anchor='w', padx=10, pady=7,
                             bg=theme.FOND_LATERAL, fg=theme.TEXTE, cursor='hand2')
             lien.pack(fill='x')
@@ -206,7 +208,7 @@ class AsyDec(tk.Tk):
     def ouvrir_module(self, cle):
         if self.session_verrouillee:
             return
-        if cle == 'documents_finaux':
+        if cle in ('documents_finaux', 'generateur_factures'):
             self.montrer(cle)
             return
         if cle not in ('friperie', 'divers'):
@@ -236,14 +238,15 @@ class AsyDec(tk.Tk):
             cle = "dossier"
         if cle == 'accueil':
             self.module_actif = None
-        elif cle == 'documents_finaux':
-            self.module_actif = 'documents_finaux'
+        elif cle in ('documents_finaux', 'generateur_factures'):
+            self.module_actif = cle
         elif cle == 'divers':
             self.module_actif = 'divers'
         elif cle not in ('parametres', 'factures', 'mises_a_jour'):
             self.module_actif = getattr(self, 'module_travail', 'friperie')
         self.var_module.set({'friperie': 'Friperie', 'divers': 'Divers',
-                             'documents_finaux': 'Documents finaux'}.get(self.module_actif, 'Modules'))
+                             'documents_finaux': 'Documents finaux',
+                             'generateur_factures': 'Générateur de documents'}.get(self.module_actif, 'Modules'))
         if self.module_actif in ('friperie', 'divers'):
             self.navigation_friperie.pack(fill='both', expand=True)
         else:
@@ -408,6 +411,8 @@ class AsyDec(tk.Tk):
             articles._attente = None
         articles.var_fob_total.set('')
         articles.var_colis_total.set('')
+        if hasattr(articles, 'var_poids_total'):
+            articles.var_poids_total.set('')
         articles.remplir(None, mode='RATIOS')
         articles.message.vider()
         for label in articles.ratios:
@@ -675,6 +680,14 @@ class AsyDec(tk.Tk):
         self.quitter()
         if not self._fermeture:  # fermeture refusée (import en cours) : on reste ici
             self.rechargement = False
+
+    def _erreur_inattendue(self, type_erreur, erreur, trace):
+        """Une erreur non prévue dans un clic ne doit jamais rester silencieuse."""
+        import traceback
+        traceback.print_exception(type_erreur, erreur, trace)
+        messagebox.showerror('Erreur inattendue',
+                             f'L’action n’a pas pu aboutir :\n\n{erreur}\n\n'
+                             'Vos données enregistrées ne sont pas modifiées.', parent=self)
 
     def verrouiller(self):
         if self.session_verrouillee:

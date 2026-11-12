@@ -36,6 +36,7 @@ jobs:
         with:
           name: macos-${{ matrix.arch }}
           path: |
+            dist/AsyDec-Mac-*.dmg
             dist/AsyDec-macos-${{ matrix.arch }}.dmg
             dist/AsyDec-macos-${{ matrix.arch }}.zip
             dist/AsyDec-macos-${{ matrix.arch }}.json
@@ -50,6 +51,35 @@ jobs:
           pattern: macos-*
           merge-multiple: true
           path: distribution
+      - name: Vérifier les deux versions Mac
+        run: |
+          for f in AsyDec-Mac-Apple-Silicon-M1-M2-M3-M4.dmg AsyDec-Mac-Intel.dmg \
+                   AsyDec-macos-arm64.zip AsyDec-macos-arm64.json AsyDec-macos-x86_64.zip AsyDec-macos-x86_64.json; do
+            test -f "distribution/$f" || { echo "Fichier manquant : $f"; exit 1; }
+          done
+      - name: Rédiger la note de version
+        env:
+          REVISION: ${{ github.sha }}
+        run: |
+          cat > notes.md <<'NOTES'
+          ## Quel fichier télécharger ?
+
+          | Votre Mac | Fichier à télécharger |
+          |---|---|
+          | Puce **Apple M1, M2, M3 ou M4** (Apple Silicon) | `AsyDec-Mac-Apple-Silicon-M1-M2-M3-M4.dmg` |
+          | Processeur **Intel** | `AsyDec-Mac-Intel.dmg` |
+
+          **Comment savoir ?** Menu  › *À propos de ce Mac* : la ligne « Puce » indique Apple M1/M2/M3/M4,
+          la ligne « Processeur » indique Intel.
+
+          Ouvrez le `.dmg`, puis glissez AsyDec dans Applications. Les puces M1, M2, M3 et M4 utilisent la même version.
+
+          Les fichiers `AsyDec-macos-*.zip` et `.json` servent aux mises à jour automatiques depuis l’application :
+          inutile de les télécharger.
+          NOTES
+          sed -i 's/^          //' notes.md
+          echo "" >> notes.md
+          echo "Révision : ${REVISION}" >> notes.md
       - name: Publier après réussite des deux constructions
         env:
           GH_TOKEN: ${{ github.token }}
@@ -57,4 +87,4 @@ jobs:
           REVISION: ${{ github.sha }}
           CONSTRUCTION: ${{ github.run_number }}
         run: |
-          gh release create "macos-${CONSTRUCTION}" distribution/* --target "$REVISION" --title "AsyDec Mac 1.0.${CONSTRUCTION}" --notes "Application Mac construite et testée depuis main. Révision : ${REVISION}." --latest
+          gh release create "macos-${CONSTRUCTION}" distribution/* --target "$REVISION" --title "AsyDec Mac 1.0.${CONSTRUCTION} · Apple Silicon (M1, M2, M3, M4) et Intel" --notes-file notes.md --latest

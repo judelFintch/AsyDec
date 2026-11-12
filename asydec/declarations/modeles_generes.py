@@ -843,6 +843,10 @@ def noter_comparaison(identifiant, chemin_fourni, rapport, auteur, base=None):
     """Trace qu'un modèle exporté a été comparé ; le fichier fourni n'est ni copié ni modifié."""
     auteur = _auteur(auteur)
     contenu = Path(chemin_fourni).read_bytes()
+    from asydec.declarations.verification_xml import est_verification
+    if est_verification(contenu):
+        raise ValueError('Ce fichier est un XML de vérification produit par AsyDec, pas une déclaration SYDONIA réelle : '
+                         'il ne peut pas servir de comparaison.')
     total = _total_des_taxes(rapport)
     texte = lambda v: None if v is None else str(v)
     detail_ = json.dumps({'fichier': str(Path(chemin_fourni).resolve()), 'sha256': _sha(contenu),

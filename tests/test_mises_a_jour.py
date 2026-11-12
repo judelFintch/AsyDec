@@ -22,6 +22,19 @@ class MisesAJourTest(TestCase):
             with patch.object(M,'_ouvrir',side_effect=reponses()):
                 self.assertFalse(M.verifier()['disponible'])
 
+    def test_version_intel_sous_rosetta_passe_en_arm64(self):
+        class R:
+            def __init__(self, code, sortie): self.returncode, self.stdout = code, sortie
+        with patch.object(M.platform,'machine',return_value='x86_64'):
+            with patch.object(M.subprocess,'run',return_value=R(0,'1\n')):
+                self.assertEqual(M.architecture(),'arm64')  # Mac M1…M5, application Intel via Rosetta
+            with patch.object(M.subprocess,'run',return_value=R(0,'0\n')):
+                self.assertEqual(M.architecture(),'x86_64')
+            with patch.object(M.subprocess,'run',return_value=R(1,'')):
+                self.assertEqual(M.architecture(),'x86_64')  # vrai Mac Intel : clé absente
+        with patch.object(M.platform,'machine',return_value='arm64'):
+            self.assertEqual(M.architecture(),'arm64')
+
     def test_archives_traversantes_et_liens_sortants_refuses(self):
         with TemporaryDirectory() as d:
             p=Path(d)/'a.zip'

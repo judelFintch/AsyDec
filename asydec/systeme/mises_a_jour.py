@@ -57,6 +57,29 @@ def token_github():
     return r.stdout.strip() if r.returncode == 0 else None
 
 
+# Noms lisibles des versions Mac. M1, M2, M3, M4… partagent le même programme arm64.
+TYPES_MAC = {
+    'arm64': dict(libelle='Mac Apple Silicon (puces M1, M2, M3, M4…)', fichier='AsyDec-Mac-Apple-Silicon-M1-M2-M3-M4'),
+    'x86_64': dict(libelle='Mac Intel', fichier='AsyDec-Mac-Intel'),
+}
+
+
+def type_mac(arch=None):
+    arch = arch or architecture()
+    return TYPES_MAC.get(arch, dict(libelle=f'Mac {arch}', fichier=f'AsyDec-Mac-{arch}'))['libelle']
+
+
+def architecture():
+    """Architecture réelle du Mac. Une version Intel lancée sous Rosetta sur un Mac Apple Silicon (M1…M5)
+    voit « x86_64 » : elle doit pourtant passer à la version arm64 native."""
+    arch=platform.machine()
+    if arch=='x86_64':
+        r=subprocess.run(['/usr/sbin/sysctl','-n','sysctl.proc_translated'],capture_output=True,text=True)
+        if r.returncode==0 and r.stdout.strip()=='1':
+            return 'arm64'
+    return arch
+
+
 def verifier(token=None):
     try:
         with _ouvrir(API+'/releases/latest',token) as r:
@@ -65,7 +88,7 @@ def verifier(token=None):
         if exc.code==404:
             raise ValueError('Aucune version publiée accessible. Si le dépôt est privé, configurez un jeton GitHub en lecture seule.') from exc
         raise
-    arch=platform.machine()
+    arch=architecture()
     nom=f'AsyDec-macos-{arch}'
     assets={a['name']:a for a in release.get('assets',[])}
     if nom+'.json' not in assets or nom+'.zip' not in assets:

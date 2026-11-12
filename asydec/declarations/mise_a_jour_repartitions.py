@@ -22,7 +22,7 @@ def empreinte(licence):
     donnees.pop('recuperation_simulation',None)
     donnees.pop('modele_structure',None)
     # Factures de l'étape 5 et leurs références : elles dépendent de ces données, pas l'inverse.
-    for cle in ('factures_parts','cvi_parts','numero_facture','date_facture','declarations'):
+    for cle in ('factures_parts','cvi_parts','numero_facture','date_facture','declarations','finalisation','taux_change'):
         donnees.pop(cle,None)
     for cle in ('date_validation','date_bl'):
         if donnees.get(cle):

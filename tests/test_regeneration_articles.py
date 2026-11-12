@@ -67,8 +67,22 @@ class RegenerationArticlesTest(unittest.TestCase):
         calculer.assert_called_once()
         self.assertEqual(self.page.var_possibles.get(), '≈ 200 possibles')
 
+    def test_poids_total_saisi_propose_la_repartition(self):
+        self.page.vider()
+        cible = int(self.app.info['poids']) + 137
+        self.page.var_poids_total.set(str(cible))
+        self.assertEqual(self.page.totaux()[0], cible)
+        with patch('asydec.ui.taux_change.confirmer', return_value=True), patch.object(E.messagebox, 'showinfo') as info_box, \
+                patch.object(E.generer, 'lire_registre', return_value={}), patch.object(E.moteur, 'enregistrer'):
+            self.page.regenerer()
+        info_box.assert_not_called()
+        v = self.page.valeurs()
+        self.assertEqual(sum(v['poids']), cible)
+        self.assertEqual(self.page.var_poids_total.get(), str(cible))
+
     def test_poids_total_decimal_refuse_sans_toucher_au_tableau(self):
         E.remplir(self.page.e_poids[0], 220.5)
+        self.page._suivre_poids()  # frappe dans la colonne des poids
         avant = self.page.valeurs()
         with patch.object(E.messagebox, 'showinfo') as info_box, patch('asydec.ui.taux_change.confirmer') as confirmer:
             self.page.regenerer()

@@ -54,6 +54,7 @@ def connexion(base=None):
         if 'retire' not in {r[1] for r in db.execute('PRAGMA table_info(gabarits)')}:
             # Date de retrait de la bibliothèque ; NULL = modèle proposé.
             db.execute('ALTER TABLE gabarits ADD COLUMN retire TEXT')
+        db.execute('CREATE TABLE IF NOT EXISTS analyses_gabarits (empreinte TEXT PRIMARY KEY, champs TEXT NOT NULL, analyse TEXT NOT NULL)')
         with db:
             yield db
     finally:
@@ -226,14 +227,45 @@ def importer(chemin, base=None):
             (chemin.stem, contenu, json.dumps(descriptions), prix_base)).lastrowid
 
 
+# Analyse d'un modèle Word, coûteuse (plusieurs lectures XML complètes, ~1 s par modèle) : calculée une
+# seule fois et gardée dans la base, indexée par l'empreinte du contenu et du code qui l'analyse
+# (une modification de ce code relance donc l'analyse).
+def _version_analyse():
+    dossier = Path(__file__).parent
+    code = hashlib.sha256()
+    for nom in ('factures.py', 'preparer_facture.py'):
+        try:
+            code.update((dossier / nom).read_bytes())
+        except OSError:  # application compilée : sources absentes, version figée
+            code.update(nom.encode())
+    return code.hexdigest()[:16]
+
+
+_VERSION_ANALYSE = _version_analyse()
+_ANALYSES = {}
+
+
+def _analyse_modele(db, contenu):
+    cle = _VERSION_ANALYSE + hashlib.sha256(contenu).hexdigest()
+    if cle not in _ANALYSES:
+        ligne = db.execute('SELECT champs,analyse FROM analyses_gabarits WHERE empreinte=?', (cle,)).fetchone()
+        if ligne:
+            _ANALYSES[cle] = (json.loads(ligne[0]), json.loads(ligne[1]))
+        else:
+            from asydec.declarations.preparer_facture import preparer_plaque
+            prepare = preparer_plaque(contenu)
+            champs, analyse = sorted(inspecter(prepare, exiger=False)), analyser_gabarit(prepare)
+            db.execute('INSERT OR REPLACE INTO analyses_gabarits VALUES(?,?,?)', (cle, json.dumps(champs), json.dumps(analyse)))
+            _ANALYSES[cle] = (champs, analyse)
+    champs, analyse = _ANALYSES[cle]
+    return set(champs), dict(analyse, articles=list(analyse['articles']))
+
+
 def lister_modeles(base=None):
     with connexion(base) as db:
         modeles = []
-        for r in db.execute('SELECT id,nom,articles_json,contenu,prix_base FROM gabarits WHERE retire IS NULL ORDER BY id DESC'):
-            from asydec.declarations.preparer_facture import preparer_plaque
-            contenu = preparer_plaque(r['contenu'])
-            champs = inspecter(contenu, exiger=False)
-            analyse = analyser_gabarit(contenu)
+        for r in db.execute('SELECT id,nom,articles_json,contenu,prix_base FROM gabarits WHERE retire IS NULL ORDER BY id DESC').fetchall():
+            champs, analyse = _analyse_modele(db, r['contenu'])
             modeles.append({'id': r['id'], 'nom': r['nom'], 'articles': json.loads(r['articles_json']) or analyse['articles'],
                             'prix_base': r['prix_base'], 'pret': champs_prets(champs), 'champs': sorted(champs), 'plaque_prevue': 'PLAQUE' in champs, 'fournisseur': analyse['fournisseur'], 'destinataire': analyse['destinataire']})
         return modeles
@@ -348,7 +380,14 @@ def generer(modele_id, gabarit_id, auteur, base=None, base_modeles=None, corresp
     valeurs.update(FOB_LETTRES=lettres(resume['fob'], monnaie=True), POIDS_LETTRES=lettres(resume['poids']))
     with connexion(base) as db:
         db.execute('BEGIN IMMEDIATE')
-        existante = db.execute('SELECT id,numero,manifeste,contenu,date,date_facture FROM factures WHERE modele_id=? AND contenu IS NOT NULL ORDER BY id DESC LIMIT 1', (modele_id,)).fetchone()
+        gabarit = db.execute('SELECT contenu,articles_json,prix_base,retire FROM gabarits WHERE id=?', (gabarit_id,)).fetchone()
+        if gabarit is None:
+            raise ValueError('Modèle de facture introuvable.')
+        # Une archive n'est réutilisable que pour le Word effectivement choisi.
+        # Un autre gabarit produit sa propre facture ; l'ancienne reste consultable.
+        existante = db.execute('SELECT id,numero,manifeste,contenu,date,date_facture,gabarit_id FROM factures '
+                              'WHERE modele_id=? AND gabarit_id=? AND contenu IS NOT NULL ORDER BY id DESC LIMIT 1',
+                              (modele_id, gabarit_id)).fetchone()
         if existante is not None:
             facture = _mettre_a_niveau(db, dict(existante), _date_stockee(existante))
             if not facture['manifeste']:
@@ -364,9 +403,6 @@ def generer(modele_id, gabarit_id, auteur, base=None, base_modeles=None, corresp
             facture.pop('date', None)
             return facture
         valeurs['DATE_FACTURE'] = date_retenue(db, modele, maintenant, base_modeles)
-        gabarit = db.execute('SELECT contenu,articles_json,prix_base,retire FROM gabarits WHERE id=?', (gabarit_id,)).fetchone()
-        if gabarit is None:
-            raise ValueError('Modèle de facture introuvable.')
         if gabarit['retire']:
             raise ValueError('Ce modèle de facture a été retiré de la bibliothèque. Rechargez le Word pour l’utiliser à nouveau.')
         from asydec.declarations.preparer_facture import preparer_plaque
@@ -402,7 +438,7 @@ def generer(modele_id, gabarit_id, auteur, base=None, base_modeles=None, corresp
         db.execute('UPDATE factures SET numero=?,manifeste=?,contenu=?,date_facture=? WHERE id=?',
                    (numero, manifeste, contenu, valeurs['DATE_FACTURE'], identifiant))
     return {'id': identifiant, 'numero': numero, 'manifeste': manifeste, 'contenu': contenu,
-            'date_facture': valeurs['DATE_FACTURE']}
+            'date_facture': valeurs['DATE_FACTURE'], 'gabarit_id': gabarit_id}
 
 
 def factures_emises(gabarit_ids, base=None):
@@ -434,7 +470,9 @@ def retirer_modeles(gabarit_ids, base=None):
 
 def lister_factures(modele_id, base=None):
     with connexion(base) as db:
-        return [dict(r) for r in db.execute('SELECT id,numero,manifeste,date,date_facture FROM factures WHERE modele_id=? ORDER BY id DESC', (modele_id,))]
+        return [dict(r) for r in db.execute('SELECT f.id,f.numero,f.manifeste,f.date,f.date_facture,f.gabarit_id, '
+                                           'g.nom AS nom_gabarit FROM factures f JOIN gabarits g ON g.id=f.gabarit_id '
+                                           'WHERE f.modele_id=? ORDER BY f.id DESC', (modele_id,))]
 
 
 def lire(identifiant, base=None):
@@ -479,6 +517,36 @@ def analyser_gabarit(contenu):
         archive.close()
 
 
+def cle_client_facture(nom):
+    """Équivalence métier explicitement autorisée pour les factures Friperie."""
+    cle = nom_client(nom)
+    if cle in {'JAQ', 'JACQ', 'SHABANI', 'CHABANI',
+               'SHABANISUMAILI', 'CHABANISUMAILI',
+               'SHABANISUMAILICHARLY', 'CHABANISUMAILICHARLY'}:
+        return 'SHABANISUMAILICHARLY'
+    return cle
+
+
+def correspond_importateur(gabarit, modele):
+    """Le destinataire fixe du Word doit être celui du dossier sélectionné."""
+    client = cle_client_facture(modele.get('importateur', ''))
+    destinataire = gabarit.get('destinataire', '').strip()
+    if destinataire == '{{IMPORTATEUR}}':
+        return bool(client)
+    return bool(client and cle_client_facture(destinataire) == client)
+
+
+def selection_par_defaut(gabarits, modele, selection_id=None):
+    """Indice d'un Word du client et compatible, jamais le premier client venu."""
+    nombre_articles = len(modele.get('resultat', {}).get('resume', {}).get('articles', []))
+    compatibles = [i for i, g in enumerate(gabarits)
+                   if correspond_importateur(g, modele) and g.get('pret', True)
+                   and g.get('plaque_prevue')
+                   and (not g['articles'] or len(g['articles']) == nombre_articles)]
+    return next((i for i in compatibles if gabarits[i]['id'] == selection_id),
+                compatibles[0] if compatibles else None)
+
+
 def classer_gabarits(gabarits, modele):
     """Propositions expliquées ; le nombre seul ne vaut jamais correspondance."""
     resultat = modele['resultat']
@@ -506,12 +574,21 @@ def classer_gabarits(gabarits, modele):
                 raison = 'Articles correspondants dans le même ordre'
             destinataire = nom_client(g.get('destinataire', ''))
             importateur = nom_client(modele.get('importateur', ''))
-            if destinataire and importateur and destinataire != importateur:
+            if destinataire and importateur and not correspond_importateur(g, modele):
                 propose = False
                 note = 1
                 raison += ' ; destinataire différent à vérifier'
-        classement.append(dict(g, propose=propose, raison=raison, score=note))
-    return sorted(classement, key=lambda g: (g['propose'], g['score']), reverse=True)
+        client_correspond = correspond_importateur(g, modele)
+        if not client_correspond:
+            propose = False
+        exact = bool(nom_client(g.get('destinataire', ''))
+                     and nom_client(g.get('destinataire', '')) == nom_client(modele.get('importateur', '')))
+        if client_correspond and not exact and g.get('destinataire') != '{{IMPORTATEUR}}':
+            raison += ' ; équivalence JAQ / Shabani autorisée'
+        classement.append(dict(g, propose=propose, raison=raison, score=note,
+                               importateur_correspond=client_correspond, destinataire_exact=exact))
+    return sorted(classement, key=lambda g: (g['importateur_correspond'], g['destinataire_exact'],
+                                            g['propose'], g['score']), reverse=True)
 
 
 def proposer(modele_id, base=None, base_modeles=None):

@@ -3,8 +3,18 @@
 ## Installer
 
 - Windows 10/11 (64 bits) : lancer `AsyDec-Setup-windows-x64.exe`. L’installation se fait pour l’utilisateur courant, sans compte administrateur. Le menu Démarrer et le désinstalleur sont créés ; le raccourci Bureau est facultatif.
-- Mac Intel : ouvrir `AsyDec-macos-x86_64.dmg`, puis glisser AsyDec dans Applications.
-- Mac Apple Silicon : même procédure avec `AsyDec-macos-arm64.dmg`.
+- Mac avec puce **Apple M1, M2, M3 ou M4** : ouvrir `AsyDec-Mac-Apple-Silicon-M1-M2-M3-M4.dmg`, puis glisser AsyDec dans Applications.
+- Mac avec processeur **Intel** : même procédure avec `AsyDec-Mac-Intel.dmg`.
+- Pour savoir quel Mac vous avez : menu  › *À propos de ce Mac*. « Puce Apple M… » = Apple Silicon ; « Processeur Intel » = Intel.
+  Les puces M1, M2, M3 et M4 utilisent la même version. La page « Mises à jour Mac » d’AsyDec affiche aussi le type de ce Mac.
+- Les fichiers `AsyDec-macos-arm64.*` et `AsyDec-macos-x86_64.*` servent aux mises à jour automatiques ; ils ne sont pas à installer à la main.
+
+Les dépendances, dont Pillow pour le sceau bleu, sont téléchargées pendant la construction
+et incluses dans l’application. Aucun téléchargement Python supplémentaire n’est nécessaire
+lors de l’installation du produit compilé. Microsoft Word reste nécessaire pour la conversion PDF.
+
+Pour une installation depuis les sources, double-cliquer sur `INSTALLER.command` (Mac)
+ou `INSTALLER.bat` (Windows), avec Python 3.10 ou plus récent et une connexion Internet.
 
 Python n’est pas nécessaire sur le poste destinataire. Les données personnelles ne sont pas incluses dans les installateurs. Les données de l’application restent dans `%LOCALAPPDATA%\AsyDec` sur Windows et `~/Library/Application Support/AsyDec` sur Mac. La désinstallation ne supprime pas ces données.
 

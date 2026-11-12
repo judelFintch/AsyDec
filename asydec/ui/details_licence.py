@@ -342,7 +342,17 @@ class DetailsLicence:
                 arrondi = None if incomplets or fob <= 0 else ecart_arrondi(self.produits, fob)
             except ValueError:
                 arrondi = None
-            if ecart == 0 and not incomplets:
+            from asydec.declarations import quantites_entieres
+            pieces = [] if incomplets or fob <= 0 else quantites_entieres.fractionnaires(self.produits)
+            if pieces:
+                # Articles comptés à l'unité avec décimales : quantité entière, PU recalculé à l'enregistrement.
+                from asydec.declarations.repartition_licence import ajuster_articles
+                corriges = [f"{' '.join(str(n.get('designation', '')).split())[:30]} : {a['quantite']} → "
+                            f"{n['quantite']} × {quantites_entieres.format_pu(n['prix_unitaire'])}"
+                            for a, n in zip(self.produits, ajuster_articles(self.produits, fob)) if a != n]
+                verdict = ('pièces sans décimales : corrigé à l’enregistrement'
+                           + (' → ' + ' · '.join(corriges) if corriges else ''))
+            elif ecart == 0 and not incomplets:
                 verdict = '✓ égal au FOB'
             elif arrondi is not None:
                 # Quantité arrondie sur la licence : corrigée à l'enregistrement pour que quantité × prix = FOB.

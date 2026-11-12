@@ -33,8 +33,8 @@ CHAMPS_COMPLEMENTAIRES = {
     'ORIGINE': 'Pays d’origine', 'PROVENANCE': 'Pays de provenance',
     'MODE_TRANSPORT': 'Mode de transport', 'REGIME': 'Régime',
     'ENTITE': 'Entité OCC', 'DESTINATION': 'Destination finale',
-    'CONSTAT': 'Constat sous palan', 'FRET': 'Fret de la première part (USD)',
-    'ASSURANCE': 'Assurance de la première part (USD)',
+    'CONSTAT': 'Constat sous palan', 'FRET': 'Fret total du dossier (USD)',
+    'ASSURANCE': 'Assurance totale du dossier (USD)',
     'NUMERO_BL': 'N° BL (repris du dossier ou réservé automatiquement)',
     'DESIGNATION': 'Une seule désignation sur le CVI (ajustée à la case)',
 }
@@ -64,7 +64,9 @@ DEFAUTS_CVI = {
     'QUANTITE': '1800,00', 'QUANTITE_ARTICLE': '1 800,000',
 }
 REFERENCES_CVI = dict(NUMERO_CVI='2025-725B-CAE-1230', DOSSIER_OCC='LSHI 2025 587821 CAE',
-                      RAPPORT_INSPECTION='09899670', BORDEREAU='20')
+                      RAPPORT_INSPECTION='09899670', BORDEREAU='20',
+                      # Le n° de voyage du modèle sert de base : chaque dossier reçoit le suivant.
+                      VOYAGE_BL='994334')
 
 # Valeurs de la deuxième page du modèle fourni, modifiables dans Infos BL.
 DEFAUTS_BL = {
@@ -78,6 +80,30 @@ DEFAUTS_BL = {
                 'DAR ES SALAAM / TANZANIA | PH +255 22 2181420 | PH +255 784 278652',
 }
 CHAMPS_COMPLEMENTAIRES.update(CHAMPS_BL)
+# Calculés, jamais saisis : l'origine vient de la licence, les conditions FOB du port de chargement.
+CHAMPS_DERIVES = ('ORIGINE', 'CONDITIONS_FOB_BL')
+NUMEROS_BL_SUIVANTS = ('NUMERO_BL_2', 'NUMERO_BL_3')
+
+
+def port_chargement(licence, complements=None):
+    """Port de chargement du dossier : saisi dans Infos BL, sinon port habituel du pays d'origine."""
+    from asydec.declarations import coherence_transport
+    if complements is None:
+        complements = (licence.get('cvi_parts') or {}).get('complements') or {}
+    return (str(complements.get('PORT_CHARGEMENT_BL') or '').strip()
+            or coherence_transport.port_par_defaut(licence) or DEFAUTS_BL['PORT_CHARGEMENT_BL'])
+
+
+def appliquer_derives(licence, valeurs):
+    """Origine (licence) et conditions FOB (port) imposées, pour que CVI, BL et facture concordent."""
+    from asydec.declarations import coherence_transport
+    origine = coherence_transport.origine_cvi(licence)
+    if origine:
+        valeurs['ORIGINE'] = origine
+    port = valeurs.get('PORT_CHARGEMENT_BL') or port_chargement(licence)
+    valeurs['PORT_CHARGEMENT_BL'] = coherence_transport.normaliser_port(port)
+    valeurs['CONDITIONS_FOB_BL'] = coherence_transport.conditions_fob(port)
+    return valeurs
 CHAMPS += tuple(CHAMPS_BL) + ('DATE_BL', 'DATE_FACTURE_BL', 'POIDS_BL', 'QUANTITE_BL')
 CHAMPS_LIGNES = tuple(f'{prefixe}_LIGNE_{i}' for prefixe, maximum in
                      (('IMPORTATEUR', 5), ('FOURNISSEUR', 8), ('AGENT_BL', 7))
@@ -100,6 +126,31 @@ def incrementer_reference(reference):
 
 
 REFERENCE_BL_MODELE = 'E 008948899'
+# Une page BL du modèle affiche 10 conteneurs ; au-delà, un BL de plus par tranche de 10 (3 au plus).
+CONTENEURS_PAR_BL = 10
+BL_MAXIMUM = 3
+# Champs propres à chaque page BL ; le reste (navire, ports, notify…) est commun.
+CHAMPS_PAGE_BL = ('NUMERO_BL', 'CONTENEUR', 'NOMBRE_CONTENEURS_BL', 'QUANTITE_BL', 'QUANTITE_BL_LETTRES',
+                  'POIDS_BL') + tuple(f'CONTENEUR_SCELLE_BL_{i}' for i in range(1, 20))
+
+
+def parts_triees(licence, part=None):
+    parts = (licence.get('repartition') or {}).get('parts') or ([part] if part else [])
+    return sorted(parts, key=lambda p: int(p['numero']))
+
+
+def nombre_bl(licence):
+    """1 BL jusqu'à 10 répartitions, 2 jusqu'à 20, 3 jusqu'à 30."""
+    n = max(1, -(-len(parts_triees(licence)) // CONTENEURS_PAR_BL))
+    if n > BL_MAXIMUM:
+        raise ValueError(f'{len(parts_triees(licence))} répartitions : {BL_MAXIMUM} BL de {CONTENEURS_PAR_BL} conteneurs '
+                         f'au plus ({BL_MAXIMUM * CONTENEURS_PAR_BL} répartitions).')
+    return n
+
+
+def cles_numeros_bl(licence):
+    """['NUMERO_BL', 'NUMERO_BL_2', …] selon le nombre de BL du dossier."""
+    return ['NUMERO_BL'] + [f'NUMERO_BL_{k}' for k in range(2, nombre_bl(licence) + 1)]
 
 
 def numero_bl_connu(licence, part=None):
@@ -126,6 +177,11 @@ def reserver_references(licence, fichier=None):
     references = dict(REFERENCES_CVI)
     if not connu:
         references['NUMERO_BL'] = REFERENCE_BL_MODELE
+    try:
+        for cle in cles_numeros_bl(licence)[1:]:
+            references[cle] = REFERENCE_BL_MODELE
+    except ValueError:
+        pass
     # Les appels sans dossier identifié servent seulement aux aperçus / analyses.
     if not identifiant:
         return dict({cle: incrementer_reference(valeur) for cle, valeur in references.items()}, **({'NUMERO_BL':connu} if connu else {}))
@@ -146,24 +202,32 @@ def reserver_references(licence, fichier=None):
                 resultat[cle] = reserve['reference']
                 continue
             maximum = extraire(base)
-            autre = conn.execute('SELECT MAX(sequence) FROM cvi_references WHERE champ=?', (cle,)).fetchone()[0]
+            # Tous les BL (1er, 2e, 3e d'un dossier) partagent une seule séquence.
+            famille = ['NUMERO_BL'] + [f'NUMERO_BL_{k}' for k in range(2, BL_MAXIMUM + 1)] if cle.startswith('NUMERO_BL') else [cle]
+            marques = ','.join('?' * len(famille))
+            autre = conn.execute(f'SELECT MAX(sequence) FROM cvi_references WHERE champ IN ({marques})', famille).fetchone()[0]
             maximum = max(maximum, autre or 0)
             utilisees = set()
             for dossier in anciens:
-                valeur = ((dossier.get('cvi_parts') or {}).get('complements') or {}).get(cle)
-                if cle == 'NUMERO_BL':
-                    try:
-                        valeur = numero_bl_connu(dossier) or valeur
-                    except ValueError:
-                        pass
-                if valeur and re.search(r'[0-9]+[^0-9]*$', valeur):
-                    maximum = max(maximum, extraire(valeur))
-                    if str(dossier.get('numero_validation') or dossier.get('numero_dec')) != identifiant:
-                        utilisees.add(extraire(valeur))
+                for membre in famille:
+                    valeur = ((dossier.get('cvi_parts') or {}).get('complements') or {}).get(membre)
+                    if membre == 'NUMERO_BL':
+                        try:
+                            valeur = numero_bl_connu(dossier) or valeur
+                        except ValueError:
+                            pass
+                    if valeur and re.search(r'[0-9]+[^0-9]*$', valeur):
+                        maximum = max(maximum, extraire(valeur))
+                        if str(dossier.get('numero_validation') or dossier.get('numero_dec')) != identifiant or membre != cle:
+                            utilisees.add(extraire(valeur))
+            if cle != 'NUMERO_BL' and cle.startswith('NUMERO_BL') and connu and re.search(r'[0-9]+[^0-9]*$', connu):
+                utilisees.add(extraire(connu))
             reference = str(existants.get(cle) or '')
             sequence = extraire(reference) if reference and re.search(r'[0-9]+[^0-9]*$', reference) else None
-            collision = sequence is not None and (sequence in utilisees or conn.execute(
-                'SELECT 1 FROM cvi_references WHERE champ=? AND sequence=?', (cle,sequence)).fetchone())
+            # Le numéro du modèle lui-même n'est jamais attribué à un dossier (ex. ancien voyage 994334).
+            collision = sequence is not None and (sequence == extraire(base) or sequence in utilisees or conn.execute(
+                f'SELECT 1 FROM cvi_references WHERE champ IN ({marques}) AND sequence=? AND NOT (licence=? AND champ=?)',
+                (*famille, sequence, identifiant, cle)).fetchone())
             if sequence is None or collision:
                 reference = base
                 if re.fullmatch(r'[0-9]{4}', annee):
@@ -225,9 +289,38 @@ def proposer_complements(licence, fichier=None):
     for cle, valeur in existants.items():
         if valeur is not None and str(valeur).strip():
             valeurs[cle] = valeur
+    # Sans choix enregistré : port habituel du pays d'origine, et les lieux et la provenance qui en découlent.
+    from asydec.declarations import coherence_transport
+    if not str(existants.get('PORT_CHARGEMENT_BL') or '').strip():
+        port = port_chargement(licence, existants)
+        valeurs['PORT_CHARGEMENT_BL'] = port
+        for cle in ('FRET_PAYABLE_BL', 'LIEU_EMISSION_BL'):
+            if not str(existants.get(cle) or '').strip():
+                valeurs[cle] = port
+        if not str(existants.get('PROVENANCE') or '').strip() and coherence_transport.port_par_defaut(licence):
+            valeurs['PROVENANCE'] = coherence_transport.pays_du_port(port) or valeurs.get('PROVENANCE', '')
+    appliquer_derives(licence, valeurs)
     valeurs['DESIGNATION'] = adapter_designation(valeurs['DESIGNATION'])
     valeurs.update(reserver_references(licence, fichier))
-    return {cle: valeurs.get(cle, '') for cle in CHAMPS_COMPLEMENTAIRES}
+    return {cle: valeurs.get(cle, '') for cle in tuple(CHAMPS_COMPLEMENTAIRES) + tuple(cles_numeros_bl(licence)[1:])}
+
+
+def colis_dossier(licence, parts):
+    """Nombre total de colis du dossier (entier), selon la règle du XML appliquée à chaque article de chaque part."""
+    from decimal import Decimal
+    from asydec.declarations.xml_licence import colis
+    total = 0
+    for part in parts:
+        articles = part.get('articles') or []
+        if not articles:
+            continue
+        try:
+            lignes = facture_licence.donnees_part(licence, part)['lignes']
+        except (ValueError, KeyError, ArithmeticError):
+            lignes = [dict(quantite=Decimal(str(a['quantite'])), unite=a.get('unite'),
+                           poids=Decimal(str(part.get('poids_kg') or 0)) / len(articles)) for a in articles]
+        total += sum(colis(l['quantite'], l.get('unite'), l['poids']) for l in lignes)
+    return Decimal(total)
 
 
 def poids_global_cvi(licence, part):
@@ -244,6 +337,61 @@ def poids_global_cvi(licence, part):
     except (KeyError, InvalidOperation, ValueError):
         raise ValueError('Le poids de chaque répartition doit être renseigné et positif pour calculer le poids global CVI.') from None
     return nombre(sum(poids, Decimal(0)), 2)
+
+
+def page_bl(licence, parts, numero_bl):
+    """Champs propres à une page BL : ses conteneurs (10 au plus), scellés, poids et colis."""
+    from decimal import Decimal, InvalidOperation
+    from asydec.formats import nombre
+    from asydec.declarations.nombres_lettres import nombre as en_lettres
+    page = {'NUMERO_BL': str(numero_bl or ''), 'NOMBRE_CONTENEURS_BL': str(len(parts)), 'CONTENEUR': ''}
+    lignes_bl = []
+    if any(p.get('conteneur') or p.get('scelle') for p in parts):
+        for i, p in enumerate(parts):
+            conteneur = str(p.get('conteneur') or '').strip()
+            scelle = str(p.get('scelle') or '').strip()
+            if not conteneur or not scelle:
+                raise ValueError(f"Conteneur ou scellé manquant sur la répartition {p.get('numero')}.")
+            if i == 0:
+                page['CONTENEUR'] = conteneur
+            else:
+                lignes_bl.append(conteneur)
+            lignes_bl.append('SEAL ' + scelle)
+    for i, cle in enumerate(CHAMPS_LISTE_BL):
+        page[cle] = lignes_bl[i] if i < len(lignes_bl) else ''
+    try:
+        poids = sum((Decimal(str(p.get('poids_kg') or 0).replace(' ', '').replace(',', '.')) for p in parts), Decimal(0))
+        # Packages : nombre entier de colis, calculé comme dans le XML (un colis par pièce,
+        # sinon un colis par 50 kg) et additionné sur les répartitions du BL.
+        colis = colis_dossier(licence, parts)
+        if not colis:
+            colis = Decimal(DEFAUTS_CVI['QUANTITE'].replace(',', '.'))
+    except (InvalidOperation, ValueError):
+        raise ValueError('Quantités ou poids BL invalides sur les répartitions.') from None
+    if poids:
+        page['POIDS_BL'] = nombre(poids, 2).replace(',', '.')
+    page['QUANTITE_BL'] = nombre(colis, 0)
+    page['QUANTITE_BL_LETTRES'] = en_lettres(colis)
+    return page
+
+
+def numeros_bl_cvi(numeros):
+    """N° BL pour la case du CVI : tous les BL s'ils tiennent, sinon le premier suivi de la fin des autres."""
+    import pymupdf
+    numeros = [str(n) for n in numeros if str(n or '').strip()]
+    if len(numeros) <= 1:
+        return numeros[0] if numeros else ''
+    largeur = lambda t: pymupdf.get_text_length(t, fontname='helv', fontsize=9)
+    complet = ' / '.join(numeros)
+    if largeur(complet) <= 128:
+        return complet
+    courts = [numeros[0]]
+    for n in numeros[1:]:
+        commun = 0
+        while commun < min(len(n), len(numeros[0])) and n[commun] == numeros[0][commun]:
+            commun += 1
+        courts.append(n[min(commun, len(n) - 3):] if n[:commun].strip() else n)
+    return ' / '.join(courts)
 
 
 def donnees(licence, part, complements=None):
@@ -270,17 +418,40 @@ def donnees(licence, part, complements=None):
     valeurs['DESIGNATION'] = premiere_designation(part)
     if complements is None:
         complements = (licence.get('cvi_parts') or {}).get('complements') or {}
-    valeurs.update({k: str(v).strip() for k, v in complements.items() if k in CHAMPS_COMPLEMENTAIRES
+    valeurs.update({k: str(v).strip() for k, v in complements.items()
+                    if (k in CHAMPS_COMPLEMENTAIRES or k in NUMEROS_BL_SUIVANTS)
                     and (k != 'NUMERO_BL' or not numero_bl_connu(licence, part))})
+    if not str(valeurs.get('PORT_CHARGEMENT_BL') or '').strip():
+        valeurs['PORT_CHARGEMENT_BL'] = port_chargement(licence, complements)
+    for cle in ('FRET_PAYABLE_BL', 'LIEU_EMISSION_BL'):
+        if not str(valeurs.get(cle) or '').strip():
+            valeurs[cle] = valeurs['PORT_CHARGEMENT_BL']
     for cle, valeur in {**DEFAUTS_CVI, **DEFAUTS_BL}.items():
         if not str(valeurs.get(cle) or '').strip():
             valeurs[cle] = valeur
+    appliquer_derives(licence, valeurs)
     valeurs['DESIGNATION'] = adapter_designation(valeurs['DESIGNATION'])
     for cle, prefixe in (('NUMERO_E', 'E'), ('NUMERO_LIQUIDATION', 'L'), ('NUMERO_QUITTANCE', 'Q')):
         if valeurs[cle] and not re.match(r'^'+prefixe+r'\b', valeurs[cle], re.I):
             valeurs[cle] = prefixe + ' ' + valeurs[cle]
+    # Le CVI couvre toute la licence (comme le BL) : FOB, CIF, quantité, poids et facture globaux,
+    # jamais ceux de la seule première part.
+    toutes = (licence.get('repartition') or {}).get('parts') or [part]
+    valeurs['NUMERO_FACTURE'] = numero
     try:
-        quantite = sum((Decimal(str(a['quantite'])) for a in part.get('articles') or []), Decimal(0))
+        fob_global = sum((Decimal(str(p.get('fob') or 0)) for p in toutes), Decimal(0))
+        if not fob_global and licence.get('montant_fob'):
+            fob_global = Decimal(str(licence['montant_fob']))
+        if fob_global:
+            valeurs['FOB'] = str(fob_global)
+        valeurs['POIDS_KG'] = valeurs['POIDS_GLOBAL_CVI']
+    except (InvalidOperation, ValueError):
+        raise ValueError('FOB des répartitions invalide.') from None
+    try:
+        quantite = sum((Decimal(str(a['quantite'])) for p in toutes for a in p.get('articles') or []), Decimal(0))
+        if not quantite:
+            quantite = sum((Decimal(str(a.get('quantite')).replace(',', '.')) for a in licence.get('produits') or []
+                            if str(a.get('quantite') or '').strip()), Decimal(0))
         valeurs['QUANTITE'] = nombre(quantite, 2) if quantite else DEFAUTS_CVI['QUANTITE']
         valeurs['QUANTITE_ARTICLE'] = nombre(quantite, 3) if quantite else DEFAUTS_CVI['QUANTITE_ARTICLE']
         for cle in ('FOB', 'POIDS_KG', 'FRET', 'ASSURANCE'):
@@ -302,38 +473,28 @@ def donnees(licence, part, complements=None):
     valeurs['DATE_FACTURE_BL'] = date.replace('/', '.')
     valeurs['POIDS_BL'] = valeurs['POIDS_GLOBAL_CVI'].replace(',', '.')
     valeurs['QUANTITE_BL'] = valeurs.get('QUANTITE', '').replace(',', '.')
-    # Le BL rassemble les conteneurs et scellés de toutes les répartitions.
-    parts_bl = sorted((licence.get('repartition') or {}).get('parts') or [part], key=lambda p: int(p['numero']))
-    if len(parts_bl) > 10:
-        raise ValueError('Le modèle BL permet 10 conteneurs sur une page. Un modèle avec suite est nécessaire pour afficher toutes les répartitions sans omission.')
-    valeurs['NOMBRE_CONTENEURS_BL'] = str(len(parts_bl))
-    lignes_bl = []
-    if any(p.get('conteneur') or p.get('scelle') for p in parts_bl):
-        vus = set()
-        for i, p in enumerate(parts_bl):
-            conteneur = str(p.get('conteneur') or '').strip()
-            scelle = str(p.get('scelle') or '').strip()
-            if not conteneur or not scelle:
-                raise ValueError(f"Conteneur ou scellé manquant sur la répartition {p.get('numero')}.")
-            if conteneur in vus:
-                raise ValueError('Un conteneur apparaît sur plusieurs répartitions : ' + conteneur)
-            vus.add(conteneur)
-            if i == 0:
-                valeurs['CONTENEUR'] = conteneur
-            else:
-                lignes_bl.append(conteneur)
-            lignes_bl.append('SEAL ' + scelle)
-    for i, cle in enumerate(CHAMPS_LISTE_BL):
-        valeurs[cle] = lignes_bl[i] if i < len(lignes_bl) else ''
-    from asydec.declarations.nombres_lettres import nombre as en_lettres
-    try:
-        quantite_bl = sum((Decimal(str(a['quantite'])) for p in parts_bl for a in p.get('articles') or []), Decimal(0))
-        if not quantite_bl:
-            quantite_bl = Decimal(DEFAUTS_CVI['QUANTITE'].replace(',', '.'))
-        valeurs['QUANTITE_BL'] = nombre(quantite_bl, 2).replace(',', '.')
-        valeurs['QUANTITE_BL_LETTRES'] = en_lettres(quantite_bl)
-    except (InvalidOperation, ValueError):
-        raise ValueError('Quantités BL invalides sur les répartitions.') from None
+    # Un BL par tranche de 10 répartitions (conteneurs) : chacun a son numéro, ses conteneurs et scellés,
+    # son poids et ses colis. Le CVI garde les totaux de tout le dossier.
+    parts_bl = parts_triees(licence, part)
+    tranches = [parts_bl[k:k + CONTENEURS_PAR_BL] for k in range(0, len(parts_bl), CONTENEURS_PAR_BL)]
+    if len(tranches) > BL_MAXIMUM:
+        nombre_bl(licence)
+    vus = set()
+    for p in parts_bl:
+        conteneur = str(p.get('conteneur') or '').strip()
+        if conteneur and conteneur in vus:
+            raise ValueError('Un conteneur apparaît sur plusieurs répartitions : ' + conteneur)
+        vus.add(conteneur)
+    numeros_bl = [valeurs.get('NUMERO_BL', '')] + [valeurs.get(f'NUMERO_BL_{k}', '') for k in range(2, len(tranches) + 1)]
+    if len(tranches) > 1:
+        manquants = [str(k + 1) for k, n in enumerate(numeros_bl) if not str(n).strip()]
+        if manquants:
+            raise ValueError('Numéro manquant pour le BL ' + ', '.join(manquants) + ' : rouvrez le formulaire CVI et BL.')
+        if len(set(numeros_bl)) != len(numeros_bl):
+            raise ValueError('Chaque BL doit avoir un numéro différent.')
+    valeurs['_PAGES_BL'] = [page_bl(licence, tranche, numero_bl) for tranche, numero_bl in zip(tranches, numeros_bl)]
+    valeurs.update(valeurs['_PAGES_BL'][0])
+    valeurs['NUMERO_BL'] = numeros_bl_cvi(numeros_bl)
     valeurs['NUMERO_FACTURE_BL'] = numero
     if valeurs.get('TARE_BL'):
         try:
@@ -344,10 +505,10 @@ def donnees(licence, part, complements=None):
         except (InvalidOperation, ValueError):
             raise ValueError('La tare du BL doit être un nombre positif ou nul.') from None
     # Éviter le texte coupé dans les deux cases étroites du BL, sans réduire la police.
-    for cle, largeur in (('VOYAGE_BL', 45.6), ('NUMERO_BL', 75.6)):
-        if valeurs.get(cle):
-            import pymupdf
-            if pymupdf.get_text_length(valeurs[cle], fontname='helv', fontsize=7.5) > largeur:
+    import pymupdf
+    for cle, largeur, sources in (('VOYAGE_BL', 45.6, [valeurs]), ('NUMERO_BL', 75.6, valeurs['_PAGES_BL'])):
+        for source in sources:
+            if source.get(cle) and pymupdf.get_text_length(source[cle], fontname='helv', fontsize=7.5) > largeur:
                 raise ValueError(f'{cle} : référence trop longue pour la case du modèle BL à police constante.')
     for prefixe, coordonnees, maximum in (
             ('IMPORTATEUR', licence.get('soussigne') or {}, 5),
@@ -365,7 +526,64 @@ def donnees(licence, part, complements=None):
     return valeurs
 
 
+_VML = 'urn:schemas-microsoft-com:vml'
+_W14 = 'http://schemas.microsoft.com/office/word/2010/wordml'
+
+
+def _saut_de_page(element):
+    return any(b.getAttributeNS(W, 'type') == 'page' and b.parentNode is element
+               for b in element.getElementsByTagNameNS(W, 'br'))
+
+
+def _pages_bl(doc, nombre):
+    """Duplique la page BL du modèle (zones de texte après le saut de page) pour avoir `nombre` pages BL.
+
+    Renvoie {élément de premier niveau: indice de page BL} pour savoir quelle page remplit chaque zone."""
+    corps = doc.getElementsByTagNameNS(W, 'body')[0]
+    for paragraphe in [c for c in corps.childNodes if c.nodeType == 1 and c.localName == 'p']:
+        runs = [c for c in paragraphe.childNodes if c.nodeType == 1]
+        saut = next((i for i, r in enumerate(runs) if r.localName == 'r' and _saut_de_page(r)), None)
+        if saut is not None:
+            break
+    else:
+        return {}
+    page_bl = [r for r in runs[saut + 1:] if r.localName == 'r']
+    appartenance = {id(r): 0 for r in page_bl}
+    precedent = paragraphe
+    for k in range(1, nombre):
+        nouveau = doc.createElementNS(W, 'w:p')
+        for proprietes in [c for c in paragraphe.childNodes if c.nodeType == 1 and c.localName == 'pPr']:
+            nouveau.appendChild(proprietes.cloneNode(True))
+        nouveau.appendChild(runs[saut].cloneNode(True))
+        for run in page_bl:
+            copie = run.cloneNode(True)
+            for forme in copie.getElementsByTagNameNS(_VML, 'shape'):
+                if forme.getAttribute('id'):
+                    forme.setAttribute('id', f"{forme.getAttribute('id')} BL{k + 1}")
+                if forme.getAttribute('o:spid'):
+                    forme.setAttribute('o:spid', f"{forme.getAttribute('o:spid')}_{k + 1}")
+            for element in [copie] + list(copie.getElementsByTagName('*')):
+                for attribut in ('w14:paraId', 'w14:textId'):
+                    if element.hasAttribute(attribut):
+                        element.removeAttribute(attribut)
+            nouveau.appendChild(copie)
+            appartenance[id(copie)] = k
+        corps.insertBefore(nouveau, precedent.nextSibling)
+        precedent = nouveau
+    return appartenance
+
+
+def _page_de(p, appartenance):
+    noeud = p
+    while noeud is not None:
+        if id(noeud) in appartenance:
+            return appartenance[id(noeud)]
+        noeud = noeud.parentNode
+    return None
+
+
 def remplir(modele, valeurs, avec_bl=False):
+    pages = valeurs.get('_PAGES_BL') or []
     try:
         archive = ZipFile(BytesIO(modele))
     except BadZipFile:
@@ -380,20 +598,24 @@ def remplir(modele, valeurs, avec_bl=False):
             except Exception as exc:
                 raise ValueError('Le modèle CVI contient un XML illisible : ' + nom) from exc
             change = False
+            appartenance = _pages_bl(doc, len(pages)) if nom == 'word/document.xml' and pages else {}
+            change = len(pages) > 1 and bool(appartenance)
             for p in doc.getElementsByTagNameNS(W, 'p'):
                 # Un paragraphe de zone de texte peut être inclus dans un autre :
                 # ne traiter que les paragraphes contenant directement leurs textes.
                 if p.getElementsByTagNameNS(W, 'p'):
                     continue
                 contenu = texte(p)
+                indice = _page_de(p, appartenance) if appartenance else None
+                source = dict(valeurs, **pages[indice]) if indice is not None else valeurs
                 for m in reversed(list(BALISE.finditer(contenu))):
                     cle = m.group(1)
                     if cle not in CHAMPS:
                         raise ValueError(f'Champ CVI inconnu : {cle}.')
-                    if cle not in CHAMPS_LIGNES + CHAMPS_LISTE_BL and not str(valeurs.get(cle) or '').strip():
+                    if cle not in CHAMPS_LIGNES + CHAMPS_LISTE_BL and not str(source.get(cle) or '').strip():
                         raise ValueError(f'Donnée CVI manquante : {cle}. Complétez la licence ou la déclaration.')
                     trouvees.add(cle)
-                    valeur = str(valeurs.get(cle, ''))
+                    valeur = str(source.get(cle, ''))
                     if cle == 'DESIGNATION':
                         valeur = adapter_designation(valeur)
                     remplacer(p, m.start(), m.end(), valeur)
@@ -429,7 +651,7 @@ def generer(licence, modele, complements=None):
 def empreinte(licence, complements=None):
     import hashlib
     import json
-    return hashlib.sha256(json.dumps({'version_modele': 8, 'donnees': donnees(licence, premiere_part(licence), complements)},
+    return hashlib.sha256(json.dumps({'version_modele': 9, 'donnees': donnees(licence, premiere_part(licence), complements)},
                                     sort_keys=True, ensure_ascii=False).encode()).hexdigest()
 
 

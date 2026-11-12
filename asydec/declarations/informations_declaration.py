@@ -135,27 +135,39 @@ def alerte_enregistrement(licence, aujourdhui=None):
 ECARTS_CVI = (2, 3, 4)
 
 
-def proposer_date_cvi(date_liquidation, tirage=None):
-    """Jour ouvrable tiré entre 2 et 4 jours après la liquidation."""
+def dates_cvi_possibles(date_liquidation):
+    """Jours ouvrables entre 2 et 4 jours après la liquidation, sinon le premier jour ouvrable suivant."""
     liquidation = lire_date(date_liquidation)
     candidats = [liquidation + timedelta(days=d) for d in ECARTS_CVI if est_ouvrable(liquidation + timedelta(days=d))]
-    if not candidats:
-        return suivant_ouvrable(liquidation + timedelta(days=ECARTS_CVI[-1]))
-    return (tirage or random.SystemRandom()).choice(candidats)
+    return candidats or [suivant_ouvrable(liquidation + timedelta(days=ECARTS_CVI[-1]))]
+
+
+def proposer_date_cvi(date_liquidation, tirage=None):
+    """Jour ouvrable tiré entre 2 et 4 jours après la liquidation."""
+    return (tirage or random.SystemRandom()).choice(dates_cvi_possibles(date_liquidation))
 
 
 DATES_AUTO = ('date_enregistrement', 'date_liquidation', 'date_quittance', 'date_cvi')
 
 
-def proposer_dates_declaration(date_bl, aujourdhui=None, tirage=None):
+def combinaisons_dates_declaration(date_bl, aujourdhui=None):
+    """Toutes les combinaisons E / liquidation / quittance / CVI conformes aux règles."""
     limite = aujourdhui or date.today()
     e = proposer_date_enregistrement(date_bl, limite)['date']
     candidats = [e + timedelta(days=d) for d in (0,2,3)
                  if e + timedelta(days=d) <= limite and est_ouvrable(e + timedelta(days=d))]
-    couples = [(l,q) for l in candidats for q in candidats if q >= l]
-    tirage = tirage or random.SystemRandom()
-    liquidation, quittance = tirage.choice(couples)
-    return dict(date_enregistrement=e.strftime('%d/%m/%Y'),
-                date_liquidation=liquidation.strftime('%d/%m/%Y'),
-                date_quittance=quittance.strftime('%d/%m/%Y'),
-                date_cvi=proposer_date_cvi(liquidation, tirage).strftime('%d/%m/%Y'))
+    return [dict(date_enregistrement=e.strftime('%d/%m/%Y'),
+                 date_liquidation=l.strftime('%d/%m/%Y'),
+                 date_quittance=q.strftime('%d/%m/%Y'),
+                 date_cvi=c.strftime('%d/%m/%Y'))
+            for l in candidats for q in candidats if q >= l for c in dates_cvi_possibles(l)]
+
+
+def proposer_dates_declaration(date_bl, aujourdhui=None, tirage=None, exclure=None):
+    """Tire une combinaison conforme, différente de « exclure » quand une autre existe."""
+    combinaisons = combinaisons_dates_declaration(date_bl, aujourdhui)
+    if exclure:
+        actuelle = {c: str(exclure.get(c, '')).strip() for c in DATES_AUTO}
+        autres = [c for c in combinaisons if c != actuelle]
+        combinaisons = autres or combinaisons
+    return dict((tirage or random.SystemRandom()).choice(combinaisons))

@@ -9,16 +9,19 @@ sur une page autant que possible (taille du texte réduite quand les articles so
   (sans licence, DEC, plaque, conteneur, scellé ni manifeste).
 """
 from io import BytesIO
+import textwrap
 from xml.sax.saxutils import escape
 from zipfile import ZipFile, ZIP_DEFLATED
 
-from asydec.declarations.nombres_lettres import nombre as en_lettres
+from asydec.declarations.nombres_lettres import nombre as en_lettres, dollars_us
 from asydec.formats import nombre
 
 W = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'
 LARGEUR = 10306  # A4 (11 906) moins deux marges de 800 twips
-GRIS = 'E7E6E6'
-TRAIT = '<w:{0} w:val="single" w:sz="{1}" w:space="0" w:color="000000"/>'
+GRIS = 'EDF2F7'
+BLEU = '183650'
+DOUX = '60758A'
+TRAIT = '<w:{0} w:val="single" w:sz="{1}" w:space="0" w:color="CAD5DF"/>'
 
 
 def _run(texte, gras=False, taille=9, souligne=False, couleur=None):
@@ -37,12 +40,12 @@ def _para(*runs, alignement=None, apres=40, avant=0, bordure_bas=False):
             f'{"".join(runs)}</w:p>')
 
 
-def _cellule(contenu, largeur, fond=None, fusion=1, alignement=None, gras=False, taille=9, bordures=None):
+def _cellule(contenu, largeur, fond=None, fusion=1, alignement=None, gras=False, taille=9, bordures=None, couleur=None):
     """contenu : texte, ou liste de paragraphes déjà construits. bordures : dict côté → épaisseur (0 = aucune)."""
     if isinstance(contenu, list):
         paragraphes = ''.join(contenu) or _para()
     else:
-        paragraphes = _para(_run(contenu, gras=gras, taille=taille), alignement=alignement, apres=0)
+        paragraphes = _para(_run(contenu, gras=gras, taille=taille, couleur=couleur), alignement=alignement, apres=0)
     bords = ''
     if bordures is not None:
         bords = '<w:tcBorders>' + ''.join(TRAIT.format(c, e) if e else f'<w:{c} w:val="nil"/>'
@@ -55,24 +58,29 @@ def _cellule(contenu, largeur, fond=None, fusion=1, alignement=None, gras=False,
 def _tableau(colonnes, lignes, bordures=True, hauteur=None, entete=False):
     """colonnes : largeurs ; lignes : listes de cellules déjà construites. entete : 1re ligne répétée."""
     trait = TRAIT.replace('{1}', '6') if bordures else '<w:{0} w:val="nil"/>'
-    bords = ''.join(trait.format(cote) for cote in ('top', 'left', 'bottom', 'right', 'insideH', 'insideV'))
+    bords = ''.join(trait.format(cote) if cote in ('bottom', 'insideH') else f'<w:{cote} w:val="nil"/>' for cote in ('top', 'left', 'bottom', 'right', 'insideH', 'insideV'))
     grille = ''.join(f'<w:gridCol w:w="{c}"/>' for c in colonnes)
     corps = ''
     for i, l in enumerate(lignes):
         proprietes = '<w:cantSplit/>' + (f'<w:trHeight w:val="{hauteur}"/>' if hauteur else '') + ('<w:tblHeader/>' if entete and i == 0 else '')
         corps += f'<w:tr><w:trPr>{proprietes}</w:trPr>' + ''.join(l) + '</w:tr>'
     return (f'<w:tbl><w:tblPr><w:tblW w:w="{sum(colonnes)}" w:type="dxa"/><w:jc w:val="center"/><w:tblBorders>{bords}</w:tblBorders>'
-            '<w:tblLayout w:type="fixed"/><w:tblCellMar><w:top w:w="15" w:type="dxa"/><w:left w:w="80" w:type="dxa"/>'
-            '<w:bottom w:w="15" w:type="dxa"/><w:right w:w="80" w:type="dxa"/>'
+            '<w:tblLayout w:type="fixed"/><w:tblCellMar><w:top w:w="90" w:type="dxa"/><w:left w:w="80" w:type="dxa"/>'
+            '<w:bottom w:w="90" w:type="dxa"/><w:right w:w="80" w:type="dxa"/>'
             f'</w:tblCellMar></w:tblPr><w:tblGrid>{grille}</w:tblGrid>{corps}</w:tbl>')
 
 
 def _montant(valeur):
-    return nombre(float(valeur), 2)
+    return f"{valeur:,.2f}"
+
+
+def _pu(valeur):
+    from asydec.declarations.quantites_entieres import pu_texte
+    return pu_texte(valeur)
 
 
 def _quantite(q):
-    return nombre(q) if q == q.to_integral_value() else nombre(float(q), 3)
+    return f'{q:,.0f}' if q == q.to_integral_value() else f'{q:,.3f}'
 
 
 def _taille(donnees):
@@ -87,63 +95,77 @@ def _contact(d):
                                   ('E-mail: ' + d['email']) if d.get('email') else '') if x)
 
 
+def _adresse(texte):
+    return str(texte).replace('Congo, The Democratic Republic of the', 'Democratic Republic of the Congo')
+
+
+def _unite(texte):
+    unite = str(texte).strip()
+    if unite.casefold() in ('unite(piece)', 'unité', 'unite', 'piece', 'pieces', 'pièce', 'pièces', 'pcs'):
+        return 'PCS'
+    return unite
+
+
 def _entete(titre, licence, donnees, references):
-    """En-tête du vendeur, titre, destinataire à gauche et références à droite."""
+    """En-tête commercial et blocs client / références, sans données inventées."""
     fournisseur = licence.get('fournisseur') or {}
-    soussigne = licence.get('soussigne') or {}
-    xml = []
-    if fournisseur.get('nom'):
-        xml.append(_para(_run(fournisseur['nom'], gras=True, taille=20), alignement='center', apres=40))
-    for ligne in (fournisseur.get('adresse', ''), _contact(fournisseur)):
+    client = licence.get('soussigne') or {}
+    vendeur = [_para(_run('\n'.join(textwrap.wrap(fournisseur.get('nom', ''), width=24)), gras=True, taille=18, couleur=BLEU), apres=90)]
+    for ligne in (_adresse(fournisseur.get('adresse', '')), _contact(fournisseur)):
         if ligne:
-            xml.append(_para(_run(ligne, taille=9.5), alignement='center', apres=0))
-    xml.append(_para(apres=120, bordure_bas=True))
-    xml.append(_para(_run(titre, gras=True, taille=18, souligne=True), alignement='center', avant=160, apres=160))
-    references = [(l, v) for l, v in references if v]
-    gauche, libelle, valeur = 5900, 1500, LARGEUR - 5900 - 1500
-    destinataire = [l for l in (soussigne.get('nom', ''), soussigne.get('adresse', '')) if l]
-    bloc_gauche = [_para(_run('Consignee:', gras=True, taille=9.5), apres=20)] + [
-        _para(_run(l, gras=i == 0, taille=9.5), apres=0) for i, l in enumerate(destinataire)]
-    lignes = []
-    for i, (l, v) in enumerate(references or [('', '')]):
-        fusion = '<w:vMerge w:val="restart"/>' if i == 0 else '<w:vMerge/>'
-        cellule = _cellule(bloc_gauche if i == 0 else [], gauche).replace('<w:tcPr>', '<w:tcPr>' + fusion, 1)
-        lignes.append([cellule, _cellule(l + ':' if l else '', libelle, gras=True, taille=9.5),
-                       _cellule(v, valeur, taille=9.5)])
-    xml.append(_tableau([gauche, libelle, valeur], lignes, bordures=False))
-    xml.append(_para(apres=120))
+            vendeur.append(_para(_run(ligne, taille=8.5, couleur=DOUX), apres=25))
+    titre_bloc = [_para(_run(titre, gras=True, taille=23 if titre == 'INVOICE' else 17, couleur=BLEU),
+                         alignement='right', apres=80),
+                  _para(_run(donnees['numero'], taille=12, couleur=DOUX), alignement='right', apres=0)]
+    xml = [_tableau([6600, 3706], [[_cellule(vendeur, 6600), _cellule(titre_bloc, 3706)]], bordures=False),
+           _para(avant=120, apres=200)]
+    destinataire = [_para(_run('Consignee:', gras=True, taille=8, couleur=DOUX), apres=100)]
+    for i, ligne in enumerate((client.get('nom', ''), _adresse(client.get('adresse', '')))):
+        if ligne:
+            destinataire.append(_para(_run(ligne, gras=i == 0, taille=10 if i == 0 else 9,
+                                           couleur=BLEU if i == 0 else None), apres=40))
+    refs = []
+    for libelle, valeur in references:
+        if valeur:
+            refs.append(_para(_run(libelle + ': ', gras=True, taille=8, couleur=DOUX),
+                              _run(valeur, gras=True, taille=10, couleur=BLEU), apres=90))
+    xml.append(_tableau([5700, 300, 4306], [[_cellule(destinataire, 5700, fond=GRIS),
+                    _cellule('', 300), _cellule(refs, 4306, fond=GRIS)]], bordures=False))
+    xml.append(_para(avant=100, apres=180))
     return ''.join(xml)
 
 
 def _fob_en_lettres(donnees):
     return _para(_run('TOTAL FOB IN WORDS: ', gras=True, taille=9),
-                 _run(en_lettres(donnees['fob'], monnaie=True) + ' US DOLLARS', taille=9), avant=120, apres=20)
+                 _run(dollars_us(donnees['fob']), taille=9), avant=120, apres=20)
 
 
 def _signature(licence, compact=False):
     nom = (licence.get('fournisseur') or {}).get('nom', '')
-    return (_para(_run('For ' + nom if nom else 'Authorized signature', gras=True), alignement='right',
-                  avant=200 if compact else 360, apres=500 if compact else 700)
-            + _para(_run('Authorized signature and stamp', taille=8.5), alignement='right', apres=0))
+    return (_para(_run('For ' + nom if nom else 'Authorized signature', gras=True, couleur=BLEU), alignement='right',
+                  avant=200 if compact else 360, apres=40)
+            + _para(_run('Authorized signature and stamp', taille=8, couleur=DOUX), alignement='right', apres=0))
 
 
 def _facture(licence, donnees):
     t, h = _taille(donnees)
-    colonnes = [600, 5106, 1400, 1450, 1750]
-    entete = ['N°', 'GOODS DESCRIPTION', 'QUANTITY', 'U. PRICE', 'TOTAL PRICE']
-    lignes = [[_cellule(e, c, fond=GRIS, gras=True, alignement='center', taille=t) for e, c in zip(entete, colonnes)]]
+    colonnes = [500, 4006, 1500, 700, 1650, 1950]
+    entete = ['N°', 'GOODS DESCRIPTION', 'QUANTITY', 'UNIT', 'U. PRICE\n(USD)', 'TOTAL PRICE\n(USD)']
+    lignes = [[_cellule(e, c, fond=BLEU, gras=True, alignement='center', taille=t, couleur='FFFFFF') for e, c in zip(entete, colonnes)]]
     for i, l in enumerate(donnees['lignes'], 1):
-        valeurs = [(str(i), 'center'), (l['designation'], None), (_quantite(l['quantite']), 'center'),
-                   ('$ ' + _montant(l['prix_unitaire']), 'right'), ('$ ' + _montant(l['valeur']), 'right')]
-        lignes.append([_cellule(v, c, alignement=a, taille=t) for (v, a), c in zip(valeurs, colonnes)])
+        valeurs = [(str(i), 'center'), (l['designation'], None), (_quantite(l['quantite']), 'center'), (_unite(l.get('unite', '')), 'center'),
+                   (_pu(l['prix_unitaire']), 'right'), (_montant(l['valeur']), 'right')]
+        lignes.append([_cellule(v, c, alignement=a, taille=t, fond='F7F9FB' if i % 2 else None) for (v, a), c in zip(valeurs, colonnes)])
     gauche = sum(colonnes[:-1])
     for libelle, valeur in (('TOTAL FOB', donnees['fob']), ('FREIGHT', 0), ('INSURANCE', 0), ('TOTAL CIF', donnees['fob'])):
         final = libelle == 'TOTAL CIF'
         lignes.append([_cellule(libelle, gauche, fusion=len(colonnes) - 1, alignement='right' if final else None,
-                                gras=True, taille=t, fond=GRIS if final else None),
-                       _cellule('$ ' + _montant(valeur), colonnes[-1], alignement='right', gras=True, taille=t,
-                                fond=GRIS if final else None)])
-    references = [('INV NO', donnees['numero']), ('DATE', donnees['date'])]
+                                gras=True, taille=t + 1 if final else t, fond=BLEU if final else None, couleur='FFFFFF' if final else BLEU),
+                       _cellule(_montant(valeur), colonnes[-1], alignement='right', gras=True, taille=t,
+                                fond=BLEU if final else None, couleur='FFFFFF' if final else BLEU)])
+    references = [('INV NO', donnees['numero']), ('DATE', donnees['date']), ('CURRENCY', 'USD'),
+                  ('SHIPMENT', f"All {donnees['total_parts']} parts" if donnees['part'] == 'global'
+                   else f"Part {donnees['part']} of {donnees['total_parts']}")]
     return (_entete('INVOICE', licence, donnees, references)
             + _tableau(colonnes, lignes, hauteur=h, entete=True) + _fob_en_lettres(donnees) + _signature(licence, h < 300))
 
@@ -152,15 +174,15 @@ def _colisage(licence, donnees):
     t, h = _taille(donnees)
     colonnes = [600, 4806, 1400, 1700, 1800]
     entete = ['N°', 'GOODS DESCRIPTION', 'QUANTITY', 'UNIT', 'WEIGHT (KG)']
-    lignes = [[_cellule(e, c, fond=GRIS, gras=True, alignement='center', taille=t) for e, c in zip(entete, colonnes)]]
+    lignes = [[_cellule(e, c, fond=BLEU, gras=True, alignement='center', taille=t, couleur='FFFFFF') for e, c in zip(entete, colonnes)]]
     for i, l in enumerate(donnees['lignes'], 1):
         valeurs = [(str(i), 'center'), (l['designation'], None), (_quantite(l['quantite']), 'center'),
-                   (l.get('unite', ''), 'center'), (nombre(l['poids'], 2), 'right')]
-        lignes.append([_cellule(v, c, alignement=a, taille=t) for (v, a), c in zip(valeurs, colonnes)])
+                   (_unite(l.get('unite', '')), 'center'), (f"{l['poids']:,.2f}", 'right')]
+        lignes.append([_cellule(v, c, alignement=a, taille=t, fond='F7F9FB' if i % 2 else None) for (v, a), c in zip(valeurs, colonnes)])
     lignes.append([_cellule('TOTAL', colonnes[0] + colonnes[1], fusion=2, alignement='right', gras=True, taille=t, fond=GRIS),
                    _cellule(_quantite(donnees['quantites']), colonnes[2], alignement='center', gras=True, taille=t, fond=GRIS),
                    _cellule('', colonnes[3], fond=GRIS),
-                   _cellule(nombre(donnees['poids'], 2), colonnes[4], alignement='right', gras=True, taille=t, fond=GRIS)])
+                   _cellule(f"{donnees['poids']:,.2f}", colonnes[4], alignement='right', gras=True, taille=t, fond=GRIS)])
     references = [('INV NO', donnees['numero']), ('DATE', donnees['date']),
                   ('SHIPMENT', f"All {donnees['total_parts']} parts" if donnees['part'] == 'global'
                    else f"Part {donnees['part']} of {donnees['total_parts']}")]
@@ -173,12 +195,20 @@ def _colisage(licence, donnees):
 
 def creer_facture(licence, donnees):
     """Octets du .docx de la facture commerciale."""
-    return _docx(_facture(licence, donnees))
+    from asydec.declarations.sceau import apposer
+    from asydec.declarations import facture_kinshop
+    if facture_kinshop.correspond(licence):
+        return facture_kinshop.creer(licence, donnees)
+    return apposer(_docx(_facture(licence, donnees)), licence)
 
 
 def creer_packing_list(licence, donnees):
     """Octets du .docx de la packing list."""
-    return _docx(_colisage(licence, donnees))
+    from asydec.declarations.sceau import apposer
+    from asydec.declarations import facture_kinshop
+    if facture_kinshop.correspond(licence):
+        return facture_kinshop.creer(licence, donnees, packing=True)
+    return apposer(_docx(_colisage(licence, donnees)), licence)
 
 
 def _docx(corps):

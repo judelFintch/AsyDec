@@ -8,6 +8,13 @@ Le XML original n'est jamais modifié.
 
 Python 3.10 ou plus récent, avec Tkinter.
 
+Double-cliquez sur **`INSTALLER.command` sur Mac** ou **`INSTALLER.bat` sur Windows**.
+Une connexion Internet est nécessaire : la procédure crée `.venv` si nécessaire et
+télécharge les dépendances de `requirements.txt`, notamment Pillow pour le sceau bleu.
+Elle peut être relancée après une mise à jour pour installer les nouvelles dépendances.
+
+Installation manuelle possible :
+
 ```bash
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
@@ -373,6 +380,14 @@ Dans **Vérifier et générer**, cliquez sur **Enregistrer la proposition** pour
 
 Les statuts sont internes à l'outil. Les anciens exports restent dans **Historique** ; ils ne sont pas ajoutés rétroactivement à cette liste. Les simulations non enregistrées ne sont pas conservées automatiquement.
 
+### Organisation de la liste des modèles
+
+La liste est rangée en sections repliables selon l'avancement : **EN COURS** (en attente de validation), **PRÊTS** (validés, pas encore comparés), **PASSÉS** (comparés à la déclaration réelle, repliée par défaut) et **REJETÉS**. Le filtre **Période** (aujourd'hui, 7 ou 30 derniers jours) se base sur la dernière action ; **Rechercher** filtre par plaque, importateur, numéro ou nom de fichier. La colonne **Dernière action** indique « aujourd'hui », « hier » ou la date.
+
+### Factures Word : date et pages
+
+La date imprimée sur une facture Word ({{DATE_FACTURE}}) est fixée **une seule fois par dossier**, à la première facture : 3 mois avant la date d'émission. Une correction du modèle (« Corriger le dossier… ») ou une nouvelle répartition pour le même camion et le même importateur (dans les 45 jours) garde cette date. Si le modèle Word n'a pas de zone de date, « Date: {{DATE_FACTURE}} » est placé sur la ligne vide prévue juste au-dessus de « INV N° », avec la police de cette ligne. Un saut de section porté par un paragraphe vide (cause d'une page blanche entre packing list et manifeste) est retiré, sans changer police, taille ni interligne. Les factures déjà émises sont mises à niveau au prochain téléchargement, en gardant leurs numéros.
+
 ### Taux de change et écart des taxes globales
 
 Avant les prédictions, l'application demande de confirmer le taux effectivement inscrit dans le XML de base : **1 unité de sa devise = taux CDF**. La confirmation est conservée pendant la session pour ce fichier et ce taux ; un changement demande une nouvelle confirmation. Les recherches utilisant plusieurs références affichent leurs taux respectifs. Aucun taux global supplémentaire n'est configuré par ce mécanisme.
@@ -426,7 +441,7 @@ Quand une plaque a été saisie (**Plaque…**), **Télécharger le XML…** l'i
 
 ### Générer une autre répartition depuis l'étape Articles
 
-À l'étape **Articles**, **Générer une autre répartition** remplit le tableau avec une nouvelle proposition, aux mêmes totaux : poids total, FOB total et colis total des champs, ou ceux du dossier. Les poids sont des kilogrammes entiers, les FOB sont au centime, et les fourchettes et taxes sont contrôlées avant l'affichage. Une répartition déjà proposée ne revient pas. Recommencez autant de fois que nécessaire, puis **Vérifier →**. Rien n'est exporté tant que vous ne cliquez pas sur **Générer le XML**. Si le poids total saisi n'est pas un nombre entier (par exemple après **Reprendre la base**), corrigez-le ou utilisez **Ajuster au poids total…** d'abord. La plaque facultative de l'étape Dossier est conservée.
+À l'étape **Articles**, **Générer une autre répartition** remplit le tableau avec une nouvelle proposition, aux totaux des champs **Poids total (kg)**, **FOB total (USD)** et **Colis total** (ou ceux du dossier s'ils sont vides). Saisissez directement le poids total voulu, sans passer par la page Répartitions : le champ suit aussi la somme des poids tapés ligne par ligne. Les poids sont des kilogrammes entiers, les FOB sont au centime, et les fourchettes et taxes sont contrôlées avant l'affichage. Une répartition déjà proposée ne revient pas. Recommencez autant de fois que nécessaire, puis **Vérifier →**. Rien n'est exporté tant que vous ne cliquez pas sur **Générer le XML**. Si le poids total saisi n'est pas un nombre entier (par exemple après **Reprendre la base**), corrigez-le ou utilisez **Ajuster au poids total…** d'abord. La plaque facultative de l'étape Dossier est conservée.
 
 Sous le tableau des articles, **Total taxes estimé** donne le total des taxes de la répartition affichée (articles + globales), recalculé à chaque modification et à chaque nouvelle répartition, avec le même calcul que **Vérifier et générer**. Il affiche « — » tant que le tableau est incomplet ou hors fourchettes.
 
@@ -590,8 +605,11 @@ Les informations de déclaration saisies correspondent à la **première part**.
 Le numéro DEC est commun à la licence. Pour chaque part suivante, les numéros E
 et liquidation augmentent chacun d’un tirage indépendant de **+1 à +6** par
 rapport à la part précédente. Les préfixes, suffixes et zéros initiaux sont
-conservés. Les cinq premières parts partagent le Q saisi ; au-delà, un second
-numéro Q proposé est commun à toutes les parts restantes (deux Q au maximum).
+conservés. Le numéro Q est partagé par **groupes aléatoires de 2 à 6 parts
+consécutives** (par exemple 4, 3, 3 sur 10 parts), uniquement entre parts à la
+même date de quittance ; le premier groupe porte le Q saisi et chaque groupe
+suivant augmente de **+1 à +6**. Un tirage déjà enregistré qui respecte ces
+règles est conservé.
 La liste des répartitions affiche les numéros et leurs dates côte à côte.
 Les numéros dérivés enregistrés restent stables aux réouvertures et à la
 revalidation des mêmes informations initiales.
