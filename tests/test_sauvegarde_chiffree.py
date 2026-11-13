@@ -37,6 +37,20 @@ class SauvegardeChiffreeTest(TestCase):
                 self.assertIn(b'DONNEES_TRES_PRIVEES', z.read('CONFIG_LOCAL/prive.json'))
         self.assertFalse(chemin_clair.exists())
 
+    def test_vecteur_aes_gcm_scrypt_compatible_avec_premier_format(self):
+        # Vecteur indépendant calculé avec l'implémentation AESGCM de cryptography.
+        # Le sel/nonce fixes sont réservés à ce test de compatibilité, jamais aux exports.
+        source, destination = self.d / 'clair', self.d / 'chiffre'
+        source.write_bytes(b'DONNEES DE TEST PUBLIQUES')
+        with patch.object(C.os, 'urandom', side_effect=[bytes(range(16)), bytes(range(12))]):
+            C.chiffrer(source, destination, MOT_DE_PASSE_TEST)
+        attendu = ('415359444543454e4301000102030405060708090a0b0c0d0e0f000102030405060708090a0b'
+                   '001f07fc99dd1370e26e839ded7e51d9228632baa33e40ecf61755d1e7fbd67acd1d8d1c856f1df635')
+        self.assertEqual(destination.read_bytes().hex(), attendu)
+
+    def test_diagnostic_moteur_chiffrement(self):
+        self.assertTrue(C.verifier_moteur())
+
     def test_mauvais_mot_de_passe_et_fichier_altere_ne_preparent_aucun_import(self):
         fichier = self.exporter()
         contenu = bytearray(fichier.read_bytes())

@@ -30,6 +30,7 @@ def main():
           if (RACINE/'ressources/declaration/Declaration-modele.docx').is_file() else []),
         '--add-data', str(RACINE/'ressources/factures')+';ressources/factures',
         '--collect-all', 'rapidocr_onnxruntime', '--collect-all', 'onnxruntime',
+        '--collect-all', 'Cryptodome',
         '--add-data', f'{RACINE}/asydec/construction.json;asydec',
         '--distpath', str(RACINE/'dist'), '--workpath', str(RACINE/'build'),
         '--specpath', str(RACINE/'packaging'), str(RACINE/'packaging/lancer.py')

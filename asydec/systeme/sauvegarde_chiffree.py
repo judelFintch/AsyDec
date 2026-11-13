@@ -9,9 +9,8 @@ import os
 from pathlib import Path
 import tempfile
 
-from cryptography.exceptions import InvalidTag
-from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
-from cryptography.hazmat.primitives.kdf.scrypt import Scrypt
+from Cryptodome.Cipher import AES
+from Cryptodome.Protocol.KDF import scrypt
 
 from asydec.systeme import transfert
 
@@ -30,7 +29,16 @@ def verifier_mot_de_passe(mot_de_passe):
 
 def _cle(mot_de_passe, sel):
     verifier_mot_de_passe(mot_de_passe)
-    return Scrypt(salt=sel, length=32, n=2**17, r=8, p=1).derive(mot_de_passe.encode('utf-8'))
+    return scrypt(mot_de_passe.encode('utf-8'), sel, key_len=32, N=2**17, r=8, p=1)
+
+
+def verifier_moteur():
+    """Diagnostic de l'application compilée, sans compte ni donnée utilisateur."""
+    cle = _cle(os.urandom(24).hex(), os.urandom(16))
+    nonce = os.urandom(12)
+    cipher = AES.new(cle, AES.MODE_GCM, nonce=nonce, mac_len=16)
+    contenu, tag = cipher.encrypt_and_digest(b'diagnostic AsyDec')
+    return AES.new(cle, AES.MODE_GCM, nonce=nonce, mac_len=16).decrypt_and_verify(contenu, tag) == b'diagnostic AsyDec'
 
 
 def verifier_fichier(source):
@@ -51,8 +59,8 @@ def chiffrer(source, destination, mot_de_passe):
         raise ValueError('Sauvegarde trop volumineuse pour GitHub (maximum 1,9 Go).')
     sel, nonce = os.urandom(16), os.urandom(12)
     entete = MAGIE + sel + nonce
-    chiffreur = Cipher(algorithms.AES(_cle(mot_de_passe, sel)), modes.GCM(nonce)).encryptor()
-    chiffreur.authenticate_additional_data(entete)
+    chiffreur = AES.new(_cle(mot_de_passe, sel), AES.MODE_GCM, nonce=nonce, mac_len=16)
+    chiffreur.update(entete)
     destination.parent.mkdir(parents=True, exist_ok=True)
     fd, temporaire = tempfile.mkstemp(prefix='.chiffrement-', dir=destination.parent)
     try:
@@ -63,9 +71,8 @@ def chiffrer(source, destination, mot_de_passe):
                 taille += len(bloc)
                 if taille > LIMITE:
                     raise ValueError('Sauvegarde trop volumineuse (maximum 1,9 Go).')
-                sortie.write(chiffreur.update(bloc))
-            sortie.write(chiffreur.finalize())
-            sortie.write(chiffreur.tag)
+                sortie.write(chiffreur.encrypt(bloc))
+            sortie.write(chiffreur.digest())
             sortie.flush()
             os.fsync(sortie.fileno())
         os.replace(temporaire, destination)
@@ -101,8 +108,8 @@ def ouvrir(source, mot_de_passe):
             tag = entree.read(16)
             entree.seek(ENTETE)
             restant = source.stat().st_size - ENTETE - 16
-            dechiffreur = Cipher(algorithms.AES(_cle(mot_de_passe, sel)), modes.GCM(nonce, tag)).decryptor()
-            dechiffreur.authenticate_additional_data(entete)
+            dechiffreur = AES.new(_cle(mot_de_passe, sel), AES.MODE_GCM, nonce=nonce, mac_len=16)
+            dechiffreur.update(entete)
             # mkstemp : fichier clair privé, y compris avant la vérification finale.
             fd = os.open(archive, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
             try:
@@ -112,9 +119,9 @@ def ouvrir(source, mot_de_passe):
                         if not bloc:
                             raise ValueError('Sauvegarde chiffrée tronquée.')
                         restant -= len(bloc)
-                        sortie.write(dechiffreur.update(bloc))
-                    sortie.write(dechiffreur.finalize())
-            except InvalidTag as exc:
+                        sortie.write(dechiffreur.decrypt(bloc))
+                    dechiffreur.verify(tag)
+            except ValueError as exc:
                 raise ValueError('Mot de passe incorrect ou sauvegarde endommagée. Aucune donnée chargée.') from exc
         manifeste = transfert.lire(archive)
         if manifeste['type'] != 'complet':

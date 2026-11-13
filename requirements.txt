@@ -1,7 +1,7 @@
 openpyxl>=3.1
 sv-ttk>=2.6  # facultatif : thème moderne
 certifi>=2024.2
-cryptography==48.0.1  # sauvegardes chiffrées AES-256-GCM, version précompilée testée
+pycryptodomex==3.24.2  # AES-256-GCM et scrypt, Windows et Mac Intel/Apple Silicon
 
 tzdata>=2025.2; sys_platform == "win32"
 

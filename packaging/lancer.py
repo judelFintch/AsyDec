@@ -12,9 +12,12 @@ def main():
     if '--diagnostic' in sys.argv:
         from asydec import chemins
         from asydec.systeme.version import courante
+        from asydec.systeme.sauvegarde_chiffree import verifier_moteur
         import tkinter
         import openpyxl
-        print(json.dumps({'version': courante(), 'donnees': str(chemins.RACINE), 'tk': tkinter.TkVersion}))
+        if not verifier_moteur():
+            raise RuntimeError('Le diagnostic du chiffrement a échoué.')
+        print(json.dumps({'version': courante(), 'donnees': str(chemins.RACINE), 'tk': tkinter.TkVersion, 'chiffrement': True}))
         sys.exit(0)
 
     if '--test-interface' in sys.argv:
