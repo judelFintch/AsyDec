@@ -7,6 +7,7 @@ import json
 import os
 from pathlib import Path, PurePosixPath
 import platform
+import posixpath
 import re
 import shutil
 import ssl
@@ -158,7 +159,7 @@ def verifier_zip(chemin):
                 raise ValueError('Chemin inattendu dans la mise à jour.')
             if (i.external_attr >> 16) & 0o170000 == 0o120000:
                 cible=z.read(i).decode('utf-8')
-                chemin_relatif=os.path.normpath(str(p.parent / cible))
+                chemin_relatif=posixpath.normpath(str(p.parent / cible))
                 if PurePosixPath(cible).is_absolute() or not chemin_relatif.startswith('AsyDec.app/'):
                     raise ValueError('Lien sortant du .app refusé.')
 
