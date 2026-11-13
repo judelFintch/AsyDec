@@ -8,20 +8,26 @@ from tkinter import filedialog, messagebox, ttk
 from asydec.systeme import espace_travail
 from asydec.ui import theme
 
-APERCU = """1 - IMPORTATEURS/<IMPORTATEUR>/
+APERCU = """1 - FRIPERIE/<IMPORTATEUR>/
     1 - BASES SYDONIA          XML de base reçus
     2 - DECLARATIONS GENEREES  sorties du générateur
     3 - XML VALIDES            modèles validés téléchargés
     4 - DECLARATIONS REELLES   déclarations SYDONIA comparées
     5 - PDF        6 - FACTURES
-2 - RAPPORTS/AAAA-MM/          exports Excel
-3 - A TRIER/                   fichiers anciens non reconnus
-4 - SAUVEGARDES/"""
+2 - DIVERS/<IMPORTATEUR>/      même organisation
+3 - DOCUMENTS FINAUX/<DEC>/    un dossier par licence
+4 - RAPPORTS/AAAA-MM/          exports Excel
+5 - A TRIER/                   fichiers anciens non reconnus
+6 - SAUVEGARDES/
+7 - TRANSFERTS/                1 - EXPORTS · 2 - IMPORTS (fichiers .asydec)"""
 
 
 def ouvrir_dans_finder(chemin):
     if sys.platform == 'darwin':
         subprocess.run(['open', str(chemin)], check=False)
+    elif sys.platform == 'win32':
+        import os
+        os.startfile(str(chemin))  # Explorateur Windows
 
 
 class FenetreEspaceTravail(tk.Toplevel):

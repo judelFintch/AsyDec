@@ -17,7 +17,8 @@ Choisi par l'utilisateur au premier lancement (Documents/AsyDec par défaut), il
     │   └── 3 - XML SYDONIA/
     ├── 4 - RAPPORTS/AAAA-MM/             exports Excel (comparaisons, ratios, études, références)
     ├── 5 - A TRIER/                      fichiers anciens dont l'importateur n'a pas pu être reconnu
-    └── 6 - SAUVEGARDES/
+    ├── 6 - SAUVEGARDES/
+    └── 7 - TRANSFERTS/                  fichiers .asydec : 1 - EXPORTS (envoyés), 2 - IMPORTS (reçus)
 
 L'ancienne organisation (1 - IMPORTATEURS, 2 - RAPPORTS, 3 - A TRIER, 4 - SAUVEGARDES) est migrée
 automatiquement : les dossiers sont renommés, rien n'est effacé.
@@ -40,8 +41,10 @@ DEFAUT = Path.home() / 'Documents' / 'AsyDec'
 
 FRIPERIE, DIVERS, DOCUMENTS_FINAUX = '1 - FRIPERIE', '2 - DIVERS', '3 - DOCUMENTS FINAUX'
 RAPPORTS, A_TRIER, SAUVEGARDES = '4 - RAPPORTS', '5 - A TRIER', '6 - SAUVEGARDES'
+TRANSFERTS = '7 - TRANSFERTS'
+TRANSFERTS_SENS = {'exports': '1 - EXPORTS', 'imports': '2 - IMPORTS'}
 IMPORTATEURS = FRIPERIE  # ancien nom, gardé pour les appels existants
-DOSSIERS = (FRIPERIE, DIVERS, DOCUMENTS_FINAUX, RAPPORTS, A_TRIER, SAUVEGARDES)
+DOSSIERS = (FRIPERIE, DIVERS, DOCUMENTS_FINAUX, RAPPORTS, A_TRIER, SAUVEGARDES, TRANSFERTS)
 MODULES = {'friperie': FRIPERIE, 'divers': DIVERS, 'documents_finaux': DOCUMENTS_FINAUX}
 # Organisation précédente du dossier de travail → nouveaux noms.
 ANCIENS_DOSSIERS = {'1 - IMPORTATEURS': FRIPERIE, '2 - RAPPORTS': RAPPORTS,
@@ -77,6 +80,9 @@ Tous les fichiers produits par AsyDec sont rangés ici, un dossier par module.
 4 - RAPPORTS/AAAA-MM/          exports Excel, classés par mois
 5 - A TRIER/                   anciens fichiers dont l'importateur n'a pas été reconnu
 6 - SAUVEGARDES/
+7 - TRANSFERTS/                 fichiers .asydec (Paramètres › Transfert vers une autre machine)
+    1 - EXPORTS                exports créés ici (kits envoyés, données pour un nouvel ordinateur)
+    2 - IMPORTS                copie datée de chaque fichier .asydec importé
 
 Ne renommez pas ces dossiers : AsyDec les recrée au besoin, mais ne retrouverait plus les fichiers
 rangés sous un autre nom.
@@ -95,6 +101,16 @@ def racine(fichier=None):
     return Path(valeur) if valeur else None
 
 
+def dossier_transferts(sens, fichier=None):
+    """7 - TRANSFERTS/1 - EXPORTS ou 2 - IMPORTS du dossier de travail (créé) ; None sans dossier de travail."""
+    base = racine(fichier)
+    if base is None or not base.is_dir():
+        return None
+    dossier = base / TRANSFERTS / TRANSFERTS_SENS[sens]
+    dossier.mkdir(parents=True, exist_ok=True)
+    return dossier
+
+
 def preparer(dossier):
     """Crée l'arborescence (sans rien effacer) et le fichier LISEZMOI. Renvoie le chemin absolu."""
     dossier = Path(dossier).expanduser().resolve()
@@ -105,6 +121,8 @@ def preparer(dossier):
     migrer(dossier)
     for nom in DOSSIERS:
         (dossier / nom).mkdir(parents=True, exist_ok=True)
+    for sous in TRANSFERTS_SENS.values():
+        (dossier / TRANSFERTS / sous).mkdir(exist_ok=True)
     lisezmoi = dossier / 'LISEZMOI.txt'
     # Le LISEZMOI d'AsyDec est tenu à jour ; un fichier écrit par l'utilisateur n'est pas touché.
     if not lisezmoi.exists() or (lisezmoi.read_text(encoding='utf-8', errors='ignore').startswith('AsyDec — dossier de travail')

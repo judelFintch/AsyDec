@@ -65,6 +65,7 @@ class Transfert(unittest.TestCase):
         with ZipFile(kit) as z:
             noms = z.namelist()
         self.assertFalse(any(n.startswith('CONFIG_LOCAL') for n in noms))
+        self.assertNotIn(str(source), ZipFile(kit).read('manifest.json').decode())  # aucun chemin de la machine
         self.assertEqual(resume['modeles_word'], 1)
         collegue = self.d / 'collegue'
         bilan = transfert.importer_modeles(kit, collegue)
@@ -98,6 +99,19 @@ class Transfert(unittest.TestCase):
         transfert.appliquer_en_attente(cible)
         self.assertTrue((cible / 'CONFIG_LOCAL/compte.json').is_file())
         self.assertTrue((outils / 'CONFIG_LOCAL/compte.json').is_file())  # source jamais modifiée
+
+    def test_copie_datee_dans_imports(self):
+        source = self.d / 'source'
+        _machine(source)
+        kit, _ = transfert.exporter(self.d / 'kit', kit=True, racine=source)
+        imports = self.d / '7 - TRANSFERTS' / '2 - IMPORTS'
+        premiere = transfert.archiver_import(kit, imports)
+        seconde = transfert.archiver_import(kit, imports)
+        self.assertNotEqual(premiere, seconde)
+        self.assertTrue(premiere.name.endswith(' - kit.asydec'))
+        self.assertEqual(transfert.archiver_import(premiere, imports), premiere)  # déjà rangé : pas de copie
+        self.assertEqual(len(list(imports.iterdir())), 2)
+        self.assertIsNone(transfert.archiver_import(source, imports))  # ancien dossier : pas copié
 
 
 if __name__ == '__main__':

@@ -164,7 +164,8 @@ def exporter(destination, kit=False, avec_sauvegardes=False, racine=None):
         resume = _resume(temp, kit)
         manifeste = dict(format=FORMAT, type='kit' if kit else 'complet', cree_le=datetime.now().astimezone().isoformat(),
                          application=courante().get('version'), systeme=f'{platform.system()} {platform.machine()}',
-                         racine=str(racine), avec_sauvegardes=bool(avec_sauvegardes and not kit),
+                         # Le kit part chez une autre personne : aucun chemin de cette machine (nom d'utilisateur).
+                         racine=None if kit else str(racine), avec_sauvegardes=bool(avec_sauvegardes and not kit),
                          resume=resume, mediatheque=mediatheque, fichiers=fichiers)
         destination.parent.mkdir(parents=True, exist_ok=True)
         temporaire = destination.with_name(destination.name + '.tmp')
@@ -207,6 +208,24 @@ def _resume(dossier, kit):
 LIBELLES = dict(modeles_word='modèles de facture Word', xml_reference='XML de référence', xml_licences='XML de licence',
                 xml_mediatheque='XML de médiathèque', dossiers_generes='dossiers générés', factures_emises='factures émises',
                 numeros_reserves='numéros réservés', licences='licences')
+
+
+def archiver_import(source, dossier):
+    """Copie datée d'un fichier .asydec importé dans dossier (7 - TRANSFERTS/2 - IMPORTS) ; renvoie la copie.
+    Un ancien dossier OUTILS n'est pas copié (trop volumineux) : None."""
+    source = Path(source)
+    if dossier is None or not source.is_file():
+        return None
+    dossier = Path(dossier)
+    if source.resolve().parent == dossier.resolve():
+        return source  # déjà rangé ici
+    dossier.mkdir(parents=True, exist_ok=True)
+    nom = source.name if source.suffix == EXTENSION else source.name + EXTENSION
+    cible, n = dossier / f'{datetime.now():%Y-%m-%d %Hh%M} - {nom}', 2
+    while cible.exists():
+        cible, n = dossier / f'{datetime.now():%Y-%m-%d %Hh%M} - {Path(nom).stem} ({n}){EXTENSION}', n + 1
+    shutil.copy2(source, cible)
+    return cible
 
 
 def decrire(resume):
