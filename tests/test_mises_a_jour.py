@@ -105,7 +105,8 @@ class MisesAJourWindowsTest(TestCase):
         assets = [{'name': nom, 'url': M.API + '/releases/assets/' + str(i)} for i, nom in enumerate(
             ['AsyDec-windows-x64.json', 'AsyDec-Setup-windows-x64.exe'])]
         meta = dict(architecture='AMD64', sha256='a'*64, revision='b'*40, build=7, version='1.0.7')
-        versions = [dict(assets=[], tag_name='macos-99'), dict(assets=assets, prerelease=True),
+        anciens = [{'name': a['name'], 'url': a['url'] + '-ancien'} for a in assets]
+        versions = [dict(assets=anciens, tag_name='windows-5'), dict(assets=[], tag_name='macos-99'), dict(assets=assets, prerelease=True),
                     dict(assets=assets, draft=True), dict(assets=assets, tag_name='windows-7')]
         with patch.object(M.platform, 'machine', return_value='AMD64'), \
              patch.object(M, 'courante', return_value=dict(revision='c'*40, build=6)), \

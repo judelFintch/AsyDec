@@ -106,20 +106,25 @@ def verifier(token=None):
     try:
         if windows:
             # Les publications Windows portent --latest=false : /latest renvoie le Mac.
-            release = None
+            candidates = []
             for page in range(1, 11):
                 with _ouvrir(API+f'/releases?per_page=100&page={page}', token) as r:
                     versions = json.loads(r.read(10_000_000))
                 for candidate in versions:
                     noms = {a['name'] for a in candidate.get('assets', [])}
                     if not candidate.get('draft') and not candidate.get('prerelease') and {nom+'.json', nom_binaire} <= noms:
-                        release = candidate
-                        break
-                if release is not None or len(versions) < 100:
+                        candidates.append(candidate)
+                if len(versions) < 100:
                     break
-            if release is None:
+            if not candidates:
                 raise ValueError('Aucune version Windows publiée accessible pour cet ordinateur. '
                                  'Si le dépôt est privé, renseignez un jeton GitHub en lecture seule.')
+            # Une ancienne release republiée peut remonter dans la liste GitHub.
+            # Les tags sont produits par le workflow Windows avec son numéro de construction.
+            def ordre(candidate):
+                tag = re.fullmatch(r'windows-([0-9]+)', candidate.get('tag_name', ''))
+                return (int(tag[1]) if tag else -1, candidate.get('published_at') or '')
+            release = max(candidates, key=ordre)
         else:
             with _ouvrir(API+'/releases/latest',token) as r:
                 release=json.loads(r.read(2_000_000))
