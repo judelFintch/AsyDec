@@ -42,6 +42,10 @@ class ErreurCompte(ValueError):
     pass
 
 
+class CompteIllisible(ErreurCompte):
+    pass
+
+
 def _ecrire_json(chemin, contenu):
     chemin = Path(chemin)
     chemin.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -75,7 +79,8 @@ def _lire_compte(configuration=None):
             raise ValueError('Format de compte non reconnu')
         return compte
     except (OSError, ValueError, KeyError, TypeError) as exc:
-        raise ErreurCompte('Le compte local est illisible. Restaurez une copie du compte ; il ne sera pas recréé automatiquement.') from exc
+        raise CompteIllisible('Le compte local est illisible. Sur l’écran de connexion, choisissez « Créer un compte » '
+                              'pour le remplacer après sauvegarde, sans effacer vos données.') from exc
 
 
 def _verifier_mot_de_passe(mot_de_passe):
@@ -98,8 +103,12 @@ def creer_compte(identifiant, mot_de_passe, configuration=None):
               'iterations': ITERATIONS, 'sel': sel.hex(), 'empreinte': _empreinte(mot_de_passe, sel),
               'echecs': 0, 'bloque_jusqua': 0, 'cree_utc': datetime.datetime.now(datetime.timezone.utc).isoformat()}
     configuration.mkdir(parents=True, exist_ok=True, mode=0o700)
+    _creer_fichier_compte(configuration / 'compte.json', compte)
+    return identifiant
+
+
+def _creer_fichier_compte(chemin, compte):
     # Création exclusive : un lancement concurrent ne peut pas remplacer un compte existant.
-    chemin = configuration / 'compte.json'
     fd = os.open(chemin, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     try:
         with os.fdopen(fd, 'w', encoding='utf-8') as fichier:
@@ -109,7 +118,60 @@ def creer_compte(identifiant, mot_de_passe, configuration=None):
     except Exception:
         chemin.unlink(missing_ok=True)
         raise
-    return identifiant
+
+
+def recreer_compte_illisible(identifiant, mot_de_passe, configuration=None):
+    """Récupération explicite : archive le seul compte corrompu, conserve toutes les données.
+
+    Un compte lisible ne peut jamais être remplacé par cette procédure, même si
+    son mot de passe est inconnu ou s'il est temporairement bloqué.
+    Renvoie (identifiant, chemin de la copie du compte illisible).
+    """
+    configuration = Path(configuration) if configuration is not None else CONFIGURATION
+    chemin = configuration / 'compte.json'
+    if configuration.is_symlink() or chemin.is_symlink() or not chemin.is_file():
+        raise ErreurCompte('Récupération refusée : le compte doit être un fichier local existant.')
+    verrou = configuration / '.recreation-compte.lock'
+    try:
+        fd = os.open(verrou, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    except FileExistsError as exc:
+        raise ErreurCompte('Une récupération de compte est déjà en cours. Fermez les autres fenêtres AsyDec.') from exc
+    os.close(fd)
+    try:
+        try:
+            _lire_compte(configuration)
+        except CompteIllisible:
+            pass
+        else:
+            raise ErreurCompte('Un compte lisible existe déjà. Connectez-vous avec ce compte ; il ne sera pas remplacé.')
+        original = chemin.read_bytes()
+        # Valide et calcule le nouveau compte avant de déplacer quoi que ce soit.
+        with tempfile.TemporaryDirectory(prefix='.nouveau-compte-', dir=configuration) as temporaire:
+            utilisateur = creer_compte(identifiant, mot_de_passe, temporaire)
+            nouveau = _lire_compte(temporaire)
+        if chemin.is_symlink() or chemin.read_bytes() != original:
+            raise ErreurCompte('Le compte a changé pendant la récupération. Relancez la connexion.')
+        date = datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%d-%H%M%S')
+        sauvegarde = configuration / f'compte-illisible-{date}-{secrets.token_hex(4)}.json'
+        os.replace(chemin, sauvegarde)
+        try:
+            _creer_fichier_compte(chemin, nouveau)
+        except Exception:
+            # N'écrase jamais un compte créé entre-temps par un autre lancement.
+            if not chemin.exists():
+                try:
+                    fd = os.open(chemin, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+                except FileExistsError:
+                    pass
+                else:
+                    with os.fdopen(fd, 'wb') as fichier:
+                        fichier.write(original)
+                        fichier.flush()
+                        os.fsync(fichier.fileno())
+            raise
+        return utilisateur, sauvegarde
+    finally:
+        verrou.unlink(missing_ok=True)
 
 
 def authentifier(identifiant, mot_de_passe, configuration=None, maintenant=None):

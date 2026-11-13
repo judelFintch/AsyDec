@@ -74,6 +74,68 @@ class GestionLocaleTest(unittest.TestCase):
         with self.assertRaises(local.ErreurCompte):
             local.authentifier('Administrateur', MDP, self.config)
 
+    def test_recreation_compte_illisible_archive_original_et_preserve_donnees(self):
+        original, export = self.preparer_donnees()
+        ancien = b'\xffcompte illisible'
+        (self.config / 'compte.json').write_bytes(ancien)
+        avant = {p: p.read_bytes() for p in self.racine.rglob('*') if p.is_file() and p.name != 'compte.json'}
+        utilisateur, sauvegarde = local.recreer_compte_illisible('NouveauCompte', MDP, self.config)
+        self.assertEqual(utilisateur, 'NouveauCompte')
+        self.assertEqual(sauvegarde.read_bytes(), ancien)
+        self.assertTrue(local.authentifier(utilisateur, MDP, self.config))
+        for p, contenu in avant.items():
+            self.assertEqual(p.read_bytes(), contenu)
+        self.assertTrue(original.exists())
+        self.assertTrue(export.exists())
+        self.assertFalse((self.config / '.recreation-compte.lock').exists())
+
+    def test_recreation_refuse_compte_lisible_meme_bloque(self):
+        for _ in range(5):
+            local.authentifier('Administrateur', 'incorrect', self.config, maintenant=1000)
+        avant = (self.config / 'compte.json').read_bytes()
+        with self.assertRaisesRegex(local.ErreurCompte, 'lisible existe'):
+            local.recreer_compte_illisible('AutreCompte', MDP, self.config)
+        self.assertEqual((self.config / 'compte.json').read_bytes(), avant)
+        self.assertEqual(list(self.config.glob('compte-illisible-*')), [])
+
+    def test_recreation_valide_identifiants_avant_archivage(self):
+        chemin = self.config / 'compte.json'
+        chemin.write_text('compte corrompu')
+        for identifiant, mdp in (('ab', MDP), ('AutreCompte', 'court')):
+            with self.assertRaises(local.ErreurCompte):
+                local.recreer_compte_illisible(identifiant, mdp, self.config)
+            self.assertEqual(chemin.read_text(), 'compte corrompu')
+            self.assertEqual(list(self.config.glob('compte-illisible-*')), [])
+
+    def test_echec_recreation_restaure_compte_illisible_et_conserve_copie(self):
+        chemin = self.config / 'compte.json'
+        chemin.write_text('compte corrompu')
+        ecrire = local._creer_fichier_compte
+        def echec(cible, compte):
+            if cible == chemin:
+                raise OSError('écriture refusée')
+            return ecrire(cible, compte)
+        with patch.object(local, '_creer_fichier_compte', side_effect=echec):
+            with self.assertRaises(OSError):
+                local.recreer_compte_illisible('NouveauCompte', MDP, self.config)
+        self.assertEqual(chemin.read_text(), 'compte corrompu')
+        self.assertEqual(len(list(self.config.glob('compte-illisible-*'))), 1)
+
+    def test_recreation_ne_remplace_pas_un_compte_cree_entretemps(self):
+        chemin = self.config / 'compte.json'
+        chemin.write_text('compte corrompu')
+        ecrire = local._creer_fichier_compte
+        def concurrent(cible, compte):
+            if cible == chemin:
+                chemin.write_text('autre lancement')
+                raise FileExistsError('compte concurrent')
+            return ecrire(cible, compte)
+        with patch.object(local, '_creer_fichier_compte', side_effect=concurrent):
+            with self.assertRaises(FileExistsError):
+                local.recreer_compte_illisible('NouveauCompte', MDP, self.config)
+        self.assertEqual(chemin.read_text(), 'autre lancement')
+        self.assertEqual(next(self.config.glob('compte-illisible-*')).read_text(), 'compte corrompu')
+
     def test_parametres_persistants_et_validation(self):
         choix = dict(local.DEFAUTS, organisation='Agence test', memoriser_recents=False,
                      dossier_xml=str(self.racine), page_demarrage='parametres', verrouillage_minutes=3)

@@ -726,7 +726,10 @@ def main():
         from asydec.ui.import_installation import appliquer_en_attente
         appliquer_en_attente()
         if chemins.DEV and local.compte_existe():
-            utilisateur = local.identifiant_compte()  # mode dev : session ouverte sans mot de passe
+            try:
+                utilisateur = local.identifiant_compte()  # mode dev : session ouverte sans mot de passe
+            except local.CompteIllisible:
+                utilisateur = demander_connexion()
         else:
             utilisateur = demander_connexion()
         if utilisateur is None:

@@ -62,7 +62,14 @@ jobs:
           REVISION: ${{ github.sha }}
         run: |
           cat > notes.md <<'NOTES'
-          ## Quel fichier télécharger ?
+          ## Connexion et compte illisible
+
+          Sur l’écran de connexion, cliquez sur **Créer un compte** si aucun compte n’existe ou si son fichier est illisible.
+          Le fichier illisible est sauvegardé avant remplacement, après confirmation ; vos dossiers et factures restent conservés.
+          Un compte lisible existant reste protégé. Le compte est local à chaque ordinateur : utilisez un export `.asydec`
+          depuis **Paramètres › Transfert** pour reprendre les données d’une autre machine.
+
+          ## Installateur Mac
 
           | Votre Mac | Fichier à télécharger |
           |---|---|

@@ -18,6 +18,21 @@ ou `INSTALLER.bat` (Windows), avec Python 3.10 ou plus récent et une connexion 
 
 Python n’est pas nécessaire sur le poste destinataire. Les données personnelles ne sont pas incluses dans les installateurs. Les données de l’application restent dans `%LOCALAPPDATA%\AsyDec` sur Windows et `~/Library/Application Support/AsyDec` sur Mac. La désinstallation ne supprime pas ces données.
 
+## Connexion sur une autre machine ou compte illisible
+
+Le compte est local à chaque ordinateur. Sur l’écran de connexion, **Créer un compte**
+permet de créer son identifiant et son mot de passe (au moins 8 caractères) s’il n’existe
+pas encore de compte. Si le fichier du compte est illisible, cette même action propose
+de conserver une copie datée dans `CONFIG_LOCAL`, puis de créer un nouveau compte,
+après confirmation. Les dossiers, factures, modèles et numéros réservés sont conservés.
+Un compte lisible existant ne peut pas être remplacé par ce bouton.
+
+Créer un compte ne synchronise pas les ordinateurs. Pour reprendre les informations
+de l’ancienne machine, utiliser le transfert `.asydec` décrit ci-dessous ; un import complet
+reprend aussi le compte de l’export. Si ce compte est illisible, revenir à **Créer un compte**.
+Cette fonction est disponible dans les nouvelles releases Windows et Mac ; installer
+la nouvelle version sur chaque machine pour voir le bouton.
+
 ## Mises à jour Windows
 
 Dans **Mises à jour Windows**, cliquer sur **Vérifier les mises à jour**, puis
