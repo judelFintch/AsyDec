@@ -60,12 +60,13 @@ class FacturesTest(TestCase):
             F.inspecter(document('<w:r><w:t>{{NUMERO_FACTURE}}{{POIDS}}{{COLIS}}{{FOB}}{{INCONNU}}</w:t></w:r>'))
 
     def test_totaux_numero_unique_et_retelechargement(self):
+        original = self.source.read_bytes()
         with patch('asydec.declarations.modeles_generes.detail', return_value=self.modele):
             a, b = self.generer(), self.generer(43)
         self.assertNotEqual(a['numero'], b['numero'])
         self.assertEqual(F.lire(a['id'], self.base)['contenu'], a['contenu'])
         self.assertEqual(len(F.lister_factures(42, self.base)), 1)
-        self.assertEqual(self.source.read_bytes(), document())
+        self.assertEqual(self.source.read_bytes(), original)
         with ZipFile(BytesIO(a['contenu'])) as z:
             xml = z.read('word/document.xml').decode()
             self.assertIn('1 234,50', xml)
