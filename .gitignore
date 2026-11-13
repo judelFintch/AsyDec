@@ -44,6 +44,8 @@ asydec/construction.json
 *.db-shm
 *.db-journal
 *.zip
+*.asydec
+*.asydec.enc
 *.p12
 *.pfx
 *.pem

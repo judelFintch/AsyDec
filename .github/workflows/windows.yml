@@ -19,7 +19,7 @@ jobs:
           architecture: x64
       - run: python -m pip install -r requirements.txt 'pyinstaller==6.22.3'
       - name: Tester les mises à jour Mac et Windows
-        run: python -m unittest tests.test_mises_a_jour
+        run: python -m unittest tests.test_mises_a_jour tests.test_transfert tests.test_sauvegarde_chiffree tests.test_ui_sauvegarde_chiffree
       - name: Tester la création et la récupération du compte
         run: >-
           python -m unittest tests.test_connexion
@@ -85,6 +85,23 @@ jobs:
           Le fichier illisible est sauvegardé avant remplacement, après confirmation ; vos dossiers et factures restent conservés.
           Un compte lisible existant reste protégé. Le compte est local à chaque ordinateur : utilisez un export `.asydec`
           depuis **Paramètres › Transfert** pour reprendre les données d’une autre machine.
+
+          ## Base d’installation pour une nouvelle machine
+
+          Sur le poste déjà équipé : **Paramètres › Transfert › Exporter une base d’installation**.
+          Le fichier `.asydec` inclut les modèles Word CVI/BL, déclaration DEC, facture et packing list disponibles,
+          la bibliothèque de factures et les XML. Sur le nouveau poste, importez-le au premier démarrage ou avec
+          **Importer des modèles**. Les modèles sont ensuite utilisés automatiquement et conservés lors des mises à jour.
+          Cette base privée se copie séparément de l’installateur ; elle ne contient pas le compte de l’ancienne machine.
+
+          ## Sauvegarde complète chiffrée via GitHub
+
+          **Paramètres › Sauvegarde chiffrée** : créez un export complet avec un mot de passe (12 caractères minimum),
+          puis publiez le fichier `.asydec.enc` avec un jeton GitHub disposant de Contents en écriture.
+          Sur l’autre poste, recherchez les sauvegardes dans ce même écran, saisissez le mot de passe, puis téléchargez et chargez.
+          Le contenu est chiffré avant l’envoi ; aucun mot de passe n’est enregistré dans le code ou dans la release.
+          Sur un dépôt public, le fichier chiffré reste téléchargeable ; le mot de passe est indispensable pour le déchiffrer.
+          Les mises à jour du logiciel ne remplacent pas les données automatiquement.
           NOTES
           echo "Révision : ${REVISION}" >> notes.md
           gh release create "windows-${CONSTRUCTION}" distribution/* --target "$REVISION" --title "AsyDec Windows 1.0.${CONSTRUCTION}" --notes-file notes.md --latest=false

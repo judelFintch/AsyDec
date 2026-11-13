@@ -24,11 +24,12 @@ import tempfile
 from zipfile import ZipFile, ZIP_DEFLATED
 
 from asydec import chemins
+from asydec.systeme import modeles_documents
 
-FORMAT = 1
+FORMAT = 2
 EXTENSION = '.asydec'
 COMPLET = ('DONNEES', 'CONFIG_LOCAL', 'MODELES_XML', 'XML_LICENCES', 'ETUDES_XML', 'SIMULATIONS',
-           'SAISIE.xlsx', 'registre.json')
+           'SAISIE.xlsx', 'registre.json', modeles_documents.DOSSIER)
 SAUVEGARDES = 'SAUVEGARDES'
 SAUVEGARDES_MANUELLES = 'DONNEES/sauvegardes_manuelles'
 MEDIATHEQUE = 'MEDIATHEQUE'
@@ -124,6 +125,15 @@ def _mediatheque(racine_ou_dossier):
 # Export
 # ---------------------------------------------------------------------------------------------------------
 
+def _copier_modeles_documents(racine, cible):
+    # Un ancien OUTILS peut contenir ses modèles dans ressources ; une application
+    # compilée les livre ailleurs, dans CODE. Les copies personnelles ont priorité.
+    code = chemins.CODE if racine.resolve() == chemins.RACINE.resolve() else racine
+    for cle, (relatif, _) in modeles_documents.MODELES.items():
+        source = modeles_documents.chemin(cle, racine=racine, code=code)
+        if source.is_file():
+            _copier(source, cible / modeles_documents.DOSSIER / relatif)
+
 def exporter(destination, kit=False, avec_sauvegardes=False, racine=None):
     """Crée le fichier .asydec ; renvoie (chemin, résumé)."""
     racine = Path(racine) if racine is not None else chemins.RACINE
@@ -159,6 +169,7 @@ def exporter(destination, kit=False, avec_sauvegardes=False, racine=None):
             exclus = () if avec_sauvegardes else (SAUVEGARDES_MANUELLES,)
             for nom in COMPLET + ((SAUVEGARDES,) if avec_sauvegardes else ()):
                 _copier_element(racine, nom, temp, exclus)
+        _copier_modeles_documents(racine, temp)
         fichiers = {p.relative_to(temp).as_posix(): _sha(p) for p in sorted(temp.rglob('*')) if p.is_file()}
         from asydec.systeme.version import courante
         resume = _resume(temp, kit)
@@ -191,6 +202,8 @@ def _resume(dossier, kit):
     d = Path(dossier)
     resume = dict(
         modeles_word=_compter(d / 'DONNEES/factures.db', 'SELECT COUNT(*) FROM gabarits WHERE retire IS NULL'),
+        modeles_documents=sum((d / modeles_documents.DOSSIER / relatif).is_file()
+                             for relatif, _ in modeles_documents.MODELES.values()),
         xml_reference=len(list((d / 'MODELES_XML').glob('*.xml'))) if (d / 'MODELES_XML').is_dir() else 0,
         xml_licences=len(list((d / 'XML_LICENCES').glob('*.xml'))) if (d / 'XML_LICENCES').is_dir() else 0)
     if kit:
@@ -206,6 +219,7 @@ def _resume(dossier, kit):
 
 
 LIBELLES = dict(modeles_word='modèles de facture Word', xml_reference='XML de référence', xml_licences='XML de licence',
+                modeles_documents='modèles Word CVI/BL, déclaration et documents commerciaux',
                 xml_mediatheque='XML de médiathèque', dossiers_generes='dossiers générés', factures_emises='factures émises',
                 numeros_reserves='numéros réservés', licences='licences')
 
@@ -246,7 +260,7 @@ def lire(source):
             manifeste = json.loads(z.read(MANIFESTE))
         except KeyError:
             raise ValueError('Ce fichier n’est pas un export AsyDec.') from None
-    if manifeste.get('format') != FORMAT or manifeste.get('type') not in ('complet', 'kit'):
+    if manifeste.get('format') not in (1, FORMAT) or manifeste.get('type') not in ('complet', 'kit'):
         raise ValueError('Format d’export AsyDec non pris en charge par cette version.')
     return manifeste
 
@@ -287,6 +301,7 @@ def _charger(source, cible):
                              'Sélectionnez l’ancien dossier OUTILS ou « Application Support/AsyDec ».')
         for nom in COMPLET:
             _copier_element(source, nom, cible)
+        _copier_modeles_documents(source, cible)
         return dict(format=FORMAT, type='complet', racine=str(source), resume=_resume(cible, False), mediatheque=[])
     return _extraire(source, cible)
 
@@ -438,12 +453,13 @@ def appliquer_en_attente(racine=None):
     mise_de_cote = racine / SAUVEGARDES / f'avant-import-{date}'
     mise_de_cote.mkdir(parents=True, exist_ok=True)
     deplaces, installes = [], []
+    elements = [nom for nom in COMPLET if nom != modeles_documents.DOSSIER or (attente / nom).exists()]
     try:
-        for nom in COMPLET:
+        for nom in elements:
             if (racine / nom).exists():
                 os.replace(racine / nom, mise_de_cote / nom)
                 deplaces.append(nom)
-        for nom in COMPLET:
+        for nom in elements:
             if (attente / nom).exists():
                 os.replace(attente / nom, racine / nom)
                 installes.append(nom)
@@ -476,7 +492,17 @@ def importer_modeles(source, racine=None, conn_references=None):
         temp = Path(temp)
         manifeste = _charger(source, temp)
         _verifier_bases(temp)
-        bilan = dict(modeles_word=0, xml_reference=0, xml_licences=0, xml_mediatheque=0, deja_presents=0)
+        bilan = dict(modeles_word=0, modeles_documents=0, xml_reference=0, xml_licences=0, xml_mediatheque=0, deja_presents=0)
+        for cle, (relatif, _) in modeles_documents.MODELES.items():
+            fichier = temp / modeles_documents.DOSSIER / relatif
+            if not fichier.is_file():
+                continue
+            cible = racine / modeles_documents.DOSSIER / relatif
+            if cible.exists():
+                bilan['deja_presents'] += 1
+                continue
+            modeles_documents.enregistrer(cle, fichier, racine=racine)
+            bilan['modeles_documents'] += 1
         # 1. Bibliothèque « Modèles de facture »
         source_db = temp / 'DONNEES/factures.db'
         if source_db.is_file():

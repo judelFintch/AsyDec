@@ -15,7 +15,6 @@ from io import BytesIO
 import math
 from pathlib import Path
 import re
-import sys
 import xml.etree.ElementTree as ET
 from xml.dom import minidom
 from zipfile import ZipFile, BadZipFile
@@ -201,8 +200,8 @@ def tenir(paragraphe, lignes):
 
 
 def modele_defaut():
-    base = Path(getattr(sys, '_MEIPASS', Path(__file__).resolve().parents[2]))
-    return base / 'ressources' / 'declaration' / 'Declaration-modele.docx'
+    from asydec.systeme import modeles_documents
+    return modeles_documents.chemin('declaration')
 
 
 # ---------------------------------------------------------------------------

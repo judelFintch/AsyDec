@@ -37,6 +37,16 @@ class Redirection(HTTPRedirectHandler):
         return nouvelle
 
 
+def contexte_ssl():
+    contexte = ssl.create_default_context()
+    try:
+        import certifi
+        contexte.load_verify_locations(certifi.where())
+    except ImportError:
+        pass
+    return contexte
+
+
 def _ouvrir(url, token=None, binaire=False):
     if urlparse(url).scheme != 'https' or urlparse(url).hostname != 'api.github.com':
         raise ValueError('Adresse de mise à jour non autorisée.')
@@ -44,13 +54,7 @@ def _ouvrir(url, token=None, binaire=False):
              'User-Agent':'AsyDec'}
     if token:
         headers['Authorization']='Bearer '+token
-    contexte = ssl.create_default_context()
-    try:
-        import certifi
-        contexte.load_verify_locations(certifi.where())
-    except ImportError:
-        pass
-    return build_opener(Redirection(),HTTPSHandler(context=contexte)).open(Request(url,headers=headers),timeout=25)
+    return build_opener(Redirection(),HTTPSHandler(context=contexte_ssl())).open(Request(url,headers=headers),timeout=25)
 
 
 def token_github():

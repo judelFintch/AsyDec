@@ -24,6 +24,7 @@ class PageMisesAJour(ttk.Frame):
         ttk.Button(self,text='Vérifier les mises à jour',command=self.verifier).pack(anchor='w',pady=8)
         self.installer_bouton=ttk.Button(self,text='Télécharger et installer…',command=self.installer,state='disabled')
         self.installer_bouton.pack(anchor='w',pady=8)
+        ttk.Button(self, text='Récupérer mes données chiffrées…', command=self.ouvrir_sauvegardes).pack(anchor='w', pady=8)
         ttk.Label(self,text=('Dépôt GitHub privé : jeton en lecture seule, conservé pour cette session uniquement.' if windows
                             else 'Dépôt GitHub privé : jeton en lecture seule, enregistré dans le Trousseau macOS.'),wraplength=800).pack(anchor='w',pady=(20,4))
         self.jeton=StringVar()
@@ -35,6 +36,13 @@ class PageMisesAJour(ttk.Frame):
         ordinateur = f'Windows ({maj.architecture()})' if windows else f'Ce Mac : {maj.type_mac()}'
         ttk.Label(self,text=f"{ordinateur}\nVersion installée : {installee}\n"
                             f"Construction : {v['version']} · {v['revision'][:12]}\nDonnées : {chemins.RACINE}",wraplength=820).pack(anchor='w',pady=20)
+
+    def ouvrir_sauvegardes(self):
+        if self.app.session_verrouillee:
+            return
+        self.app.montrer('parametres')
+        page = self.app.pages['parametres']
+        page.onglets.select(page.page_sauvegarde_chiffree)
 
     def retenir_jeton(self):
         if self.app.session_verrouillee:

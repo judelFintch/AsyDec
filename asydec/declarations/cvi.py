@@ -113,8 +113,8 @@ CHAMPS += CHAMPS_LIGNES + CHAMPS_LISTE_BL + ('NOMBRE_CONTENEURS_BL', 'QUANTITE_B
 
 
 def modele_defaut():
-    from asydec import chemins
-    return chemins.CODE / 'ressources' / 'cvi' / 'CVI-modele.docx'
+    from asydec.systeme import modeles_documents
+    return modeles_documents.chemin('cvi_bl')
 
 
 def incrementer_reference(reference):

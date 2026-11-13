@@ -13,6 +13,7 @@ from asydec.declarations import declaration_licence, finalisation
 from asydec.declarations.documents_finaux import preparer_licence, proposer_date_facture, ECART_FACTURE_MIN, ECART_FACTURE_MAX
 from asydec.ui import theme, synthese_licence
 from asydec.systeme import espace_travail
+from asydec.systeme import modeles_documents
 from asydec.ui.details_licence import DetailsLicence
 from asydec.ui.liste_licences import ListeLicences
 from asydec.ui.repartition_licence import FenetreRepartition
@@ -801,6 +802,7 @@ class PageDocumentsFinaux(ttk.Frame):
                 return
             complements = fenetre.resultat
             resultats = cvi.generer(licence, modele.read_bytes(), complements)
+            modele = modeles_documents.enregistrer('cvi_bl', modele)
             dossier = espace_travail.dossier_dec(licence['numero_dec'], 'cvi')
             if dossier is None:
                 choisi = filedialog.askdirectory(parent=self, title='Enregistrer le CVI et le BL de la première répartition')
@@ -1198,6 +1200,7 @@ class PageDocumentsFinaux(ttk.Frame):
 
     def _enregistrer_declarations(self, numero, licence, resultats, dossier, modele):
         try:
+            modele = modeles_documents.enregistrer('declaration', modele)
             anciens = {str(Path(f['fichier'])) for f in (licence.get('declarations') or {}).get('fichiers') or []}
             fichiers = []
             for resultat in resultats:

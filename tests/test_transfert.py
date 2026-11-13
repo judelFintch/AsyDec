@@ -2,11 +2,14 @@ import json
 import sqlite3
 import tempfile
 import unittest
+from unittest.mock import patch
+import shutil
 from pathlib import Path
 from zipfile import ZipFile
 
 from asydec.declarations import factures
 from asydec.systeme import transfert
+from asydec.systeme import modeles_documents
 
 
 def _machine(racine, ancienne=None):
@@ -33,6 +36,85 @@ def _machine(racine, ancienne=None):
 class Transfert(unittest.TestCase):
     def setUp(self):
         self.d = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.d)
+
+    def test_base_installation_emporte_bl_dec_et_modeles_commerciaux(self):
+        from tests.test_facture_licence import modele
+        from asydec.declarations import cvi, declaration_licence, facture_kinshop
+        source = self.d / 'source'
+        _machine(source)
+        contenu = modele()
+        for relatif, _ in modeles_documents.MODELES.values():
+            p = source / 'ressources' / relatif
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_bytes(contenu)
+        kit, resume = transfert.exporter(self.d / 'base-installation', kit=True, racine=source)
+        self.assertEqual(resume['modeles_documents'], 4)
+        with ZipFile(kit) as archive:
+            self.assertFalse(any(n.startswith('CONFIG_LOCAL/') for n in archive.namelist()))
+            self.assertIn('MODELES_DOCUMENTS/cvi/CVI-modele.docx', archive.namelist())
+            self.assertIn('MODELES_DOCUMENTS/declaration/Declaration-modele.docx', archive.namelist())
+        neuve = self.d / 'nouvelle-machine'
+        self.assertEqual(transfert.importer_modeles(kit, neuve)['modeles_documents'], 4)
+        shutil.rmtree(source)  # les anciens chemins et fichiers ne sont plus accessibles
+        with patch.object(modeles_documents.chemins, 'RACINE', neuve), \
+             patch.object(modeles_documents.chemins, 'CODE', self.d / 'application-vide'):
+            for p in (cvi.modele_defaut(), declaration_licence.modele_defaut(), facture_kinshop.modele(), facture_kinshop.modele(True)):
+                self.assertEqual(p.read_bytes(), contenu)
+        self.assertEqual(transfert.importer_modeles(kit, neuve)['modeles_documents'], 0)
+        # Une configuration locale différente n'est pas écrasée par un import de modèles.
+        p = neuve / 'MODELES_DOCUMENTS/cvi/CVI-modele.docx'
+        p.write_bytes(b'modele personnel')
+        transfert.importer_modeles(kit, neuve)
+        self.assertEqual(p.read_bytes(), b'modele personnel')
+
+    def test_export_complet_et_ancien_outils_emportent_modeles_documents(self):
+        from tests.test_facture_licence import modele
+        source = self.d / 'ancienne'
+        _machine(source)
+        p = source / 'ressources/cvi/CVI-modele.docx'
+        p.parent.mkdir(parents=True)
+        p.write_bytes(modele())
+        for i, export in enumerate((source, transfert.exporter(self.d / 'complet', racine=source)[0])):
+            neuve = self.d / f'cible-{i}'
+            transfert.preparer_import_complet(export, neuve)
+            transfert.appliquer_en_attente(neuve)
+            self.assertEqual((neuve / 'MODELES_DOCUMENTS/cvi/CVI-modele.docx').read_bytes(), p.read_bytes())
+
+    def test_modele_personnel_prend_priorite_sur_modele_livre(self):
+        from tests.test_facture_licence import modele
+        source = self.d / 'source'
+        _machine(source)
+        p = source / 'ressources/cvi/CVI-modele.docx'
+        p.parent.mkdir(parents=True)
+        p.write_bytes(modele())
+        personnel = source / 'nouveau.docx'
+        personnel.write_bytes(modele(lignes=3))
+        modeles_documents.enregistrer('cvi_bl', personnel, racine=source)
+        kit, _ = transfert.exporter(self.d / 'kit', kit=True, racine=source)
+        with ZipFile(kit) as archive:
+            self.assertEqual(archive.read('MODELES_DOCUMENTS/cvi/CVI-modele.docx'), personnel.read_bytes())
+
+    def test_ancien_export_sans_modeles_conserve_ceux_de_la_machine(self):
+        source = self.d / 'source'
+        _machine(source)
+        export, _ = transfert.exporter(self.d / 'ancien', racine=source)
+        ancien_format = self.d / 'format-1.asydec'
+        with ZipFile(export) as entree, ZipFile(ancien_format, 'w') as sortie:
+            for info in entree.infolist():
+                contenu = entree.read(info)
+                if info.filename == transfert.MANIFESTE:
+                    manifeste = json.loads(contenu)
+                    manifeste['format'] = 1
+                    contenu = json.dumps(manifeste).encode()
+                sortie.writestr(info, contenu)
+        neuve = self.d / 'nouvelle'
+        p = neuve / 'MODELES_DOCUMENTS/cvi/CVI-modele.docx'
+        p.parent.mkdir(parents=True)
+        p.write_bytes(b'modele deja installe')
+        transfert.preparer_import_complet(ancien_format, neuve)
+        transfert.appliquer_en_attente(neuve)
+        self.assertEqual(p.read_bytes(), b'modele deja installe')
 
     def test_export_complet_puis_import_sur_autre_machine(self):
         ancienne = self.d / 'ancienne' / 'AsyDec'

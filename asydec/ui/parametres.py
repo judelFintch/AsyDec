@@ -2,7 +2,7 @@
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
-from asydec.systeme import espace_travail, transfert
+from asydec.systeme import espace_travail, transfert, modeles_documents
 from asydec.systeme import gestion_locale as local
 from asydec.ui import theme
 
@@ -22,8 +22,12 @@ class PageParametres(ttk.Frame):
         compte = ttk.Frame(onglets, padding=18)
         reset = ttk.Frame(onglets, padding=18)
         transfert_page = ttk.Frame(onglets, padding=18)
+        from asydec.ui.sauvegarde_chiffree import PageSauvegardeChiffree
+        sauvegarde_chiffree = PageSauvegardeChiffree(onglets, app)
+        self.onglets = onglets
+        self.page_sauvegarde_chiffree = sauvegarde_chiffree
         for page, titre in ((general, 'Application'), (compte, 'Compte'), (transfert_page, 'Transfert vers une autre machine'),
-                            (reset, 'Remise à zéro')):
+                            (sauvegarde_chiffree, 'Sauvegarde chiffrée'), (reset, 'Remise à zéro')):
             onglets.add(page, text=titre)
         self.organisation = tk.StringVar()
         self.dossier = tk.StringVar()
@@ -92,14 +96,18 @@ class PageParametres(ttk.Frame):
         theme.bouton(ligne, 'Exporter toutes mes données…', lambda: self.exporter(False), principal=True).pack(side='left')
         ttk.Checkbutton(ligne, text='inclure les sauvegardes (fichier plus lourd)', variable=self.avec_sauvegardes).pack(side='left', padx=10)
         ttk.Label(cadre, text='Compte, numéros de facture réservés, modèles, dossiers, licences, références et réglages. '
-                  'Uniquement pour VOTRE nouvel ordinateur : contient votre compte et votre mot de passe (chiffré). '
-                  'Ne l’envoyez à personne.',
+                  'Uniquement pour VOTRE nouvel ordinateur : contient les informations de connexion de votre compte. '
+                  'Cet export .asydec n’est pas chiffré. Pour GitHub, utilisez l’onglet « Sauvegarde chiffrée ».',
                   wraplength=760, style='Doux.TLabel').pack(anchor='w', pady=(2, 10))
-        theme.bouton(cadre, 'Exporter un kit de démarrage (modèles seulement)…', lambda: self.exporter(True)).pack(anchor='w')
-        ttk.Label(cadre, text='À envoyer à une autre personne comme base de départ : modèles de facture Word, XML de '
+        theme.bouton(cadre, 'Exporter une base d’installation (modèles seulement)…', lambda: self.exporter(True)).pack(anchor='w')
+        ttk.Label(cadre, text='Pour préparer une nouvelle machine : modèles Word CVI et BL, déclaration DEC, factures, XML de '
                   'référence et médiathèque XML. Jamais de compte, mot de passe, numéros de facture, historique ni réglages : '
                   'elle crée son propre compte. Attention : les XML sont de vraies déclarations (clients, montants).',
-                  wraplength=760, style='Doux.TLabel').pack(anchor='w', pady=(2, 16))
+                  wraplength=760, style='Doux.TLabel').pack(anchor='w', pady=(2, 8))
+        ligne = ttk.Frame(cadre)
+        ligne.pack(anchor='w', pady=(0, 10))
+        theme.bouton(ligne, 'Définir le modèle CVI / BL…', lambda: self.definir_modele_document('cvi_bl')).pack(side='left')
+        theme.bouton(ligne, 'Définir le modèle déclaration DEC…', lambda: self.definir_modele_document('declaration')).pack(side='left', padx=8)
         ttk.Separator(cadre).pack(fill='x', pady=6)
         ttk.Label(cadre, text='Importer', style='Section.TLabel').pack(anchor='w', pady=(8, 4))
         theme.bouton(cadre, 'Importer des modèles (kit ou export complet)…', self.importer_modeles, principal=True).pack(anchor='w')
@@ -126,6 +134,23 @@ class PageParametres(ttk.Frame):
         self.configure(cursor='watch')
         self.update_idletasks()
 
+    def definir_modele_document(self, cle):
+        if self.app.session_verrouillee:
+            return
+        nom = modeles_documents.MODELES[cle][1]
+        fichier = filedialog.askopenfilename(parent=self, title='Modèle Word préparé : ' + nom,
+                                             filetypes=[('Modèle Word', '*.docx')])
+        if not fichier:
+            return
+        try:
+            cible = modeles_documents.enregistrer(cle, fichier)
+        except (ValueError, OSError) as exc:
+            messagebox.showerror('Modèle non enregistré', str(exc), parent=self)
+            return
+        self.etat_transfert.set(f'Modèle {nom} conservé. Il sera inclus dans la base d’installation et les exports complets.')
+        messagebox.showinfo('Modèle enregistré', f'{nom} sera utilisé automatiquement sur cet ordinateur '
+                            f'et après import de votre base sur une autre machine.\n\n{cible}', parent=self)
+
     def _dossier_reception(self):
         dossier = espace_travail.dossier_transferts('imports')
         return str(dossier) if dossier else None
@@ -148,7 +173,7 @@ class PageParametres(ttk.Frame):
 
     def exporter(self, kit):
         from datetime import date
-        nom = f"AsyDec-{'kit-modeles' if kit else 'donnees'}-{date.today():%Y-%m-%d}{transfert.EXTENSION}"
+        nom = f"AsyDec-{'base-installation' if kit else 'donnees'}-{date.today():%Y-%m-%d}{transfert.EXTENSION}"
         dossier = espace_travail.dossier_transferts('exports')
         chemin = filedialog.asksaveasfilename(parent=self, title='Enregistrer l’export AsyDec', initialfile=nom,
                                               initialdir=str(dossier) if dossier else None,
@@ -182,7 +207,7 @@ class PageParametres(ttk.Frame):
             manifeste = transfert.lire(chemin)
             if not messagebox.askyesno('Importer des modèles',
                                        f"Export du {manifeste.get('cree_le', '')[:10]} ({manifeste['type']}).\n\n"
-                                       f"{transfert.decrire({k: v for k, v in manifeste.get('resume', {}).items() if k in ('modeles_word', 'xml_reference', 'xml_licences', 'xml_mediatheque')})}"
+                                       f"{transfert.decrire({k: v for k, v in manifeste.get('resume', {}).items() if k in ('modeles_word', 'modeles_documents', 'xml_reference', 'xml_licences', 'xml_mediatheque')})}"
                                        '\n\nAjouter les modèles absents de cette machine ?', parent=self):
                 return
             self._occupe('Import des modèles en cours…')

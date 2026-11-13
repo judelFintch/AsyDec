@@ -5,9 +5,7 @@ en-têtes, pieds de page et paramètres d'impression sont conservés.
 """
 from datetime import datetime
 from io import BytesIO
-from pathlib import Path
 import re
-import sys
 from zipfile import ZipFile
 
 from asydec.declarations import factures as F, ajustement_word as A
@@ -22,8 +20,8 @@ def correspond(licence):
 
 
 def modele(packing=False):
-    base = Path(getattr(sys, '_MEIPASS', Path(__file__).resolve().parents[2]))
-    return base / 'ressources/factures/kinshop' / ('packing.docx' if packing else 'facture.docx')
+    from asydec.systeme import modeles_documents
+    return modeles_documents.chemin('packing_kinshop' if packing else 'facture_kinshop')
 
 
 def disponible(licence):

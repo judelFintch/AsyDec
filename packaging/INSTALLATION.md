@@ -47,6 +47,32 @@ Sous Windows, le jeton reste uniquement en mémoire et doit être renseigné apr
 Une ancienne installation dont le bouton utilise encore le mécanisme Mac doit d’abord
 recevoir manuellement le nouveau `AsyDec-Setup-windows-x64.exe` contenant cette correction.
 
+## Sauvegarde complète chiffrée dans les releases
+
+Dans **Paramètres › Sauvegarde chiffrée** :
+
+1. Choisir un mot de passe de sauvegarde d’au moins 12 caractères, le confirmer, puis
+   **Créer un export complet chiffré…**. Le fichier `.asydec.enc` inclut le compte, les
+   dossiers, les factures, les réglages et les modèles persistants CVI/BL, DEC et factures.
+2. Pour le déposer sur GitHub, renseigner un jeton avec accès **Contents en écriture** au
+   dépôt AsyDec, saisir à nouveau le mot de passe et cliquer sur **Publier un fichier chiffré…**.
+   Après confirmation, une release de sauvegarde séparée est créée, sans modifier la release
+   de mise à jour du logiciel. Aucun export en clair n’est envoyé par cette fonction.
+3. Sur l’autre ordinateur, **Rechercher les sauvegardes sur GitHub**, sélectionner la sauvegarde,
+   saisir le mot de passe, puis **Télécharger et charger avec mon mot de passe…**.
+   Le mot de passe du compte local est également demandé avant de remplacer des données existantes.
+4. Le chiffrement et l’intégrité sont vérifiés avant de préparer l’import. AsyDec redémarre,
+   met les anciennes données de côté et charge la sauvegarde. Se connecter avec le compte de l’export.
+   Un fichier `.asydec.enc` peut aussi être chargé localement, ou au premier démarrage sans compte.
+
+Le chiffrement utilise AES-256-GCM et une clé dérivée du mot de passe par scrypt avec un sel
+aléatoire. Le mot de passe n’est enregistré ni dans le code, ni dans les préférences, ni sur GitHub ;
+il doit être conservé séparément. Sans ce mot de passe, la sauvegarde ne peut pas être récupérée.
+Le jeton GitHub saisi ici n’est utilisé que pour l’opération et n’est pas enregistré.
+Sur une release publique, le fichier chiffré reste téléchargeable par un lien direct : le mot de passe
+protège son contenu. Dans l’application, il est demandé avant de lancer le téléchargement.
+Les mises à jour du logiciel ne chargent jamais une sauvegarde automatiquement.
+
 ## Passer sur une nouvelle machine
 
 Les modèles Word privés (CVI, déclaration de licence, facture Kinshop) sont inclus seulement
@@ -59,9 +85,18 @@ la bibliothèque. Les données de travail ne sont pas incluses ; elles se transf
   (ou, plus tard, Paramètres › Transfert › « Remplacer mes données par un export complet… »). Compte, mot de passe,
   numéros de facture réservés, modèles, dossiers et licences sont repris ; les chemins de l’ancienne machine
   sont adaptés automatiquement.
-- **Équiper un collègue** : « Exporter un kit de démarrage (modèles seulement)… », puis sur son poste
-  « Importer des modèles… ». Seuls les modèles Word, XML de référence et la médiathèque XML sont ajoutés ;
+- **Préparer une nouvelle installation à partir de votre poste** : « Exporter une base d’installation (modèles seulement)… »,
+  puis sur la nouvelle machine, au premier démarrage, répondre **Oui** et choisir le fichier `.asydec`
+  (ou Paramètres › Transfert › « Importer des modèles… »). Les modèles **CVI et BL**, **déclaration DEC**,
+  facture et packing list sont inclus, avec les modèles de la bibliothèque, XML de référence et médiathèque XML ;
   ni compte, ni historique, ni numéros.
+- Les boutons **Définir le modèle CVI / BL…** et **Définir le modèle déclaration DEC…** permettent d’enregistrer
+  les modèles Word préparés dans l’application avant export. Un modèle choisi lors d’une génération réussie
+  est aussi conservé automatiquement. Ces copies restent dans les données utilisateur lors d’une mise à jour.
+- Sur le nouveau poste, les modèles importés sont utilisés automatiquement : plus besoin de chercher les fichiers
+  de l’ancien ordinateur pour générer le BL ou la déclaration. Un modèle personnel déjà installé n’est pas écrasé
+  par l’import d’une base. Installer la nouvelle version d’AsyDec sur les deux postes avant de créer ou importer
+  ces exports au format 2 ; les anciens exports au format 1 restent acceptés par la nouvelle version.
 - Un ancien dossier `OUTILS` copié tel quel reste accepté (« Depuis un ancien dossier OUTILS… »).
 
 Lors d’un remplacement, les données présentes sont d’abord déplacées dans `SAUVEGARDES/avant-import-…` :

@@ -31,6 +31,7 @@ jobs:
       - name: Vérifier l’application
         run: |
           ASYDEC_HOME="$RUNNER_TEMP/asydec-diagnostic" dist/AsyDec.app/Contents/MacOS/AsyDec --diagnostic
+          ASYDEC_HOME="$RUNNER_TEMP/asydec-diagnostic" dist/AsyDec.app/Contents/MacOS/AsyDec --test-interface
           codesign --verify --deep --strict dist/AsyDec.app
       - uses: actions/upload-artifact@v4
         with:
@@ -68,6 +69,23 @@ jobs:
           Le fichier illisible est sauvegardé avant remplacement, après confirmation ; vos dossiers et factures restent conservés.
           Un compte lisible existant reste protégé. Le compte est local à chaque ordinateur : utilisez un export `.asydec`
           depuis **Paramètres › Transfert** pour reprendre les données d’une autre machine.
+
+          ## Base d’installation pour une nouvelle machine
+
+          Sur le poste déjà équipé : **Paramètres › Transfert › Exporter une base d’installation**.
+          Le fichier `.asydec` inclut les modèles Word CVI/BL, déclaration DEC, facture et packing list disponibles,
+          la bibliothèque de factures et les XML. Sur le nouveau poste, importez-le au premier démarrage ou avec
+          **Importer des modèles**. Les modèles sont ensuite utilisés automatiquement et conservés lors des mises à jour.
+          Cette base privée se copie séparément de l’installateur ; elle ne contient pas le compte de l’ancienne machine.
+
+          ## Sauvegarde complète chiffrée via GitHub
+
+          **Paramètres › Sauvegarde chiffrée** : créez un export complet avec un mot de passe (12 caractères minimum),
+          puis publiez le fichier `.asydec.enc` avec un jeton GitHub disposant de Contents en écriture.
+          Sur l’autre poste, recherchez les sauvegardes dans ce même écran, saisissez le mot de passe, puis téléchargez et chargez.
+          Le contenu est chiffré avant l’envoi ; aucun mot de passe n’est enregistré dans le code ou dans la release.
+          Sur un dépôt public, le fichier chiffré reste téléchargeable ; le mot de passe est indispensable pour le déchiffrer.
+          Les mises à jour du logiciel ne remplacent pas les données automatiquement.
 
           ## Installateur Mac
 

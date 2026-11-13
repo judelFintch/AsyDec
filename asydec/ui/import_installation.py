@@ -1,5 +1,5 @@
 """Premier démarrage et import en attente : reprise des données d'une autre machine."""
-from tkinter import Tk, messagebox, filedialog
+from tkinter import Tk, messagebox, filedialog, simpledialog
 from asydec import chemins
 from asydec.systeme import transfert
 
@@ -13,19 +13,30 @@ def proposer():
     try:
         choix=messagebox.askyesnocancel('Bienvenue dans AsyDec',
             'Voulez-vous reprendre les données d’une autre machine ?\n\n'
-            'Oui : un fichier d’export « .asydec » (Paramètres › Transfert sur l’ancienne machine).\n'
+            'Oui : un export .asydec ou une sauvegarde chiffrée .asydec.enc.\n'
             'Non : un ancien dossier OUTILS copié depuis l’autre machine.\n'
             'Annuler : commencer avec une installation vide.',parent=racine)
         if choix is None:
             return
         if choix:
             source=filedialog.askopenfilename(parent=racine,title='Export AsyDec',
-                                              filetypes=[('Export AsyDec','*'+transfert.EXTENSION)])
+                                              filetypes=[('Export AsyDec','*.asydec *.asydec.enc')])
         else:
             source=filedialog.askdirectory(parent=racine,title='Sélectionnez l’ancien dossier OUTILS')
         if not source:
             return
         try:
+            if choix and source.endswith('.asydec.enc'):
+                from asydec.systeme import sauvegarde_chiffree
+                mot_de_passe = simpledialog.askstring('Sauvegarde chiffrée',
+                    'Mot de passe de la sauvegarde (pas le mot de passe du compte AsyDec) :', show='•', parent=racine)
+                if mot_de_passe is None:
+                    return
+                sauvegarde_chiffree.preparer_import(source, mot_de_passe)
+                transfert.appliquer_en_attente()
+                messagebox.showinfo('Données reprises', 'La sauvegarde a été déchiffrée et chargée. '
+                    'Connectez-vous avec le compte de l’ancienne machine.', parent=racine)
+                return
             if choix and transfert.lire(source)['type']=='kit':
                 # Kit d'un collègue : modèles seulement ; le compte sera créé ensuite.
                 bilan=transfert.importer_modeles(source)
