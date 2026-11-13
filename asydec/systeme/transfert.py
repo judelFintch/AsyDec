@@ -28,8 +28,9 @@ from asydec.systeme import modeles_documents
 
 FORMAT = 2
 EXTENSION = '.asydec'
+TRAVAIL = 'ESPACE_TRAVAIL'
 COMPLET = ('DONNEES', 'CONFIG_LOCAL', 'MODELES_XML', 'XML_LICENCES', 'ETUDES_XML', 'SIMULATIONS',
-           'SAISIE.xlsx', 'registre.json', modeles_documents.DOSSIER)
+           'SAISIE.xlsx', 'registre.json', modeles_documents.DOSSIER, TRAVAIL)
 SAUVEGARDES = 'SAUVEGARDES'
 SAUVEGARDES_MANUELLES = 'DONNEES/sauvegardes_manuelles'
 MEDIATHEQUE = 'MEDIATHEQUE'
@@ -134,6 +135,34 @@ def _copier_modeles_documents(racine, cible):
         if source.is_file():
             _copier(source, cible / modeles_documents.DOSSIER / relatif)
 
+
+def _copier_dossier_travail(racine, cible, avec_sauvegardes=False):
+    """Reprend les documents générés, même si le dossier de travail est hors d'AsyDec."""
+    from asydec.systeme import espace_travail
+    origine = None
+    try:
+        config = json.loads((racine / 'CONFIG_LOCAL/espace_travail.json').read_text(encoding='utf-8'))
+        origine = config['racine']
+        if not isinstance(origine, str) or not origine.strip():
+            raise ValueError('Dossier de travail absent')
+        dossier = Path(origine)
+    except (OSError, ValueError, KeyError, TypeError):
+        origine = None
+        dossier = racine / TRAVAIL
+    if not dossier.is_dir():
+        dossier = racine / TRAVAIL
+        if not dossier.is_dir():
+            return None
+    if dossier.is_symlink():
+        raise ValueError('Le dossier de travail est un lien symbolique : transfert refusé.')
+    for nom in espace_travail.DOSSIERS:
+        if nom == espace_travail.TRANSFERTS or (nom == espace_travail.SAUVEGARDES and not avec_sauvegardes):
+            continue
+        _copier_element(dossier, nom, cible / TRAVAIL)
+    if (dossier / 'LISEZMOI.txt').is_file():
+        _copier(dossier / 'LISEZMOI.txt', cible / TRAVAIL / 'LISEZMOI.txt')
+    return (origine or str(dossier)) if (cible / TRAVAIL).is_dir() else None
+
 def exporter(destination, kit=False, avec_sauvegardes=False, racine=None):
     """Crée le fichier .asydec ; renvoie (chemin, résumé)."""
     racine = Path(racine) if racine is not None else chemins.RACINE
@@ -145,6 +174,7 @@ def exporter(destination, kit=False, avec_sauvegardes=False, racine=None):
     with tempfile.TemporaryDirectory(prefix='asydec-export-') as temp:
         temp = Path(temp)
         mediatheque = []
+        dossier_travail = None
         if kit:
             if (racine / 'DONNEES/factures.db').is_file():
                 cible = temp / 'DONNEES/factures.db'
@@ -168,7 +198,9 @@ def exporter(destination, kit=False, avec_sauvegardes=False, racine=None):
                 raise ValueError('Aucun compte AsyDec dans ces données : rien à exporter.')
             exclus = () if avec_sauvegardes else (SAUVEGARDES_MANUELLES,)
             for nom in COMPLET + ((SAUVEGARDES,) if avec_sauvegardes else ()):
-                _copier_element(racine, nom, temp, exclus)
+                if nom != TRAVAIL:
+                    _copier_element(racine, nom, temp, exclus)
+            dossier_travail = _copier_dossier_travail(racine, temp, avec_sauvegardes)
         _copier_modeles_documents(racine, temp)
         fichiers = {p.relative_to(temp).as_posix(): _sha(p) for p in sorted(temp.rglob('*')) if p.is_file()}
         from asydec.systeme.version import courante
@@ -177,6 +209,7 @@ def exporter(destination, kit=False, avec_sauvegardes=False, racine=None):
                          application=courante().get('version'), systeme=f'{platform.system()} {platform.machine()}',
                          # Le kit part chez une autre personne : aucun chemin de cette machine (nom d'utilisateur).
                          racine=None if kit else str(racine), avec_sauvegardes=bool(avec_sauvegardes and not kit),
+                         espace_travail=dossier_travail,
                          resume=resume, mediatheque=mediatheque, fichiers=fichiers)
         destination.parent.mkdir(parents=True, exist_ok=True)
         temporaire = destination.with_name(destination.name + '.tmp')
@@ -210,6 +243,7 @@ def _resume(dossier, kit):
         resume['xml_mediatheque'] = len(list((d / MEDIATHEQUE).rglob('*.xml'))) if (d / MEDIATHEQUE).is_dir() else 0
     else:
         resume.update(
+            documents_travail=sum(p.is_file() for p in (d / TRAVAIL).rglob('*')),
             dossiers_generes=_compter(d / 'DONNEES/modeles_generes.db', 'SELECT COUNT(*) FROM modeles'),
             factures_emises=_compter(d / 'DONNEES/factures.db', 'SELECT COUNT(*) FROM factures WHERE contenu IS NOT NULL'),
             numeros_reserves=_compter(d / 'CONFIG_LOCAL/numeros_factures.db', 'SELECT COUNT(*) FROM numeros'),
@@ -220,6 +254,7 @@ def _resume(dossier, kit):
 
 LIBELLES = dict(modeles_word='modèles de facture Word', xml_reference='XML de référence', xml_licences='XML de licence',
                 modeles_documents='modèles Word CVI/BL, déclaration et documents commerciaux',
+                documents_travail='documents du dossier de travail',
                 xml_mediatheque='XML de médiathèque', dossiers_generes='dossiers générés', factures_emises='factures émises',
                 numeros_reserves='numéros réservés', licences='licences')
 
@@ -300,9 +335,12 @@ def _charger(source, cible):
             raise ValueError('Ce dossier ne contient pas de données AsyDec (CONFIG_LOCAL/compte.json absent). '
                              'Sélectionnez l’ancien dossier OUTILS ou « Application Support/AsyDec ».')
         for nom in COMPLET:
-            _copier_element(source, nom, cible)
+            if nom != TRAVAIL:
+                _copier_element(source, nom, cible)
         _copier_modeles_documents(source, cible)
-        return dict(format=FORMAT, type='complet', racine=str(source), resume=_resume(cible, False), mediatheque=[])
+        travail = _copier_dossier_travail(source, cible)
+        return dict(format=FORMAT, type='complet', racine=str(source), espace_travail=travail,
+                    resume=_resume(cible, False), mediatheque=[])
     return _extraire(source, cible)
 
 
@@ -338,15 +376,50 @@ def _anciennes_racines(dossier, manifeste):
     return [r for r in racines if r]
 
 
-def _reecrire_chemins(dossier, anciennes, nouvelle):
+def _reecrire_texte(valeur, paires):
+    """Réécrit les valeurs JSON avant sérialisation : les antislashs Windows restent échappés."""
+    if not isinstance(valeur, str) or not any(a in valeur or json.dumps(a)[1:-1] in valeur for a, _ in paires):
+        return valeur
+
+    def chaine(s):
+        for ancienne, neuve in paires:
+            if s.startswith(ancienne):
+                return neuve + s[len(ancienne):].replace('\\', neuve[-1]).replace('/', neuve[-1])
+            s = s.replace(ancienne, neuve)
+        return s
+
+    def convertir(objet):
+        if isinstance(objet, str):
+            return chaine(objet)
+        if isinstance(objet, list):
+            return [convertir(v) for v in objet]
+        if isinstance(objet, dict):
+            return {chaine(k): convertir(v) for k, v in objet.items()}
+        return objet
+
+    try:
+        original = json.loads(valeur)
+    except ValueError:
+        return chaine(valeur)
+    modifie = convertir(original)
+    return json.dumps(modifie, ensure_ascii=False) if modifie != original else valeur
+
+
+def _reecrire_chemins(dossier, anciennes, nouvelle, correspondances=None):
     """Remplace les débuts de chemins de l'ancienne machine dans les bases et fichiers JSON."""
     nouvelle = str(nouvelle).rstrip('/\\')
     paires = []
-    for ancienne in sorted(set(anciennes), key=len, reverse=True):
+    racines = {variante for r in anciennes for variante in (r, r.replace('\\', '/'), r.replace('/', '\\'))}
+    for ancienne in sorted(racines, key=len, reverse=True):
         if ancienne == nouvelle:
             continue
         for sep in ('/', '\\'):
             paires.append((ancienne + sep, nouvelle + os.sep))
+    for origine, cible in (correspondances or {}).items():
+        for ancienne in {origine, origine.replace('\\', '/'), origine.replace('/', '\\')}:
+            for sep in ('/', '\\'):
+                paires.append((ancienne.rstrip('/\\') + sep, str(cible).rstrip('/\\') + os.sep))
+    paires.sort(key=lambda paire: len(paire[0]), reverse=True)
     if not paires:
         return 0
     modifies = 0
@@ -355,30 +428,27 @@ def _reecrire_chemins(dossier, anciennes, nouvelle):
             continue
         if p.suffix in BASES:
             with closing(sqlite3.connect(p)) as db:
+                db.create_function('asydec_reecrire', 1, lambda v: _reecrire_texte(v, paires))
                 tables = [t for (t,) in db.execute("SELECT name FROM sqlite_master WHERE type='table' "
                                                    "AND name NOT LIKE 'sqlite_%'")]
                 with db:
                     for table in tables:
-                        colonnes = [c[1] for c in db.execute(f'PRAGMA table_info("{table}")')
+                        table_sql = '"' + table.replace('"', '""') + '"'
+                        colonnes = [c[1] for c in db.execute(f'PRAGMA table_info({table_sql})')
                                     if 'BLOB' not in (c[2] or '').upper()]
                         for colonne in colonnes:
-                            for ancienne, neuve in paires:
-                                modifies += db.execute(
-                                    f'UPDATE "{table}" SET "{colonne}" = REPLACE("{colonne}", ?, ?) '
-                                    f'WHERE typeof("{colonne}") = \'text\' AND instr("{colonne}", ?) > 0',
-                                    (ancienne, neuve, ancienne)).rowcount
-                                # Chemins Windows dans du JSON : antislashs doublés.
-                                if '\\' in ancienne:
-                                    a, n = json.dumps(ancienne)[1:-1], json.dumps(neuve)[1:-1]
-                                    modifies += db.execute(
-                                        f'UPDATE "{table}" SET "{colonne}" = REPLACE("{colonne}", ?, ?) '
-                                        f'WHERE typeof("{colonne}") = \'text\' AND instr("{colonne}", ?) > 0',
-                                        (a, n, a)).rowcount
+                            c = '"' + colonne.replace('"', '""') + '"'
+                            modifies += db.execute(
+                                f'UPDATE {table_sql} SET {c}=asydec_reecrire({c}) '
+                                f'WHERE typeof({c})=\'text\' AND CAST({c} AS BLOB) != '
+                                f'CAST(asydec_reecrire({c}) AS BLOB)').rowcount
         elif p.suffix == '.json':
-            texte = p.read_text(encoding='utf-8')
+            try:
+                texte = p.read_text(encoding='utf-8')
+            except UnicodeError:
+                continue  # conserver les comptes illisibles pour la récupération au login
             origine = texte
-            for ancienne, neuve in paires:
-                texte = texte.replace(ancienne, neuve).replace(json.dumps(ancienne)[1:-1], json.dumps(neuve)[1:-1])
+            texte = _reecrire_texte(texte, paires)
             if texte != origine:
                 p.write_text(texte, encoding='utf-8')
                 modifies += 1
@@ -411,7 +481,13 @@ def preparer_import_complet(source, racine=None):
         if not (temporaire / 'CONFIG_LOCAL/compte.json').is_file():
             raise ValueError('Cet export ne contient pas de compte AsyDec.')
         _verifier_bases(temporaire)
-        _reecrire_chemins(temporaire, _anciennes_racines(temporaire, manifeste), racine)
+        correspondances = {}
+        if (temporaire / TRAVAIL).is_dir() and manifeste.get('espace_travail'):
+            correspondances[manifeste['espace_travail']] = racine / TRAVAIL
+        _reecrire_chemins(temporaire, _anciennes_racines(temporaire, manifeste), racine, correspondances)
+        if (temporaire / TRAVAIL).is_dir():
+            config = temporaire / 'CONFIG_LOCAL/espace_travail.json'
+            config.write_text(json.dumps({'racine': str(racine / TRAVAIL)}, ensure_ascii=False), encoding='utf-8')
         (temporaire / 'attente.json').write_text(json.dumps(dict(
             source=str(source), prepare_le=datetime.now().astimezone().isoformat(),
             cree_le=manifeste.get('cree_le'), resume=manifeste.get('resume', {})), ensure_ascii=False), encoding='utf-8')
@@ -453,7 +529,7 @@ def appliquer_en_attente(racine=None):
     mise_de_cote = racine / SAUVEGARDES / f'avant-import-{date}'
     mise_de_cote.mkdir(parents=True, exist_ok=True)
     deplaces, installes = [], []
-    elements = [nom for nom in COMPLET if nom != modeles_documents.DOSSIER or (attente / nom).exists()]
+    elements = [nom for nom in COMPLET if nom not in (modeles_documents.DOSSIER, TRAVAIL) or (attente / nom).exists()]
     try:
         for nom in elements:
             if (racine / nom).exists():

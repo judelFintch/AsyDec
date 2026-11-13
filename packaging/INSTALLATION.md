@@ -85,6 +85,11 @@ la bibliothèque. Les données de travail ne sont pas incluses ; elles se transf
   (ou, plus tard, Paramètres › Transfert › « Remplacer mes données par un export complet… »). Compte, mot de passe,
   numéros de facture réservés, modèles, dossiers et licences sont repris ; les chemins de l’ancienne machine
   sont adaptés automatiquement.
+  Les fichiers produits dans le dossier de travail AsyDec (dont CVI/BL et déclarations) sont également repris,
+  même si ce dossier était situé ailleurs que les données de l’application. Ils sont restaurés dans
+  `ESPACE_TRAVAIL` sur la nouvelle machine et restent accessibles par les boutons d’ouverture de dossier.
+  Le dossier `7 - TRANSFERTS` est exclu pour éviter d’imbriquer d’anciens exports ; les sauvegardes du dossier
+  de travail ne sont incluses que si l’option d’inclusion des sauvegardes est cochée.
 - **Préparer une nouvelle installation à partir de votre poste** : « Exporter une base d’installation (modèles seulement)… »,
   puis sur la nouvelle machine, au premier démarrage, répondre **Oui** et choisir le fichier `.asydec`
   (ou Paramètres › Transfert › « Importer des modèles… »). Les modèles **CVI et BL**, **déclaration DEC**,

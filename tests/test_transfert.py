@@ -1,4 +1,5 @@
 import json
+from contextlib import closing
 import sqlite3
 import tempfile
 import unittest
@@ -18,14 +19,14 @@ def _machine(racine, ancienne=None):
     (racine / 'CONFIG_LOCAL').mkdir(parents=True)
     (racine / 'CONFIG_LOCAL/compte.json').write_text('{"identifiant":"admin"}')
     (racine / 'CONFIG_LOCAL/preferences.json').write_text(json.dumps({'recents': [ancienne + '/DONNEES/sources/a.xml']}))
-    with sqlite3.connect(racine / 'CONFIG_LOCAL/numeros_factures.db') as db:
+    with closing(sqlite3.connect(racine / 'CONFIG_LOCAL/numeros_factures.db')) as db, db:
         db.execute('CREATE TABLE numeros (facture TEXT PRIMARY KEY, manifeste TEXT)')
         db.execute("INSERT INTO numeros VALUES('AB-123-456','1-ML2')")
     with factures.connexion(racine / 'DONNEES/factures.db') as db:
         g = db.execute("INSERT INTO gabarits(nom,contenu) VALUES('client A',?)", (b'WORD-A',)).lastrowid
         db.execute("INSERT INTO gabarits(nom,contenu,retire) VALUES('retire',?, 'oui')", (b'WORD-R',))
         db.execute("INSERT INTO factures(numero,modele_id,gabarit_id,date,auteur,contenu) VALUES('AB-123-456',1,?,'2026','a',x'00')", (g,))
-    with sqlite3.connect(racine / 'DONNEES/modeles_generes.db') as db:
+    with closing(sqlite3.connect(racine / 'DONNEES/modeles_generes.db')) as db, db:
         db.execute('CREATE TABLE modeles (id INTEGER PRIMARY KEY, resultat_json TEXT, image BLOB)')
         db.execute('INSERT INTO modeles VALUES(1,?,?)', (json.dumps({'source': ancienne + '/MODELES_XML/x.xml'}), b'bin'))
     (racine / 'MODELES_XML').mkdir()
@@ -132,13 +133,64 @@ class Transfert(unittest.TestCase):
         mise_de_cote = transfert.appliquer_en_attente(neuve)
         self.assertEqual((mise_de_cote / 'DONNEES/existant.txt').read_text(), 'ancien contenu')
         self.assertIsNone(transfert.en_attente(neuve))
-        with sqlite3.connect(neuve / 'CONFIG_LOCAL/numeros_factures.db') as db:
+        with closing(sqlite3.connect(neuve / 'CONFIG_LOCAL/numeros_factures.db')) as db:
             self.assertEqual(db.execute('SELECT facture FROM numeros').fetchone()[0], 'AB-123-456')
-        with sqlite3.connect(neuve / 'DONNEES/modeles_generes.db') as db:
+        with closing(sqlite3.connect(neuve / 'DONNEES/modeles_generes.db')) as db:
             source, image = db.execute('SELECT resultat_json, image FROM modeles').fetchone()
-        self.assertTrue(json.loads(source)['source'].startswith(str(neuve) + '/'))
+        self.assertTrue(Path(json.loads(source)['source']).is_relative_to(neuve))
         self.assertEqual(image, b'bin')
-        self.assertIn(str(neuve), (neuve / 'CONFIG_LOCAL/preferences.json').read_text())
+        preferences = json.loads((neuve / 'CONFIG_LOCAL/preferences.json').read_text())
+        self.assertTrue(Path(preferences['recents'][0]).is_relative_to(neuve))
+
+    def test_chemins_mac_vers_windows_conservent_json_lisible(self):
+        source = self.d / 'source'
+        _machine(source, ancienne='/Users/ancien/OUTILS')
+        with patch.object(transfert.os, 'sep', '\\'):
+            transfert._reecrire_chemins(source, ['/Users/ancien/OUTILS'], r'C:\Users\nouveau\AsyDec')
+        preferences = json.loads((source / 'CONFIG_LOCAL/preferences.json').read_text())
+        self.assertTrue(preferences['recents'][0].startswith('C:\\Users\\nouveau\\AsyDec\\'))
+        with closing(sqlite3.connect(source / 'DONNEES/modeles_generes.db')) as db:
+            texte, image = db.execute('SELECT resultat_json,image FROM modeles').fetchone()
+        self.assertTrue(json.loads(texte)['source'].startswith('C:\\Users\\nouveau\\AsyDec\\'))
+        self.assertEqual(image, b'bin')
+
+    def test_chemins_windows_vers_mac_conservent_json_lisible(self):
+        paires = [('C:\\Users\\ancien\\AsyDec\\', '/Users/nouveau/AsyDec/')]
+        texte = json.dumps({'source': r'C:\Users\ancien\AsyDec\DONNEES\a.xml'})
+        self.assertEqual(json.loads(transfert._reecrire_texte(texte, paires))['source'],
+                         '/Users/nouveau/AsyDec/DONNEES/a.xml')
+
+    def test_export_complet_reprend_documents_externes_bl_et_declarations(self):
+        from asydec.systeme import espace_travail
+        source = self.d / 'source'
+        _machine(source)
+        travail = self.d / 'documents-ancienne-machine'
+        document = travail / espace_travail.DOCUMENTS_FINAUX / 'DEC001' / 'CVI-BL.docx'
+        document.parent.mkdir(parents=True)
+        document.write_bytes(b'BL original')
+        declaration = document.with_name('declaration.docx')
+        declaration.write_bytes(b'Declaration originale')
+        transferts = travail / espace_travail.TRANSFERTS / 'ancien.asydec'
+        transferts.parent.mkdir(parents=True)
+        transferts.write_bytes(b'ne pas imbriquer cet export')
+        (source / 'CONFIG_LOCAL/espace_travail.json').write_text(json.dumps({'racine': str(travail)}))
+        with closing(sqlite3.connect(source / 'DONNEES/modeles_generes.db')) as db, db:
+            db.execute('UPDATE modeles SET resultat_json=?', (json.dumps({'fichier': str(document)}),))
+        fichier, resume = transfert.exporter(self.d / 'export', racine=source)
+        self.assertEqual(resume['documents_travail'], 2)
+        with ZipFile(fichier) as archive:
+            self.assertFalse(any(espace_travail.TRANSFERTS in n for n in archive.namelist()))
+        shutil.rmtree(travail)
+        neuve = self.d / 'nouvelle-machine'
+        transfert.preparer_import_complet(fichier, neuve)
+        transfert.appliquer_en_attente(neuve)
+        config = json.loads((neuve / 'CONFIG_LOCAL/espace_travail.json').read_text())
+        self.assertEqual(config['racine'], str(neuve / transfert.TRAVAIL))
+        with closing(sqlite3.connect(neuve / 'DONNEES/modeles_generes.db')) as db:
+            contenu = json.loads(db.execute('SELECT resultat_json FROM modeles').fetchone()[0])
+        nouveau_bl = Path(contenu['fichier'])
+        self.assertEqual(nouveau_bl.read_bytes(), b'BL original')
+        self.assertEqual(nouveau_bl.with_name('declaration.docx').read_bytes(), b'Declaration originale')
 
     def test_kit_sans_donnees_personnelles_et_fusion_sans_doublon(self):
         source = self.d / 'source'
@@ -152,7 +204,7 @@ class Transfert(unittest.TestCase):
         collegue = self.d / 'collegue'
         bilan = transfert.importer_modeles(kit, collegue)
         self.assertEqual((bilan['modeles_word'], bilan['xml_reference']), (1, 1))
-        with sqlite3.connect(collegue / 'DONNEES/factures.db') as db:
+        with closing(sqlite3.connect(collegue / 'DONNEES/factures.db')) as db:
             self.assertEqual(db.execute('SELECT COUNT(*) FROM factures').fetchone()[0], 0)
             self.assertEqual([r[0] for r in db.execute('SELECT nom FROM gabarits')], ['client A'])
         self.assertEqual(transfert.importer_modeles(kit, collegue)['modeles_word'], 0)
