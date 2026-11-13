@@ -26,6 +26,11 @@ def modele(packing=False):
     return base / 'ressources/factures/kinshop' / ('packing.docx' if packing else 'facture.docx')
 
 
+def disponible(licence):
+    """Les références Word privées sont facultatives dans une distribution publique."""
+    return correspond(licence) and all(modele(packing).is_file() for packing in (False, True))
+
+
 def _ecrire(element, valeur):
     if texte(element):
         remplacer(element, 0, len(texte(element)), str(valeur))

@@ -37,6 +37,9 @@ class CoherenceTransportTest(TestCase):
         self.assertFalse(C.alertes(l, 'CHENNAI PORT'))
 
     def test_facture_kinshop_reprend_le_port_du_bl(self):
+        from tests.test_facture_kinshop import MODELES_PRESENTS
+        if not MODELES_PRESENTS:
+            self.skipTest('Référence Word privée non distribuée')
         from asydec.declarations import facture_licence as F, facture_kinshop as K
         from tests.test_facture_kinshop import texte
         l = self.dossier('India', {'PORT_CHARGEMENT_BL': 'JEBEL ALI'})

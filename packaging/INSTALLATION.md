@@ -18,10 +18,26 @@ ou `INSTALLER.bat` (Windows), avec Python 3.10 ou plus récent et une connexion 
 
 Python n’est pas nécessaire sur le poste destinataire. Les données personnelles ne sont pas incluses dans les installateurs. Les données de l’application restent dans `%LOCALAPPDATA%\AsyDec` sur Windows et `~/Library/Application Support/AsyDec` sur Mac. La désinstallation ne supprime pas ces données.
 
+## Mises à jour Windows
+
+Dans **Mises à jour Windows**, cliquer sur **Vérifier les mises à jour**, puis
+**Télécharger et installer…**. AsyDec recherche la publication Windows, vérifie
+l’empreinte du téléchargement et ouvre le setup dans le dossier de l’application
+actuelle. Suivre l’assistant d’installation puis relancer AsyDec ; les données restent conservées.
+
+Si le dépôt est privé, renseigner un jeton GitHub en lecture seule ayant accès au dépôt,
+puis cliquer sur **Utiliser le jeton pour cette session** avant de relancer la recherche.
+Sous Windows, le jeton reste uniquement en mémoire et doit être renseigné après un redémarrage.
+
+Une ancienne installation dont le bouton utilise encore le mécanisme Mac doit d’abord
+recevoir manuellement le nouveau `AsyDec-Setup-windows-x64.exe` contenant cette correction.
+
 ## Passer sur une nouvelle machine
 
-Les modèles fixes du programme (CVI, déclaration de licence, facture Kinshop et sceau) sont inclus dans
-l’installateur. Les données de travail ne le sont pas ; elles se transfèrent par un fichier `.asydec` :
+Les modèles Word privés (CVI, déclaration de licence, facture Kinshop) sont inclus seulement
+s’ils sont présents lors de la construction. Sans les Word Kinshop, AsyDec produit ses propres
+factures à partir des informations de licence ; un modèle Word peut aussi être choisi depuis
+la bibliothèque. Les données de travail ne sont pas incluses ; elles se transfèrent par un fichier `.asydec` :
 
 - **Remplacer son ordinateur** : ancienne machine › Paramètres › *Transfert vers une autre machine* ›
   « Exporter toutes mes données… ». Sur la nouvelle : au premier lancement, répondre **Oui** et choisir le fichier

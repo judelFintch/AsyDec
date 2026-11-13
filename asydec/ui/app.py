@@ -1,6 +1,7 @@
 """Fenêtre principale d'AsyDec : bandeau du dossier, navigation et pages."""
 import json
 import os
+import sys
 import time
 import tkinter as tk
 from tkinter import messagebox, ttk
@@ -191,7 +192,7 @@ class AsyDec(tk.Tk):
         commun.pack(side='bottom', fill='x', pady=12)
         tk.Label(commun, text='OUTILS COMMUNS', font=(theme.POLICE, 10, 'bold'),
                  fg=theme.TEXTE_DOUX, bg=theme.FOND_LATERAL, anchor='w').pack(fill='x', padx=8)
-        for cle, texte in (('generateur_factures', 'Générateur de documents'), ('factures', 'Modèles de facture'), ('mises_a_jour', 'Mises à jour Mac'), ('parametres', 'Paramètres')):
+        for cle, texte in (('generateur_factures', 'Générateur de documents'), ('factures', 'Modèles de facture'), ('mises_a_jour', 'Mises à jour Windows' if sys.platform == 'win32' else 'Mises à jour Mac'), ('parametres', 'Paramètres')):
             lien = tk.Label(commun, text=texte, font=(theme.POLICE, 13), anchor='w', padx=10, pady=7,
                             bg=theme.FOND_LATERAL, fg=theme.TEXTE, cursor='hand2')
             lien.pack(fill='x')

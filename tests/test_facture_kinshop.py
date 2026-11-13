@@ -1,4 +1,6 @@
-from unittest import TestCase
+from unittest import TestCase, skipUnless
+from unittest.mock import patch
+from pathlib import Path
 from asydec.declarations import facture_licence as F, facture_kinshop as K
 from tests.test_facture_licence import licence
 
@@ -12,6 +14,23 @@ def texte(contenu):
         return " ".join(contenu_texte(p) for p in paragraphes(doc))
 
 
+MODELES_PRESENTS = all(K.modele(p).is_file() for p in (False, True))
+
+
+class DistributionPubliqueTest(TestCase):
+    def test_factures_generees_sans_les_word_prives(self):
+        l = licence(parts=1)
+        l['fournisseur'] = dict(nom='KINSHOP GENERAL TRADING FZE', adresse='Adresse licence')
+        with patch.object(K, 'modele', return_value=Path('/modele-absent.docx')):
+            self.assertFalse(K.disponible(l))
+            resultats = F.generer(l) + [F.generer_globale(l)]
+        for resultat in resultats:
+            for document in resultat['documents'].values():
+                self.assertIn(l['fournisseur']['nom'], texte(document))
+                self.assertIn(l['fournisseur']['adresse'], texte(document))
+
+
+@skipUnless(MODELES_PRESENTS, 'Références Word privées non distribuées ; génération autonome testée séparément')
 class KinshopTest(TestCase):
     def test_modele_fournisseur_sans_references_de_l_ancienne_operation(self):
         l = licence()
@@ -91,6 +110,7 @@ class KinshopTest(TestCase):
                 archive.close()
 
 
+@skipUnless(MODELES_PRESENTS, 'Références Word privées non distribuées ; génération autonome testée séparément')
 class MiseEnPageKinshopTest(TestCase):
     def _document(self, packing=False, quantite=None, nom='ETS KATANGA TVS (CLT1064118)'):
         from decimal import Decimal

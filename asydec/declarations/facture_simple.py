@@ -197,7 +197,7 @@ def creer_facture(licence, donnees):
     """Octets du .docx de la facture commerciale."""
     from asydec.declarations.sceau import apposer
     from asydec.declarations import facture_kinshop
-    if facture_kinshop.correspond(licence):
+    if facture_kinshop.disponible(licence):
         return facture_kinshop.creer(licence, donnees)
     return apposer(_docx(_facture(licence, donnees)), licence)
 
@@ -206,7 +206,7 @@ def creer_packing_list(licence, donnees):
     """Octets du .docx de la packing list."""
     from asydec.declarations.sceau import apposer
     from asydec.declarations import facture_kinshop
-    if facture_kinshop.correspond(licence):
+    if facture_kinshop.disponible(licence):
         return facture_kinshop.creer(licence, donnees, packing=True)
     return apposer(_docx(_colisage(licence, donnees)), licence)
 

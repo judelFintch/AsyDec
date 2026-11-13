@@ -1392,7 +1392,7 @@ class PageDocumentsFinaux(ttk.Frame):
         reference = licence.get('numero_facture')
         if facture_ok:
             liste = factures['parts']
-            origine = (('présentation KINSHOP' if facture_kinshop.correspond(licence) else 'facture simple AsyDec') if factures.get('methode') == 'simple'
+            origine = (('présentation KINSHOP' if facture_kinshop.disponible(licence) else 'facture simple AsyDec') if factures.get('methode') == 'simple'
                        else 'modèle ' + Path(factures['modele']).name)
             texte_facture = (f"{len(liste)} facture(s) et {len(liste)} packing list(s) séparées du {factures['date_facture']} : "
                              f"{liste[0]['numero']} à {liste[-1]['numero']}, plus la facture globale "
@@ -1464,7 +1464,7 @@ class PageDocumentsFinaux(ttk.Frame):
             ('Factures', 'Factures et packing lists', facture_ok, a_jour, texte_facture,
              (('Choisir le modèle de facture…', lambda: self.generer_facture(numero)),
               ('Depuis mes modèles enregistrés…', lambda: self.choisir_facture_bibliotheque(numero)),
-              ('Facture KINSHOP' if facture_kinshop.correspond(licence) else 'Facture simple AsyDec', lambda: self.generer_facture(numero, simple=True)),
+              ('Facture KINSHOP' if facture_kinshop.disponible(licence) else 'Facture simple AsyDec', lambda: self.generer_facture(numero, simple=True)),
               ('📂 Dossier factures', lambda: self.ouvrir_rangement(numero, 'factures')))),
             ('CVI + BL', 'Remplissage CVI et BL', cvi.est_a_jour(licence), a_jour and facture_ok,
              'Un seul fichier Word : le CVI puis 1 à 3 BL. Un BL réunit 10 conteneurs au plus : 1 BL jusqu’à 10 répartitions, 2 BL jusqu’à 20, 3 BL jusqu’à 30 ; chacun a son numéro, ses conteneurs, scellés, poids et colis. Les polices et positions du modèle sont conservées. '

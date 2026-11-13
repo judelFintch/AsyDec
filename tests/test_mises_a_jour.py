@@ -1,4 +1,5 @@
 import json
+import hashlib
 from io import BytesIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -9,6 +10,11 @@ from asydec.systeme import mises_a_jour as M
 
 
 class MisesAJourTest(TestCase):
+    def setUp(self):
+        plateforme = patch.object(M.sys, 'platform', 'darwin')
+        plateforme.start()
+        self.addCleanup(plateforme.stop)
+
     def test_seule_construction_publiee_plus_recente_proposee(self):
         assets=[{'name':f'AsyDec-macos-arm64.{ext}','url':M.API+'/releases/assets/'+str(i)} for i,ext in enumerate(['json','zip'])]
         release={'assets':assets}
@@ -87,6 +93,73 @@ class MisesAJourTest(TestCase):
             self.assertTrue((cible/'nouveau').exists())
             self.assertTrue((racine/'AsyDec-version-precedente.app/ancien').exists())
             self.assertEqual((donnees/'f.db').read_text(),'data')
+
+class MisesAJourWindowsTest(TestCase):
+    def setUp(self):
+        plateforme = patch.object(M.sys, 'platform', 'win32')
+        plateforme.start()
+        self.addCleanup(plateforme.stop)
+
+    def test_recherche_publication_windows_meme_si_latest_est_mac(self):
+        assets = [{'name': nom, 'url': M.API + '/releases/assets/' + str(i)} for i, nom in enumerate(
+            ['AsyDec-windows-x64.json', 'AsyDec-Setup-windows-x64.exe'])]
+        meta = dict(architecture='AMD64', sha256='a'*64, revision='b'*40, build=7, version='1.0.7')
+        versions = [dict(assets=[], tag_name='macos-99'), dict(assets=assets, prerelease=True),
+                    dict(assets=assets, draft=True), dict(assets=assets, tag_name='windows-7')]
+        with patch.object(M.platform, 'machine', return_value='AMD64'), \
+             patch.object(M, 'courante', return_value=dict(revision='c'*40, build=6)), \
+             patch.object(M, '_ouvrir', side_effect=[BytesIO(json.dumps(versions).encode()),
+                                                     BytesIO(json.dumps(meta).encode())]) as ouvrir, \
+             patch.object(M.subprocess, 'run') as run:
+            resultat = M.verifier()
+        self.assertTrue(resultat['disponible'])
+        self.assertEqual(resultat['asset'], assets[1])
+        self.assertIn('/releases?per_page=100&page=1', ouvrir.call_args_list[0].args[0])
+        run.assert_not_called()  # aucun sysctl Mac
+
+    def test_aucune_publication_windows_message_explicite(self):
+        with patch.object(M.platform, 'machine', return_value='AMD64'), \
+             patch.object(M, '_ouvrir', return_value=BytesIO(b'[]')):
+            with self.assertRaisesRegex(ValueError, 'Windows'):
+                M.verifier()
+
+    def test_jeton_windows_sans_trousseau_et_sans_ecriture(self):
+        with patch.object(M, '_jeton_session', None), patch.object(M.subprocess, 'run') as run:
+            self.assertIsNone(M.token_github())
+            M.retenir_token('jeton-test')
+            self.assertEqual(M.token_github(), 'jeton-test')
+            run.assert_not_called()
+
+    def test_telechargement_verifie_puis_lancement_du_setup(self):
+        contenu = b'MZ-installateur-test'
+        meta = dict(asset=dict(url=M.API+'/releases/assets/1'), sha256=hashlib.sha256(contenu).hexdigest())
+        with TemporaryDirectory() as d:
+            executable = Path(d) / 'AsyDec.exe'
+            dossier = Path(d) / 'telechargement'
+            dossier.mkdir()
+            with patch.object(M, 'application_windows', return_value=executable), \
+                 patch.object(M.tempfile, 'mkdtemp', return_value=str(dossier)), \
+                 patch.object(M, '_ouvrir', return_value=BytesIO(contenu)):
+                setup = M.preparer(meta)
+            self.assertEqual(setup.read_bytes(), contenu)
+            with patch.object(M, 'application_windows', return_value=executable), \
+                 patch.object(M.subprocess, 'Popen') as lancer:
+                M.lancer_installation(setup)
+            self.assertEqual(lancer.call_args.args[0], [str(setup), '/NORESTART', '/DIR='+str(executable.parent)])
+
+    def test_empreinte_incorrecte_ne_lance_rien_et_nettoie(self):
+        with TemporaryDirectory() as d:
+            dossier = Path(d) / 'telechargement'
+            dossier.mkdir()
+            with patch.object(M, 'application_windows'), \
+                 patch.object(M.tempfile, 'mkdtemp', return_value=str(dossier)), \
+                 patch.object(M, '_ouvrir', return_value=BytesIO(b'MZ-corrompu')), \
+                 patch.object(M.subprocess, 'Popen') as lancer:
+                with self.assertRaisesRegex(ValueError, 'Empreinte'):
+                    M.preparer(dict(asset=dict(url=M.API+'/releases/assets/1'), sha256='0'*64))
+            self.assertFalse(dossier.exists())
+            lancer.assert_not_called()
+
 
 if __name__=='__main__':
     main()
