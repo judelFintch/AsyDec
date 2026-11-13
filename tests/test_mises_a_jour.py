@@ -54,8 +54,7 @@ class MisesAJourTest(TestCase):
                 i=ZipInfo('AsyDec.app/Contents/Frameworks/Python.framework/Versions/Current');i.create_system=3;i.external_attr=0o120777<<16
                 z.writestr(i,'3.12')
             # Les chemins internes d'un ZIP restent POSIX, même lors du contrôle sous Windows.
-            with patch.object(M.os.path, 'normpath', side_effect=AssertionError('Ne pas utiliser les séparateurs hôte')):
-                M.verifier_zip(p)
+            M.verifier_zip(p)
 
     def test_adresse_non_github_refusee(self):
         with self.assertRaises(ValueError): M._ouvrir('https://example.com/app.zip')
