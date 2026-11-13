@@ -722,6 +722,8 @@ def main():
         proposer()
     journal.activer()
     while True:
+        from asydec.ui.import_installation import appliquer_en_attente
+        appliquer_en_attente()
         if chemins.DEV and local.compte_existe():
             utilisateur = local.identifiant_compte()  # mode dev : session ouverte sans mot de passe
         else:

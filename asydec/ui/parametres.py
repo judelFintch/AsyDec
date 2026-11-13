@@ -2,7 +2,7 @@
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
-from asydec.systeme import espace_travail
+from asydec.systeme import espace_travail, transfert
 from asydec.systeme import gestion_locale as local
 from asydec.ui import theme
 
@@ -21,7 +21,9 @@ class PageParametres(ttk.Frame):
         general = ttk.Frame(onglets, padding=18)
         compte = ttk.Frame(onglets, padding=18)
         reset = ttk.Frame(onglets, padding=18)
-        for page, titre in ((general, 'Application'), (compte, 'Compte'), (reset, 'Remise à zéro')):
+        transfert_page = ttk.Frame(onglets, padding=18)
+        for page, titre in ((general, 'Application'), (compte, 'Compte'), (transfert_page, 'Transfert vers une autre machine'),
+                            (reset, 'Remise à zéro')):
             onglets.add(page, text=titre)
         self.organisation = tk.StringVar()
         self.dossier = tk.StringVar()
@@ -76,7 +78,136 @@ class PageParametres(ttk.Frame):
         ttk.Label(reset, text='Saisissez REINITIALISER pour confirmer').pack(anchor='w', pady=(8, 0))
         ttk.Entry(reset, textvariable=self.phrase, width=40).pack(anchor='w', pady=4)
         theme.bouton(reset, 'Réinitialiser les données de travail…', self.reinitialiser).pack(anchor='w', pady=15)
+        self.construire_transfert(transfert_page)
         self.charger_champs(app.reglages)
+
+    # ----- Transfert vers une autre machine -----
+    def construire_transfert(self, cadre):
+        ttk.Label(cadre, text='Exporter', style='Section.TLabel').pack(anchor='w')
+        ttk.Label(cadre, text='Un seul fichier .asydec à copier sur la nouvelle machine (clé USB, e-mail, cloud).',
+                  wraplength=760).pack(anchor='w', pady=(4, 8))
+        self.avec_sauvegardes = tk.BooleanVar(value=False)
+        ligne = ttk.Frame(cadre)
+        ligne.pack(anchor='w')
+        theme.bouton(ligne, 'Exporter toutes mes données…', lambda: self.exporter(False), principal=True).pack(side='left')
+        ttk.Checkbutton(ligne, text='inclure les sauvegardes (fichier plus lourd)', variable=self.avec_sauvegardes).pack(side='left', padx=10)
+        ttk.Label(cadre, text='Compte, numéros de facture réservés, modèles, dossiers, licences, références et réglages. '
+                  'Pour remplacer votre ordinateur. Contient vos données : gardez ce fichier en lieu sûr.',
+                  wraplength=760, style='Doux.TLabel').pack(anchor='w', pady=(2, 10))
+        theme.bouton(cadre, 'Exporter un kit de démarrage (modèles seulement)…', lambda: self.exporter(True)).pack(anchor='w')
+        ttk.Label(cadre, text='Modèles de facture Word, XML de référence et médiathèque XML, sans compte, historique ni '
+                  'numéros. Pour équiper le poste d’un collègue.', wraplength=760, style='Doux.TLabel').pack(anchor='w', pady=(2, 16))
+        ttk.Separator(cadre).pack(fill='x', pady=6)
+        ttk.Label(cadre, text='Importer', style='Section.TLabel').pack(anchor='w', pady=(8, 4))
+        theme.bouton(cadre, 'Importer des modèles (kit ou export complet)…', self.importer_modeles, principal=True).pack(anchor='w')
+        ttk.Label(cadre, text='Ajoute les modèles absents de cette machine ; rien n’est remplacé ni supprimé.',
+                  wraplength=760, style='Doux.TLabel').pack(anchor='w', pady=(2, 10))
+        ligne = ttk.Frame(cadre)
+        ligne.pack(anchor='w')
+        theme.bouton(ligne, 'Remplacer mes données par un export complet…', lambda: self.importer_complet(False)).pack(side='left')
+        theme.bouton(ligne, 'Depuis un ancien dossier OUTILS…', lambda: self.importer_complet(True)).pack(side='left', padx=8)
+        ttk.Label(cadre, text='Les données actuelles sont mises de côté dans SAUVEGARDES, puis AsyDec redémarre avec '
+                  'les données importées (le compte et le mot de passe deviennent ceux de l’export).',
+                  wraplength=760, style='Doux.TLabel').pack(anchor='w', pady=(2, 8))
+        self.mdp_transfert = tk.StringVar()
+        ligne = ttk.Frame(cadre)
+        ligne.pack(anchor='w', pady=4)
+        ttk.Label(ligne, text='Mot de passe administrateur (pour remplacer les données)').pack(side='left')
+        ttk.Entry(ligne, textvariable=self.mdp_transfert, show='•', width=28).pack(side='left', padx=8)
+        self.etat_transfert = tk.StringVar()
+        ttk.Label(cadre, textvariable=self.etat_transfert, wraplength=760).pack(anchor='w', pady=10)
+
+    def _occupe(self, texte):
+        self.etat_transfert.set(texte)
+        self.configure(cursor='watch')
+        self.update_idletasks()
+
+    def exporter(self, kit):
+        from datetime import date
+        nom = f"AsyDec-{'kit-modeles' if kit else 'donnees'}-{date.today():%Y-%m-%d}{transfert.EXTENSION}"
+        chemin = filedialog.asksaveasfilename(parent=self, title='Enregistrer l’export AsyDec', initialfile=nom,
+                                              defaultextension=transfert.EXTENSION,
+                                              filetypes=[('Export AsyDec', '*' + transfert.EXTENSION)])
+        if not chemin:
+            return
+        try:
+            self._occupe('Export en cours…')
+            fichier, resume = transfert.exporter(chemin, kit=kit, avec_sauvegardes=self.avec_sauvegardes.get())
+        except (ValueError, OSError) as exc:
+            self.etat_transfert.set('')
+            messagebox.showerror('Export non effectué', str(exc), parent=self)
+            return
+        finally:
+            self.configure(cursor='')
+        taille = fichier.stat().st_size / 1e6
+        self.etat_transfert.set(f'Export enregistré : {fichier} ({taille:.1f} Mo).')
+        messagebox.showinfo('Export terminé', f'{fichier.name} ({taille:.1f} Mo)\n\n{transfert.decrire(resume)}\n\n'
+                            'Sur l’autre machine : Paramètres › Transfert › '
+                            + ('« Importer des modèles ».' if kit else '« Remplacer mes données par un export complet ».'),
+                            parent=self)
+
+    def importer_modeles(self):
+        chemin = filedialog.askopenfilename(parent=self, title='Export AsyDec contenant les modèles',
+                                            filetypes=[('Export AsyDec', '*' + transfert.EXTENSION)])
+        if not chemin:
+            return
+        try:
+            manifeste = transfert.lire(chemin)
+            if not messagebox.askyesno('Importer des modèles',
+                                       f"Export du {manifeste.get('cree_le', '')[:10]} ({manifeste['type']}).\n\n"
+                                       f"{transfert.decrire({k: v for k, v in manifeste.get('resume', {}).items() if k in ('modeles_word', 'xml_reference', 'xml_licences', 'xml_mediatheque')})}"
+                                       '\n\nAjouter les modèles absents de cette machine ?', parent=self):
+                return
+            self._occupe('Import des modèles en cours…')
+            bilan = transfert.importer_modeles(chemin, conn_references=self.app.base_refs())
+        except (ValueError, OSError) as exc:
+            self.etat_transfert.set('')
+            messagebox.showerror('Import non effectué', str(exc), parent=self)
+            return
+        finally:
+            self.configure(cursor='')
+        deja = bilan.pop('deja_presents')
+        texte = transfert.decrire(bilan) + f'\n• {deja} éléments déjà présents (ignorés)'
+        self.etat_transfert.set('Modèles importés.')
+        messagebox.showinfo('Modèles importés', 'Ajoutés :\n' + texte, parent=self)
+
+    def importer_complet(self, dossier):
+        if dossier:
+            source = filedialog.askdirectory(parent=self, title='Ancien dossier OUTILS ou « Application Support/AsyDec »')
+        else:
+            source = filedialog.askopenfilename(parent=self, title='Export complet AsyDec',
+                                                filetypes=[('Export AsyDec', '*' + transfert.EXTENSION)])
+        if not source:
+            return
+        try:
+            if not local.authentifier(local.identifiant_compte(), self.mdp_transfert.get()):
+                raise ValueError('Mot de passe administrateur incorrect.')
+            if not dossier:
+                manifeste = transfert.lire(source)
+                if manifeste['type'] != 'complet':
+                    raise ValueError('Ce fichier est un kit de modèles : utilisez « Importer des modèles ».')
+                if not messagebox.askyesno('Remplacer les données de cette machine',
+                                           f"Export du {manifeste.get('cree_le', '')[:10]} :\n{transfert.decrire(manifeste.get('resume', {}))}"
+                                           '\n\nLes données actuelles seront mises de côté dans SAUVEGARDES, puis remplacées. '
+                                           'Continuer ?', icon='warning', parent=self):
+                    return
+            elif not messagebox.askyesno('Remplacer les données de cette machine',
+                                         f'Données de : {source}\n\nLes données actuelles seront mises de côté dans '
+                                         'SAUVEGARDES, puis remplacées. Continuer ?', icon='warning', parent=self):
+                return
+            self._occupe('Vérification et préparation de l’import…')
+            transfert.preparer_import_complet(source)
+        except (ValueError, OSError, local.ErreurCompte) as exc:
+            self.etat_transfert.set('')
+            messagebox.showerror('Import non effectué', str(exc), parent=self)
+            return
+        finally:
+            self.mdp_transfert.set('')
+            self.configure(cursor='')
+        messagebox.showinfo('Import prêt', 'Données vérifiées. AsyDec va se fermer, installer les données importées, '
+                            'puis demander de vous reconnecter avec le compte de l’export.', parent=self)
+        self.app.reconnexion = True
+        self.app.fermer_sans_preferences()
 
     def afficher_espace_travail(self):
         racine = espace_travail.racine()

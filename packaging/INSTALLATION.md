@@ -18,6 +18,25 @@ ou `INSTALLER.bat` (Windows), avec Python 3.10 ou plus récent et une connexion 
 
 Python n’est pas nécessaire sur le poste destinataire. Les données personnelles ne sont pas incluses dans les installateurs. Les données de l’application restent dans `%LOCALAPPDATA%\AsyDec` sur Windows et `~/Library/Application Support/AsyDec` sur Mac. La désinstallation ne supprime pas ces données.
 
+## Passer sur une nouvelle machine
+
+Les modèles fixes du programme (CVI, déclaration de licence, facture Kinshop et sceau) sont inclus dans
+l’installateur. Les données de travail ne le sont pas ; elles se transfèrent par un fichier `.asydec` :
+
+- **Remplacer son ordinateur** : ancienne machine › Paramètres › *Transfert vers une autre machine* ›
+  « Exporter toutes mes données… ». Sur la nouvelle : au premier lancement, répondre **Oui** et choisir le fichier
+  (ou, plus tard, Paramètres › Transfert › « Remplacer mes données par un export complet… »). Compte, mot de passe,
+  numéros de facture réservés, modèles, dossiers et licences sont repris ; les chemins de l’ancienne machine
+  sont adaptés automatiquement.
+- **Équiper un collègue** : « Exporter un kit de démarrage (modèles seulement)… », puis sur son poste
+  « Importer des modèles… ». Seuls les modèles Word, XML de référence et la médiathèque XML sont ajoutés ;
+  ni compte, ni historique, ni numéros.
+- Un ancien dossier `OUTILS` copié tel quel reste accepté (« Depuis un ancien dossier OUTILS… »).
+
+Lors d’un remplacement, les données présentes sont d’abord déplacées dans `SAUVEGARDES/avant-import-…` :
+rien n’est effacé. Deux machines utilisées en même temps ne se synchronisent pas : utiliser une seule machine
+pour émettre les factures, ou transférer à nouveau après chaque changement de poste.
+
 Les versions actuelles ne sont pas signées par un certificat éditeur Windows ni notarisées par Apple. Le système peut demander une autorisation d’ouverture.
 
 ## Construire
