@@ -367,6 +367,164 @@ def donnees_globale(licence):
                 scelle=distincts(p.get('scelle') for p in toutes))
 
 
+def actualiser_coordonnees(contenu, licence):
+    """Remplace les blocs commerciaux fixes du modèle par les parties de la licence.
+
+    Les paragraphes, polices et dessins restent en place. Les lignes anciennes d'un
+    bloc reconnu sont vidées, même si la licence n'a pas de contact correspondant.
+    """
+    from asydec.declarations.preparer_facture import paragraphes
+    fournisseur = licence.get('fournisseur') or {}
+    client = licence.get('soussigne') or {}
+    libelle_client = re.compile(r'(?i)^\s*(?:consignee|consignée|invoice to|bill to|client|destinataire)\s*[:：]?\s*')
+    limite = re.compile(r'(?i)^(?:INVOICE\b|PACKING\b|FACTURE\b|DATE\b|INV\b|N[°º]?\s*$|DESCRIPTION\b|'
+                        r'GOODS\b|QUANTITY\b|QTY\b|BUYER\b|NOTIFY\b|COUNTRY\b|TERMS\b|EXPORTER\b|'
+                        r'\{\{|TOTAL\b|SIGNATURE\b|FOR\s)')
+
+    def bloc(partie):
+        return '\n'.join(str(partie.get(c) or '').strip() for c in ('nom', 'adresse', 'telephone', 'email')
+                         if str(partie.get(c) or '').strip())
+
+    def ecrire(p, valeur):
+        s = texte(p)
+        if s:
+            remplacer(p, 0, len(s), valeur)
+
+    archive, parties = F._parties(contenu)
+    try:
+        for doc in parties.values():
+            ps = [p for p in paragraphes(doc) if texte(p).strip()]
+            occupes = set()
+            for i, p in enumerate(ps):
+                m = libelle_client.match(texte(p))
+                if not m:
+                    continue
+                groupe = []
+                for suivant in ps[i + 1:]:
+                    s = texte(suivant).strip()
+                    if libelle_client.match(s) or limite.match(s):
+                        break
+                    groupe.append(suivant)
+                # Le nom peut suivre le libellé dans le même paragraphe.
+                inline = bool(texte(p)[m.end():].strip())
+                if inline:
+                    remplacer(p, m.end(), len(texte(p)), bloc(client))
+                elif groupe:
+                    ecrire(groupe[0], bloc(client))
+                for ancien in groupe if inline else groupe[1:]:
+                    ecrire(ancien, '')
+                occupes.update([p, *groupe])
+
+            # En-tête fournisseur : avant le titre ou les références commerciales.
+            entete = []
+            for p in ps:
+                if p in occupes or limite.match(texte(p).strip()):
+                    break
+                entete.append(p)
+            if entete:
+                anciens = {texte(p).strip() for p in entete}
+                premier = texte(entete[0]).strip()
+                ecrire(entete[0], bloc(fournisseur))
+                for ancien in entete[1:]:
+                    ecrire(ancien, '')
+                # Même en-tête répété sur la packing list ou dans un dessin de secours.
+                for p in ps:
+                    if p not in entete and p not in occupes and texte(p).strip() in anciens:
+                        ecrire(p, bloc(fournisseur) if texte(p).strip() == premier else '')
+            # Champs explicites utilisables aussi dans les en-têtes/pieds de page.
+            valeurs = {'FOURNISSEUR': fournisseur.get('nom', ''), 'ADRESSE_FOURNISSEUR': fournisseur.get('adresse', ''),
+                       'TELEPHONE_FOURNISSEUR': fournisseur.get('telephone', ''), 'EMAIL_FOURNISSEUR': fournisseur.get('email', ''),
+                       'IMPORTATEUR': client.get('nom', ''), 'ADRESSE_IMPORTATEUR': client.get('adresse', ''),
+                       'TELEPHONE_IMPORTATEUR': client.get('telephone', ''), 'EMAIL_IMPORTATEUR': client.get('email', '')}
+            for p in paragraphes(doc):
+                for cle, valeur in valeurs.items():
+                    for m in reversed(list(re.finditer(re.escape('{{' + cle + '}}'), texte(p)))):
+                        remplacer(p, m.start(), m.end(), str(valeur or ''))
+                # Word attend des sauts de ligne explicites dans les blocs multiligne.
+                for t in list(p.getElementsByTagNameNS(F.W, 't')):
+                    s = F._texte(t)
+                    if '\n' not in s:
+                        continue
+                    lignes = s.splitlines()
+                    F._ecrire(t, lignes[0] if lignes else '')
+                    precedent = t
+                    for ligne in lignes[1:]:
+                        br = doc.createElementNS(F.W, 'w:br')
+                        nouveau = t.cloneNode(False)
+                        F._ecrire(nouveau, ligne)
+                        t.parentNode.insertBefore(br, precedent.nextSibling)
+                        t.parentNode.insertBefore(nouveau, br.nextSibling)
+                        precedent = nouveau
+        sortie = BytesIO()
+        with ZipFile(sortie, 'w') as cible:
+            for info in archive.infolist():
+                cible.writestr(info, F.serialiser(parties[info.filename]) if info.filename in parties
+                               else archive.read(info.filename))
+        return sortie.getvalue()
+    finally:
+        archive.close()
+
+
+def completer_entete_fournisseur(contenu, licence):
+    """Garantit un bloc fournisseur complet dans chaque document séparé.
+
+    Certains modèles commencent directement par INVOICE, ou ne portent leur
+    identité que dans un logo. Le bloc est alors ajouté avant le corps du document.
+    """
+    from asydec.declarations.preparer_facture import paragraphes
+    fournisseur = licence.get('fournisseur') or {}
+    lignes = [str(fournisseur.get(c) or '').strip() for c in ('nom', 'adresse', 'telephone', 'email')]
+    lignes = [s for s in lignes if s]
+    if not lignes:
+        return contenu
+    archive, parties = F._parties(contenu)
+    try:
+        doc = parties['word/document.xml']
+        normaliser = lambda s: ' '.join(s.split()).casefold()
+        # Une identité complète dans un vrai en-tête Word suffit également.
+        for nom, partie in parties.items():
+            if nom.startswith('word/footer'):
+                continue
+            debut = []
+            for p in paragraphes(partie):
+                textes = ' '.join(F._texte(t) for t in p.getElementsByTagNameNS(F.W, 't'))
+                if all(normaliser(ligne) in normaliser(textes) for ligne in lignes):
+                    return contenu
+                if re.search(r'(?i)\b(?:INVOICE|PACKING LIST|FACTURE|CONSIGNEE|INVOICE TO)\b', textes):
+                    break
+                debut.append(textes)
+            if all(normaliser(ligne) in normaliser(' '.join(debut)) for ligne in lignes):
+                return contenu
+        corps = doc.getElementsByTagNameNS(F.W, 'body')[0]
+        p = doc.createElementNS(F.W, 'w:p')
+        ppr = doc.createElementNS(F.W, 'w:pPr')
+        espace = doc.createElementNS(F.W, 'w:spacing')
+        espace.setAttribute('w:after', '160')
+        ppr.appendChild(espace)
+        p.appendChild(ppr)
+        for i, ligne in enumerate(lignes):
+            r = doc.createElementNS(F.W, 'w:r')
+            if i:
+                r.appendChild(doc.createElementNS(F.W, 'w:br'))
+            else:
+                pr = doc.createElementNS(F.W, 'w:rPr')
+                pr.appendChild(doc.createElementNS(F.W, 'w:b'))
+                r.appendChild(pr)
+            t = doc.createElementNS(F.W, 'w:t')
+            F._ecrire(t, ligne)
+            r.appendChild(t)
+            p.appendChild(r)
+        corps.insertBefore(p, corps.firstChild)
+        sortie = BytesIO()
+        with ZipFile(sortie, 'w') as cible:
+            for info in archive.infolist():
+                cible.writestr(info, F.serialiser(doc) if info.filename == 'word/document.xml'
+                               else archive.read(info.filename))
+        return sortie.getvalue()
+    finally:
+        archive.close()
+
+
 def _generer_documents(licence, contenu_modele, donnees):
     """Facture et packing list d'une part ou de la facture globale, depuis ses données.
     Renvoie dict(documents, part, numero, date, fob, poids_kg, articles)."""
@@ -375,9 +533,11 @@ def _generer_documents(licence, contenu_modele, donnees):
                     fob=format(donnees['fob'], '.2f'), poids_kg=donnees['poids'], articles=len(lignes))
     if contenu_modele is None:
         from asydec.declarations import facture_simple
-        return dict(resultat, documents={FACTURE: facture_simple.creer_facture(licence, donnees),
-                                         PACKING_LIST: facture_simple.creer_packing_list(licence, donnees)})
-    contenu = preparer_modele(contenu_modele)
+        documents = {FACTURE: facture_simple.creer_facture(licence, donnees),
+                     PACKING_LIST: facture_simple.creer_packing_list(licence, donnees)}
+        return dict(resultat, documents={nom: completer_entete_fournisseur(document, licence)
+                                        for nom, document in documents.items()})
+    contenu = actualiser_coordonnees(preparer_modele(contenu_modele), licence)
     contenu, capacite = adapter_tableaux(contenu, [l['designation'] for l in lignes])
     champs = F.inspecter(contenu, exiger=False)
     indices = {int(m[2]) for c in champs if (m := INDICE.fullmatch(c))}
@@ -406,7 +566,7 @@ def _generer_documents(licence, contenu_modele, donnees):
                         f'PRIX_UNITAIRE_{i}': nombre(float(prix), 4) if prix_kg else _pu_fr(prix)})
     valeurs = {c: v for c, v in valeurs.items() if c in champs}
     from asydec.declarations.sceau import apposer
-    facture, packing_list = (apposer(document, licence) for document in
+    facture, packing_list = (apposer(completer_entete_fournisseur(document, licence), licence) for document in
                              separer(F.remplir(contenu, valeurs, verifier=False)))
     return dict(resultat, documents={FACTURE: facture, PACKING_LIST: packing_list})
 

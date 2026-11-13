@@ -65,6 +65,46 @@ def texte(contenu):
 
 
 class FactureLicenceTest(TestCase):
+    def test_entete_complet_sur_chaque_document_meme_sans_bloc_dans_le_modele(self):
+        l = licence(parts=1)
+        l['fournisseur'] = dict(nom='VENDEUR LICENCE', adresse='12 RUE FOURNISSEUR',
+                                telephone='+243 123456', email='contact@example.test')
+        resultats = facture_licence.generer(l, modele())
+        resultats.append(facture_licence.generer_globale(l, modele()))
+        for resultat in resultats:
+            for contenu in resultat['documents'].values():
+                s = texte(contenu)
+                for valeur in l['fournisseur'].values():
+                    self.assertIn(valeur, s)
+                self.assertTrue(s.startswith('VENDEUR LICENCE'))
+                # Une seconde vérification ne duplique pas l'en-tête.
+                self.assertEqual(facture_licence.completer_entete_fournisseur(contenu, l), contenu)
+
+    def test_coordonnees_du_modele_remplacees_par_la_licence(self):
+        original = modele()
+        with ZipFile(BytesIO(original)) as z:
+            xml = z.read('word/document.xml').decode()
+            def p(s):
+                return '<w:p><w:r><w:rPr><w:b/></w:rPr><w:t>' + s + '</w:t></w:r></w:p>'
+            entete = ''.join(p(s) for s in ('ANCIEN FOURNISSEUR', 'ANCIENNE ADRESSE VENDEUR',
+                                           'INVOICE', 'Consignee:', 'ANCIEN CLIENT', 'ANCIENNE ADRESSE CLIENT',
+                                           'Tel: ancien'))
+            xml = xml.replace('<w:body>', '<w:body>' + entete)
+            b = BytesIO()
+            with ZipFile(b, 'w') as cible:
+                for info in z.infolist():
+                    cible.writestr(info, xml if info.filename == 'word/document.xml' else z.read(info.filename))
+        l = licence(parts=1)
+        l['fournisseur'] = dict(nom='NOUVEAU VENDEUR', adresse='NOUVELLE ADRESSE VENDEUR', email='vendeur@example.test')
+        l['soussigne'] = dict(nom='NOUVEAU CLIENT', adresse='NOUVELLE ADRESSE CLIENT')
+        resultat = facture_licence.generer(l, b.getvalue())[0]
+        s = texte(resultat['documents']['facture'])
+        for attendu in ('NOUVEAU VENDEUR', 'NOUVELLE ADRESSE VENDEUR', 'vendeur@example.test',
+                        'NOUVEAU CLIENT', 'NOUVELLE ADRESSE CLIENT'):
+            self.assertIn(attendu, s)
+        for ancien in ('ANCIEN FOURNISSEUR', 'ANCIENNE ADRESSE', 'ANCIEN CLIENT', 'Tel: ancien'):
+            self.assertNotIn(ancien, s)
+
     def test_facture_et_packing_list_separees_pour_chaque_part(self):
         resultats = facture_licence.generer(licence(), modele())
         self.assertEqual([r['numero'] for r in resultats], ['ORD0000013709-1', 'ORD0000013709-2'])

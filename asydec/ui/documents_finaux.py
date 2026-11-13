@@ -662,7 +662,47 @@ class PageDocumentsFinaux(ttk.Frame):
             messagebox.showerror('Facture', str(exc), parent=self)
             return None
 
-    def generer_facture(self, numero, simple=False):
+    def choisir_facture_bibliotheque(self, numero):
+        """Réutilise les Word enregistrés dans Modèles de facture pour toute la licence."""
+        if self.app.session_verrouillee or self.import_en_cours:
+            return
+        from asydec.declarations import factures
+        try:
+            modeles = factures.lister_modeles()
+        except (ValueError, OSError, sqlite3.Error) as exc:
+            messagebox.showerror('Modèles de facture', str(exc), parent=self)
+            return
+        if not modeles:
+            messagebox.showinfo('Modèles de facture',
+                                'Ajoutez d’abord vos modèles Word dans « Modèles de facture », '
+                                'ou utilisez « Choisir le modèle de facture… ».', parent=self)
+            return
+        fenetre = tk.Toplevel(self)
+        fenetre.title('Produire les factures depuis un modèle existant')
+        fenetre.transient(self.winfo_toplevel())
+        cadre = ttk.Frame(fenetre, padding=18)
+        cadre.pack(fill='both', expand=True)
+        ttk.Label(cadre, text='Choisissez une facture avec packing list. AsyDec reprend sa présentation et remplit\n'
+                  'les articles, quantités, prix, poids, numéro et date de la licence.').pack(anchor='w', pady=(0, 10))
+        choix = ttk.Combobox(cadre, state='readonly', width=85,
+                             values=[f"{m['nom']} — {m.get('destinataire') or 'Destinataire non repéré'}"
+                                     for m in modeles])
+        choix.pack(fill='x', pady=8)
+        choix.current(0)
+
+        def produire():
+            try:
+                modele = factures.lire_modele(modeles[choix.current()]['id'])
+            except (ValueError, OSError, sqlite3.Error) as exc:
+                messagebox.showerror('Modèles de facture', str(exc), parent=fenetre)
+                return
+            fenetre.destroy()
+            self.generer_facture(numero, modele_bibliotheque=modele)
+
+        theme.bouton(cadre, 'Produire les factures et packing lists', produire, principal=True).pack(anchor='e', pady=10)
+        fenetre.grab_set()
+
+    def generer_facture(self, numero, simple=False, modele_bibliotheque=None):
         """Étape 5 : une facture + packing list Word par part, depuis le modèle fourni
         ou, avec simple=True, créées par AsyDec sans modèle."""
         if self.app.session_verrouillee or self.import_en_cours:
@@ -684,14 +724,17 @@ class PageDocumentsFinaux(ttk.Frame):
                 and Path(precedentes['modele']).parent.is_dir():
             options = {'initialdir': str(Path(precedentes['modele']).parent), 'initialfile': Path(precedentes['modele']).name}
         modele = None
-        if not simple:
+        if modele_bibliotheque is not None:
+            modele = modele_bibliotheque['nom']
+        elif not simple:
             modele = filedialog.askopenfilename(parent=self, title='Choisir le modèle de facture (Word avec packing list)',
                                                 filetypes=[('Document Word', '*.docx')], **options)
             if not modele:
                 return
         try:
             # Toutes les parts sont préparées en mémoire : rien n'est écrit si l'une échoue.
-            contenu_modele = Path(modele).read_bytes() if modele else None
+            contenu_modele = (modele_bibliotheque['contenu'] if modele_bibliotheque is not None
+                              else Path(modele).read_bytes() if modele else None)
             resultats = facture_licence.generer(licence, contenu_modele)
             globale = facture_licence.generer_globale(licence, contenu_modele)
         except (ValueError, OSError) as exc:
@@ -1420,6 +1463,7 @@ class PageDocumentsFinaux(ttk.Frame):
               ('📂 Dossier DEC', lambda: self.ouvrir_rangement(numero)))),
             ('Factures', 'Factures et packing lists', facture_ok, a_jour, texte_facture,
              (('Choisir le modèle de facture…', lambda: self.generer_facture(numero)),
+              ('Depuis mes modèles enregistrés…', lambda: self.choisir_facture_bibliotheque(numero)),
               ('Facture KINSHOP' if facture_kinshop.correspond(licence) else 'Facture simple AsyDec', lambda: self.generer_facture(numero, simple=True)),
               ('📂 Dossier factures', lambda: self.ouvrir_rangement(numero, 'factures')))),
             ('CVI + BL', 'Remplissage CVI et BL', cvi.est_a_jour(licence), a_jour and facture_ok,

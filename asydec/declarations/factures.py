@@ -21,7 +21,9 @@ from asydec.formats import nombre
 
 BASE = chemins.DONNEES / 'factures.db'
 W = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'
-CHAMPS = ('NUMERO_FACTURE', 'DATE_FACTURE', 'POIDS', 'COLIS', 'FOB', 'IMPORTATEUR', 'PLAQUE', 'MODELE_ID', 'FRET', 'ASSURANCE', 'CIF_USD', 'NUMERO_MANIFESTE', 'FOB_LETTRES', 'POIDS_LETTRES')
+CHAMPS = ('NUMERO_FACTURE', 'DATE_FACTURE', 'POIDS', 'COLIS', 'FOB', 'IMPORTATEUR', 'PLAQUE', 'MODELE_ID', 'FRET', 'ASSURANCE', 'CIF_USD', 'NUMERO_MANIFESTE', 'FOB_LETTRES', 'POIDS_LETTRES',
+          'FOURNISSEUR', 'ADRESSE_FOURNISSEUR', 'TELEPHONE_FOURNISSEUR', 'EMAIL_FOURNISSEUR',
+          'ADRESSE_IMPORTATEUR', 'TELEPHONE_IMPORTATEUR', 'EMAIL_IMPORTATEUR')
 OBLIGATOIRES = {'NUMERO_FACTURE', 'POIDS', 'COLIS', 'FOB'}
 BALISE = re.compile(r'\{\{([A-Z_][A-Z_0-9]*)\}\}')
 
@@ -259,6 +261,16 @@ def _analyse_modele(db, contenu):
             _ANALYSES[cle] = (champs, analyse)
     champs, analyse = _ANALYSES[cle]
     return set(champs), dict(analyse, articles=list(analyse['articles']))
+
+
+def lire_modele(identifiant, base=None):
+    """Relit un modèle actif pour produire des documents depuis la bibliothèque."""
+    with connexion(base) as db:
+        ligne = db.execute('SELECT nom,contenu FROM gabarits WHERE id=? AND retire IS NULL',
+                           (identifiant,)).fetchone()
+        if ligne is None:
+            raise ValueError('Modèle de facture introuvable ou retiré de la bibliothèque.')
+        return dict(ligne)
 
 
 def lister_modeles(base=None):

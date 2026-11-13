@@ -8,6 +8,18 @@ from tests.test_factures import document
 
 
 class GabaritChoisiTest(TestCase):
+    def test_modele_bibliotheque_relu_et_retrait_respecte(self):
+        with TemporaryDirectory() as d:
+            base = Path(d) / 'factures.db'
+            with F.connexion(base) as db:
+                identifiant = db.execute('INSERT INTO gabarits(nom,contenu) VALUES(?,?)',
+                                         ('Mon modèle', b'word original')).lastrowid
+            self.assertEqual(F.lire_modele(identifiant, base),
+                             {'nom': 'Mon modèle', 'contenu': b'word original'})
+            F.retirer_modeles([identifiant], base)
+            with self.assertRaisesRegex(ValueError, 'retiré'):
+                F.lire_modele(identifiant, base)
+
     def test_archive_autre_client_ne_remplace_pas_le_word_choisi(self):
         with TemporaryDirectory() as d:
             base = Path(d) / 'factures.db'
